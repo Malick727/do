@@ -123,7 +123,9 @@ class CPOptSolver(CPSolver):
 
     def solve(self, parameters_cp: ParametersCP, **args) -> ResultStorage:
         result: CpoSolveResult = self.model.solve(TimeLimit=parameters_cp.time_limit,
-                                                  execfile="/Applications/CPLEX_Studio201/cpoptimizer/bin/x86-64_osx/cpoptimizer")
+                                                  execfile=
+                                                  "/Applications/CPLEX_Studio201/cpoptimizer/"
+                                                  "bin/x86-64_osx/cpoptimizer")
         self.results = result
         self.solver_infos = result.solver_infos
         return self.retrieve_solutions(result, parameters_cp)
