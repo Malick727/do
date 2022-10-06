@@ -1,7 +1,7 @@
 import unittest
-from discrete_optimization.jobshop.jobshop_model import JobShopSolution
-from discrete_optimization.jobshop.jobshop_model import JobShopProblem
-from discrete_optimization.jobshop.jobshop_model import TaskDetails
+from jobshop.jobshop_model import JobShopSolution
+from jobshop.jobshop_model import JobShopProblem
+from jobshop.jobshop_model import TaskDetails
 
 
 class DatasTestModel:

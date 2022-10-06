@@ -3,11 +3,7 @@
 #  LICENSE file in the root directory of this source tree.
 
 from copy import deepcopy
-from dataclasses import dataclass
 from typing import Dict, List, NamedTuple
-import collections
-from ortools.sat.python import cp_model
-import numpy as np
 
 from discrete_optimization.generic_tools.do_problem import (
     EncodingRegister,
