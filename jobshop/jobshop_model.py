@@ -64,6 +64,10 @@ class JobShopSolution(Solution):
             value=self.value
         )
 
+    def sort(self):
+        for machine in self.jobshop_schedule :
+            machine.sort()
+
 
 class JobShopProblem(Problem):
     n_machines: int  # numbers of machines

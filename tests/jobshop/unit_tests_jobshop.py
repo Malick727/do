@@ -1,8 +1,8 @@
 import unittest
-from jobshop.jobshop_model import JobShopSolution
-from jobshop.jobshop_model import JobShopProblem
-from jobshop.jobshop_model import TaskDetails
-
+from discrete_optimization.jobshop.jobshop_model import JobShopSolution
+from discrete_optimization.jobshop.jobshop_model import JobShopProblem
+from discrete_optimization.jobshop.jobshop_model import TaskDetails
+from discrete_optimization.jobshop.jobshop_solver import ORtools_CP_solver
 
 class DatasTestModel:
     problem: JobShopProblem
@@ -183,6 +183,11 @@ class MyTestCase(unittest.TestCase):
         self.assertEqual(False, data_pb1_solKO_overlap.problem.check_no_overlap(
             data_pb1_solKO_overlap.solution))
         print("Done")
+
+    def test_ORtools_solver(self):
+        solver = ORtools_CP_solver()
+        solution = solver.solve(JobShopProblem(jobs_problem1))
+        solver.print_solution(solution)
 
 
 if __name__ == '__main__':
