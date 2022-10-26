@@ -188,6 +188,7 @@ class MyTestCase(unittest.TestCase):
         solver = ORtools_CP_solver()
         solution = solver.solve(JobShopProblem(jobs_problem1))
         solver.print_solution(solution)
+        self.assertEqual(11, solution.value)
 
 
 if __name__ == '__main__':

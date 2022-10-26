@@ -37,7 +37,8 @@ class TaskDetails:
                 + " [start_time : %i, end_time : %i" % (self.start_time, self.end_time)
         )
 
-
+    def taskDetail_sort(self):
+        return self.start_time
 
 
 class JobShopSolution(Solution):
@@ -65,8 +66,8 @@ class JobShopSolution(Solution):
         )
 
     def sort(self):
-        for machine in self.jobshop_schedule :
-            machine.sort()
+        for machine in self.jobshop_schedule:
+            machine.sort(key=TaskDetails.taskDetail_sort)
 
 
 class JobShopProblem(Problem):
