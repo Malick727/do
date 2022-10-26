@@ -4,7 +4,6 @@
 
 from copy import deepcopy
 from typing import Dict, List, NamedTuple
-
 from discrete_optimization.generic_tools.do_problem import (
     EncodingRegister,
     MethodAggregating,
@@ -39,6 +38,8 @@ class TaskDetails:
         )
 
 
+
+
 class JobShopSolution(Solution):
     jobshop_schedule: List[List[TaskDetails]]
     # List of ordered jobs (matrix indices) per machines containing TaskDetails
@@ -52,7 +53,7 @@ class JobShopSolution(Solution):
     def copy(self) -> "Solution":
         return JobShopSolution(
             problem=self.problem,
-            jobshop_schedule=self.jobshop_schedule,
+            jobshop_schedule=deepcopy(self.jobshop_schedule),
             value=self.value
         )
 
@@ -69,12 +70,10 @@ class JobShopProblem(Problem):
     jobs: List[List[Dict[str, int]]]  # {"machine_id":__, "processing_time":__}
     # List of jobs containing ordered tasks (machine_id, processing_time)
     # that has to be processed
+    horizon: int  # Maximum time needed for the tasks processing (sum of all task duration)
     index_tasks: List[List[int]]
 
-    def __init__(
-            self,
-            jobs
-    ):
+    def __init__(self, jobs):
         self.jobs = jobs
         self.n_machines = 1 + max(task["machine_id"] for job in jobs for task in job)
         self.horizon = sum(task["processing_time"] for job in jobs for task in job)
