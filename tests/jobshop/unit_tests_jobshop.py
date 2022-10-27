@@ -24,6 +24,26 @@ jobs_problem1 = [  # task = (machine_id, processing_time).
      {"machine_id": 2, "processing_time": 3}]  # Job2
 ]
 
+
+jobs_problem2 = [  # task = (machine_id, processing_time).
+    [{"machine_id": 0, "processing_time": 3},
+     {"machine_id": 1, "processing_time": 2},
+     {"machine_id": 2, "processing_time": 2},
+     {"machine_id": 0, "processing_time": 7},
+     {"machine_id": 2, "processing_time": 3}],  # Job0
+    [{"machine_id": 0, "processing_time": 2},
+     {"machine_id": 2, "processing_time": 1},
+     {"machine_id": 1, "processing_time": 4}],  # Job1
+    [{"machine_id": 1, "processing_time": 4},
+     {"machine_id": 2, "processing_time": 3},
+     {"machine_id": 1, "processing_time": 5},
+     {"machine_id": 2, "processing_time": 4},
+     {"machine_id": 0, "processing_time": 3}],  # Job2
+    [{"machine_id": 0, "processing_time": 6},
+     {"machine_id": 2, "processing_time": 1},
+     {"machine_id": 1, "processing_time": 2}]  # Job3
+]
+
 jobs_solution_ok_pb1 = [  # That solution is OK for jobs_problem1
     # machine0
     [TaskDetails(0, 0, 0, 3),
@@ -185,10 +205,14 @@ class MyTestCase(unittest.TestCase):
         print("Done")
 
     def test_ORtools_solver(self):
+        print("\nTesting check_no_overlap...")
         solver = ORtools_CP_solver()
-        solution = solver.solve(JobShopProblem(jobs_problem1))
-        solver.print_solution(solution)
-        self.assertEqual(11, solution.value)
+        solution = solver.solve(JobShopProblem(jobs_problem2))
+        solution.print_solution()
+        self.assertNotEqual(11, solution.value)
+        self.assertEqual(True,
+                         solution.problem.satisfy(solution))
+        print("Done")
 
 
 if __name__ == '__main__':

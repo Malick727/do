@@ -16,7 +16,6 @@ class ORtools_CP_solver():
     def solve(self, problem: JobShopProblem):
         # problem : List[List[Dict[str, int]]]  # {"machine_id":__, "processing_time":__}
         # Create the model.
-        model = cp_model.CpModel()
 
         # Named tuple to store information about created variables.
         task_type = collections.namedtuple('task_type', 'start end interval')
@@ -76,37 +75,11 @@ class ORtools_CP_solver():
                                     task_id,
                                     self.solver.Value(all_tasks[job_id, task_id].start),
                                     self.solver.Value(all_tasks[job_id, task_id].end)))
+        for machine in jobshop_solution.jobshop_schedule:
+            machine.sort(key=TaskDetails.taskDetail_sort)
         return jobshop_solution
 
-    def print_solution(self, solution: JobShopSolution):
-        output = ''
-        for machine_id, machine in enumerate(solution.jobshop_schedule):
-            # Sort by starting time
-            sol_line_tasks = 'Machine ' + str(machine_id) + ': '
-            sol_line = '           '
-
-            for task_number, task_details in enumerate(machine):
-                name = 'job_%i_task_%i' % (task_details.job_id,
-                                           task_details.task_id)
-                # Add spaces to output to align columns.
-                sol_line_tasks += '%-15s' % name
-
-                start = task_details.start_time
-                end = task_details.end_time
-                sol_tmp = '[%i,%i]' % (start, end)
-                # Add spaces to output to align columns.
-                sol_line += '%-15s' % sol_tmp
-
-            sol_line += '\n'
-            sol_line_tasks += '\n'
-            output += sol_line_tasks
-            output += sol_line
-
-        # Finally print the solution found.
-        print(f'Optimal Schedule Length: {solution.value}')
-        print(output)
-
-        # Statistics.
+    def print_statistics(self):  # Statistics.
         print('\nStatistics')
         print('  - conflicts: %i' % self.solver.NumConflicts())
         print('  - branches : %i' % self.solver.NumBranches())
