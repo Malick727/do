@@ -4,7 +4,6 @@
 
 from copy import deepcopy
 from typing import Dict, List, NamedTuple
-
 from discrete_optimization.generic_tools.do_problem import (
     EncodingRegister,
     MethodAggregating,
@@ -38,6 +37,9 @@ class TaskDetails:
                 + " [start_time : %i, end_time : %i" % (self.start_time, self.end_time)
         )
 
+    def taskDetail_sort(self):
+        return self.start_time
+
 
 def sort_task_details(list_td: List[TaskDetails]):
     return sorted(list_td, key=lambda x: x.start_time)
@@ -59,7 +61,7 @@ class JobShopSolution(Solution):
     def copy(self) -> "Solution":
         return JobShopSolution(
             problem=self.problem,
-            jobshop_schedule=self.jobshop_schedule,
+            jobshop_schedule=deepcopy(self.jobshop_schedule),
             value=self.value
         )
 
@@ -70,12 +72,45 @@ class JobShopSolution(Solution):
             value=self.value
         )
 
+    def sort(self):
+        for machine in self.jobshop_schedule:
+            machine.sort(key=TaskDetails.taskDetail_sort)
+
+    def print_solution(self):
+        output = ''
+        for machine_id, machine in enumerate(self.jobshop_schedule):
+            # Sort by starting time
+            sol_line_tasks = 'Machine ' + str(machine_id) + ': '
+            sol_line = '           '
+
+            for task_number, task_details in enumerate(machine):
+                name = 'job_%i_task_%i' % (task_details.job_id,
+                                           task_details.task_id)
+                # Add spaces to output to align columns.
+                sol_line_tasks += '%-15s' % name
+
+                start = task_details.start_time
+                end = task_details.end_time
+                sol_tmp = '[%i,%i]' % (start, end)
+                # Add spaces to output to align columns.
+                sol_line += '%-15s' % sol_tmp
+
+            sol_line += '\n'
+            sol_line_tasks += '\n'
+            output += sol_line_tasks
+            output += sol_line
+
+        # Finally print the solution found.
+        print(f'Optimal Schedule Length: {self.value}')
+        print(output)
+
 
 class JobShopProblem(Problem):
     n_machines: int  # numbers of machines
     jobs: List[List[Dict[str, int]]]  # {"machine_id":__, "processing_time":__}
     # List of jobs containing ordered tasks (machine_id, processing_time)
     # that has to be processed
+    horizon: int  # Maximum time needed for the tasks processing (sum of all task duration)
     index_tasks: List[List[int]]
 
     def __init__(

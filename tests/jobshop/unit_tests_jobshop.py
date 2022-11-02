@@ -1,8 +1,8 @@
 import unittest
-from jobshop.jobshop_model import JobShopSolution
-from jobshop.jobshop_model import JobShopProblem
-from jobshop.jobshop_model import TaskDetails
-
+from discrete_optimization.jobshop.jobshop_model import JobShopSolution
+from discrete_optimization.jobshop.jobshop_model import JobShopProblem
+from discrete_optimization.jobshop.jobshop_model import TaskDetails
+from discrete_optimization.jobshop.jobshop_solver import ORtools_CP_solver
 
 class DatasTestModel:
     problem: JobShopProblem
@@ -22,6 +22,26 @@ jobs_problem1 = [  # task = (machine_id, processing_time).
      {"machine_id": 1, "processing_time": 4}],  # Job1
     [{"machine_id": 1, "processing_time": 4},
      {"machine_id": 2, "processing_time": 3}]  # Job2
+]
+
+
+jobs_problem2 = [  # task = (machine_id, processing_time).
+    [{"machine_id": 0, "processing_time": 3},
+     {"machine_id": 1, "processing_time": 2},
+     {"machine_id": 2, "processing_time": 2},
+     {"machine_id": 0, "processing_time": 7},
+     {"machine_id": 2, "processing_time": 3}],  # Job0
+    [{"machine_id": 0, "processing_time": 2},
+     {"machine_id": 2, "processing_time": 1},
+     {"machine_id": 1, "processing_time": 4}],  # Job1
+    [{"machine_id": 1, "processing_time": 4},
+     {"machine_id": 2, "processing_time": 3},
+     {"machine_id": 1, "processing_time": 5},
+     {"machine_id": 2, "processing_time": 4},
+     {"machine_id": 0, "processing_time": 3}],  # Job2
+    [{"machine_id": 0, "processing_time": 6},
+     {"machine_id": 2, "processing_time": 1},
+     {"machine_id": 1, "processing_time": 2}]  # Job3
 ]
 
 jobs_solution_ok_pb1 = [  # That solution is OK for jobs_problem1
@@ -182,6 +202,16 @@ class MyTestCase(unittest.TestCase):
                          data_pb1_solOK.problem.satisfy(data_pb1_solOK.solution))
         self.assertEqual(False, data_pb1_solKO_overlap.problem.check_no_overlap(
             data_pb1_solKO_overlap.solution))
+        print("Done")
+
+    def test_ORtools_solver(self):
+        print("\nTesting check_no_overlap...")
+        solver = ORtools_CP_solver()
+        solution = solver.solve(JobShopProblem(jobs_problem2))
+        solution.print_solution()
+        self.assertNotEqual(11, solution.value)
+        self.assertEqual(True,
+                         solution.problem.satisfy(solution))
         print("Done")
 
 
