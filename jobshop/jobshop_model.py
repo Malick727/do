@@ -39,6 +39,10 @@ class TaskDetails:
         )
 
 
+def sort_task_details(list_td: List[TaskDetails]):
+    return sorted(list_td, key=lambda x: x.start_time)
+
+
 class JobShopSolution(Solution):
     jobshop_schedule: List[List[TaskDetails]]
     # List of ordered jobs (matrix indices) per machines containing TaskDetails
@@ -48,6 +52,9 @@ class JobShopSolution(Solution):
         self.problem = problem
         self.jobshop_schedule = jobshop_schedule
         self.value = value
+
+    def __str__(self):
+        return str([str(tt) for t in self.jobshop_schedule for tt in t])+" makespan="+str(self.value)
 
     def copy(self) -> "Solution":
         return JobShopSolution(
@@ -73,7 +80,7 @@ class JobShopProblem(Problem):
 
     def __init__(
             self,
-            jobs
+            jobs: List[List[Dict[str, int]]]
     ):
         self.jobs = jobs
         self.n_machines = 1 + max(task["machine_id"] for job in jobs for task in job)
@@ -82,6 +89,7 @@ class JobShopProblem(Problem):
     def evaluate(self, jobshop_solution: JobShopSolution) -> Dict[str, float]:
         if jobshop_solution.value is None:
             val = self.evaluate_value(jobshop_solution)
+            jobshop_solution.value = val
         else:
             val = jobshop_solution.value
         return {"value": val}
@@ -173,3 +181,6 @@ class JobShopProblem(Problem):
             objective_handling=ObjectiveHandling.SINGLE,
             dict_objective_to_doc=dict_objective
         )
+
+
+
