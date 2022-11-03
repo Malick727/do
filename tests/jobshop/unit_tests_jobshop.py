@@ -3,12 +3,19 @@ import os
 import sys
 import json
 
+from discrete_optimization.rcpsp.solver import CP_RCPSP_MZN
+from discrete_optimization.rcpsp.solver.ls_solver import LS_RCPSP_Solver
+from discrete_optimization.rcpsp.solver.rcpsp_cp_lns_solver import LNS_CP_RCPSP_SOLVER
+
+this_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(this_dir, "../../"))
 import jobshop.jobshop_model
 from jobshop.jobshop_model import JobShopSolution
 from jobshop.jobshop_model import JobShopProblem
 from jobshop.jobshop_model import TaskDetails
 from jobshop.jobshop_solver import ORtools_CP_solver
 from jobshop.jobshop_model import JSPLIBInstance
+from jobshop.wrapper_solvers import RCPSPSolverForJobshop
 
 
 class DatasTestModel:
@@ -222,13 +229,13 @@ class MyTestCase(unittest.TestCase):
 
     def test_JSPLIB(self):
         print("\nTesting JSPLIB...")
-        target = "abz5"
+        target = "ta20"
         jsp_lib_instance = jobshop.jobshop_model.create_jsplib_instance(target)
         problem = jsp_lib_instance.jsplib_to_jobshop()
         print("\nJSPLIB %s in JobshopProblem :\n" % target)
         problem.print_problem()
 
-        solver = ORtools_CP_solver(time_out=300)
+        solver = ORtools_CP_solver(time_out=600)
         solution = solver.solve(problem)
 
         if jsp_lib_instance.optimum is None:
@@ -243,6 +250,19 @@ class MyTestCase(unittest.TestCase):
         self.assertEqual(True,
                          solution.problem.satisfy(solution))
         print("Done")
+
+    def test_jsplib_with_rcpsp_solver(self):
+        print("\nTesting JSPLIB with rcpsp solver...")
+        target = "abz5"
+        jsp_lib_instance = jobshop.jobshop_model.create_jsplib_instance(target)
+        problem = jsp_lib_instance.jsplib_to_jobshop()
+        print("\nJSPLIB %s in JobshopProblem :\n" % target)
+        problem.print_problem()
+        solver = RCPSPSolverForJobshop(problem, class_solver=LNS_CP_RCPSP_SOLVER)
+        result = solver.solve()
+        best_sol = result.get_best_solution()
+        print(best_sol)
+        # self.assertEqual(True,???)
 
 
 if __name__ == '__main__':

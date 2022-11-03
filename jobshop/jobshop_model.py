@@ -249,7 +249,7 @@ class JSPLIBInstance:
         self.n_jobs = instance["jobs"]
         self.n_machines = instance["machines"]
         self.optimum = instance["optimum"]
-        if self.optimum is None:
+        if self.optimum is None and instance['bounds'] is not None:
             self.lower_bound = instance['bounds']['lower']
             self.upper_bound = instance['bounds']['upper']
         else:
