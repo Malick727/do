@@ -1,7 +1,7 @@
 #  Copyright (c) 2022 AIRBUS and its affiliates.
 #  This source code is licensed under the MIT license found in the
 #  LICENSE file in the root directory of this source tree.
-
+import json
 import os
 from copy import deepcopy
 from typing import Dict, List, NamedTuple
@@ -57,7 +57,7 @@ class JobShopSolution(Solution):
         self.value = value
 
     def __str__(self):
-        return str([str(tt) for t in self.jobshop_schedule for tt in t])+" makespan="+str(self.value)
+        return str([str(tt) for t in self.jobshop_schedule for tt in t]) + " makespan=" + str(self.value)
 
     def copy(self) -> "Solution":
         return JobShopSolution(
@@ -131,14 +131,14 @@ class JobShopProblem(Problem):
 
             for task_number, task_details in enumerate(job):
                 name = 'mach_%i_time_%i  ' % (task_details['machine_id'],
-                                                   task_details['processing_time'])
+                                              task_details['processing_time'])
                 # Add spaces to output to align columns.
                 pb_line_task += '%-20s' % name
                 max_task = max(max_task, task_number)
 
             pb_line_task += '\n'
             output += pb_line_task
-        for task in range(max_task+1):
+        for task in range(max_task + 1):
             name = 'Task ' + str(task)
             final_output += '%-20s' % name
         final_output += '\n' + output
@@ -242,8 +242,7 @@ class JobShopProblem(Problem):
         )
 
 
-
-class JSPLIB_instance():
+class JSPLIBInstance:
 
     def __init__(self, instance):
         self.name = instance["name"]
@@ -282,3 +281,22 @@ class JSPLIB_instance():
                 processed_line += 1
 
         return JobShopProblem(problem)
+
+
+def create_jsplib_instance(instance_name) -> JSPLIBInstance:
+    """
+
+    :param instance_name: name of a JSPlib instance of jobshop problem
+    :return: an instance of type JSPLIBInstance that can be translated in a JobshopProblem
+    """
+    file = open(os.path.join(os.path.dirname(__file__), '../../JSPLIB/instances.json'), "r")
+    data = json.load(file)
+
+    instance = [inst for inst in data if inst['name'] == instance_name]
+    if len(instance) == 0:
+        raise Exception("There is no instance named %s" % instance_name)
+
+    instance = instance[0]
+    file.close()
+    return JSPLIBInstance(instance)
+

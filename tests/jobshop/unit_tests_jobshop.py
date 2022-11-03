@@ -2,12 +2,13 @@ import unittest
 import os
 import sys
 import json
-import math
+
+import jobshop.jobshop_model
 from jobshop.jobshop_model import JobShopSolution
 from jobshop.jobshop_model import JobShopProblem
 from jobshop.jobshop_model import TaskDetails
 from jobshop.jobshop_solver import ORtools_CP_solver
-from jobshop.jobshop_model import JSPLIB_instance
+from jobshop.jobshop_model import JSPLIBInstance
 
 
 class DatasTestModel:
@@ -222,44 +223,21 @@ class MyTestCase(unittest.TestCase):
     def test_JSPLIB(self):
         print("\nTesting JSPLIB...")
         target = "abz5"
-
-        file = open(os.path.join(os.path.dirname(__file__), '../../../JSPLIB/instances.json'), "r")
-        data = json.load(file)
-
-        instance = [inst for inst in data if inst['name'] == target]
-        if len(instance) == 0:
-            raise Exception("There is no instance named %s" % target)
-
-        instance = instance[0]
-        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../JSPLIB/%s" % instance['path']))
-        optimum = instance['optimum']
-
-        if optimum is None:
-            if instance['bounds'] is None:
-                optimum = "nan"
-            else:
-                optimum_inf = instance['bounds']['lower']
-                optimum_sup = instance['bounds']['upper']
-
-        sys.stdout.write('--instance %s --optimum %s' % (path, optimum))
-        data_file_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../../JSPLIB/%s" % instance['path']))
-        print("\n", data_file_path)
-        jsplib_problem = JSPLIB_instance(instance)
-        problem = jsplib_problem.jsplib_to_jobshop()
+        jsp_lib_instance = jobshop.jobshop_model.create_jsplib_instance(target)
+        problem = jsp_lib_instance.jsplib_to_jobshop()
         print("\nJSPLIB %s in JobshopProblem :\n" % target)
         problem.print_problem()
-        file.close()
+
         solver = ORtools_CP_solver(time_out=300)
         solution = solver.solve(problem)
 
-        if instance['optimum'] is None:
-            if instance['bounds'] is None:
+        if jsp_lib_instance.optimum is None:
+            if jsp_lib_instance.lower_bound is None:
                 print("optimum : nan")
             else:
-                print("optimum : %s-%s" % (optimum_inf, optimum_sup))
-        else :
-            print("optimum : %s" % optimum)
+                print("optimum : %s-%s" % (jsp_lib_instance.lower_bound, jsp_lib_instance.upper_bound))
+        else:
+            print("optimum : %s" % jsp_lib_instance.optimum)
 
         solution.print_solution()
         self.assertEqual(True,
