@@ -1,8 +1,14 @@
 import unittest
-from discrete_optimization.jobshop.jobshop_model import JobShopSolution
-from discrete_optimization.jobshop.jobshop_model import JobShopProblem
-from discrete_optimization.jobshop.jobshop_model import TaskDetails
-from discrete_optimization.jobshop.jobshop_solver import ORtools_CP_solver
+import os
+import sys
+import json
+import math
+from jobshop.jobshop_model import JobShopSolution
+from jobshop.jobshop_model import JobShopProblem
+from jobshop.jobshop_model import TaskDetails
+from jobshop.jobshop_solver import ORtools_CP_solver
+from jobshop.jobshop_model import JSPLIB_instance
+
 
 class DatasTestModel:
     problem: JobShopProblem
@@ -23,7 +29,6 @@ jobs_problem1 = [  # task = (machine_id, processing_time).
     [{"machine_id": 1, "processing_time": 4},
      {"machine_id": 2, "processing_time": 3}]  # Job2
 ]
-
 
 jobs_problem2 = [  # task = (machine_id, processing_time).
     [{"machine_id": 0, "processing_time": 3},
@@ -205,11 +210,58 @@ class MyTestCase(unittest.TestCase):
         print("Done")
 
     def test_ORtools_solver(self):
-        print("\nTesting check_no_overlap...")
+        print("\nTesting ORtools_solver...")
         solver = ORtools_CP_solver()
         solution = solver.solve(JobShopProblem(jobs_problem2))
         solution.print_solution()
         self.assertNotEqual(11, solution.value)
+        self.assertEqual(True,
+                         solution.problem.satisfy(solution))
+        print("Done")
+
+    def test_JSPLIB(self):
+        print("\nTesting JSPLIB...")
+        target = "abz5"
+
+        file = open(os.path.join(os.path.dirname(__file__), '../../../JSPLIB/instances.json'), "r")
+        data = json.load(file)
+
+        instance = [inst for inst in data if inst['name'] == target]
+        if len(instance) == 0:
+            raise Exception("There is no instance named %s" % target)
+
+        instance = instance[0]
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../JSPLIB/%s" % instance['path']))
+        optimum = instance['optimum']
+
+        if optimum is None:
+            if instance['bounds'] is None:
+                optimum = "nan"
+            else:
+                optimum_inf = instance['bounds']['lower']
+                optimum_sup = instance['bounds']['upper']
+
+        sys.stdout.write('--instance %s --optimum %s' % (path, optimum))
+        data_file_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../JSPLIB/%s" % instance['path']))
+        print("\n", data_file_path)
+        jsplib_problem = JSPLIB_instance(instance)
+        problem = jsplib_problem.jsplib_to_jobshop()
+        print("\nJSPLIB %s in JobshopProblem :\n" % target)
+        problem.print_problem()
+        file.close()
+        solver = ORtools_CP_solver(time_out=300)
+        solution = solver.solve(problem)
+
+        if instance['optimum'] is None:
+            if instance['bounds'] is None:
+                print("optimum : nan")
+            else:
+                print("optimum : %s-%s" % (optimum_inf, optimum_sup))
+        else :
+            print("optimum : %s" % optimum)
+
+        solution.print_solution()
         self.assertEqual(True,
                          solution.problem.satisfy(solution))
         print("Done")

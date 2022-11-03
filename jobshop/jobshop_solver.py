@@ -2,16 +2,17 @@ import collections
 from copy import deepcopy
 
 from ortools.sat.python import cp_model
-from discrete_optimization.jobshop.jobshop_model import JobShopSolution
-from discrete_optimization.jobshop.jobshop_model import JobShopProblem
-from discrete_optimization.jobshop.jobshop_model import TaskDetails
+from jobshop.jobshop_model import JobShopSolution
+from jobshop.jobshop_model import JobShopProblem
+from jobshop.jobshop_model import TaskDetails
 
 
 class ORtools_CP_solver():
 
-    def __init__(self):
+    def __init__(self, time_out=300):
         self.model = cp_model.CpModel()
         self.solver = cp_model.CpSolver()
+        self.solver.parameters.max_time_in_seconds = time_out
 
     def solve(self, problem: JobShopProblem):
         # problem : List[List[Dict[str, int]]]  # {"machine_id":__, "processing_time":__}
@@ -77,6 +78,7 @@ class ORtools_CP_solver():
                                     self.solver.Value(all_tasks[job_id, task_id].end)))
         for machine in jobshop_solution.jobshop_schedule:
             machine.sort(key=TaskDetails.taskDetail_sort)
+        jobshop_solution.value = self.solver.ObjectiveValue()
         return jobshop_solution
 
     def print_statistics(self):  # Statistics.

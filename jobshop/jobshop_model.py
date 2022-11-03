@@ -2,6 +2,7 @@
 #  This source code is licensed under the MIT license found in the
 #  LICENSE file in the root directory of this source tree.
 
+import os
 from copy import deepcopy
 from typing import Dict, List, NamedTuple
 from discrete_optimization.generic_tools.do_problem import (
@@ -111,7 +112,6 @@ class JobShopProblem(Problem):
     # List of jobs containing ordered tasks (machine_id, processing_time)
     # that has to be processed
     horizon: int  # Maximum time needed for the tasks processing (sum of all task duration)
-    index_tasks: List[List[int]]
 
     def __init__(
             self,
@@ -120,6 +120,30 @@ class JobShopProblem(Problem):
         self.jobs = jobs
         self.n_machines = 1 + max(task["machine_id"] for job in jobs for task in job)
         self.horizon = sum(task["processing_time"] for job in jobs for task in job)
+
+    def print_problem(self):
+        final_output = 'Job_number       '
+        output = ''
+        max_task = 0
+        for job_id, job in enumerate(self.jobs):
+            # Sort by starting time
+            pb_line_task = '    ' + str(job_id) + ':      '
+
+            for task_number, task_details in enumerate(job):
+                name = 'mach_%i_time_%i  ' % (task_details['machine_id'],
+                                                   task_details['processing_time'])
+                # Add spaces to output to align columns.
+                pb_line_task += '%-20s' % name
+                max_task = max(max_task, task_number)
+
+            pb_line_task += '\n'
+            output += pb_line_task
+        for task in range(max_task+1):
+            name = 'Task ' + str(task)
+            final_output += '%-20s' % name
+        final_output += '\n' + output
+        # Finally print the solution found.
+        print(final_output)
 
     def evaluate(self, jobshop_solution: JobShopSolution) -> Dict[str, float]:
         if jobshop_solution.value is None:
@@ -219,3 +243,42 @@ class JobShopProblem(Problem):
 
 
 
+class JSPLIB_instance():
+
+    def __init__(self, instance):
+        self.name = instance["name"]
+        self.n_jobs = instance["jobs"]
+        self.n_machines = instance["machines"]
+        self.optimum = instance["optimum"]
+        if self.optimum is None:
+            self.lower_bound = instance['bounds']['lower']
+            self.upper_bound = instance['bounds']['upper']
+        else:
+            self.lower_bound = None
+            self.upper_bound = None
+        self.path = instance['path']
+
+    def jsplib_to_jobshop(self):
+        file = open(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../JSPLIB/%s" % self.path)), 'r')
+        split_lines = []
+        lines = file.readlines()
+        processed_line = 0
+        problem = []
+        for line in lines:
+            if not (line.startswith("#")):
+                split_line = line.split()
+                job = []
+                if processed_line == 0:
+                    if not (int(split_line[0]) == self.n_jobs
+                            and int(split_line[1]) == self.n_machines):
+                        exit(1)
+                else:
+                    for num, n in enumerate(split_line):
+                        if num % 2 == 0:
+                            machine = int(n)
+                        else:
+                            job.append({"machine_id": machine, "processing_time": int(n)})
+                    problem.append(job)
+                processed_line += 1
+
+        return JobShopProblem(problem)
