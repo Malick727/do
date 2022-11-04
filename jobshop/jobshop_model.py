@@ -3,6 +3,8 @@
 #  LICENSE file in the root directory of this source tree.
 import json
 import os
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 from copy import deepcopy
 from typing import Dict, List, NamedTuple
 from discrete_optimization.generic_tools.do_problem import (
@@ -77,6 +79,28 @@ class JobShopSolution(Solution):
         for machine in self.jobshop_schedule:
             machine.sort(key=TaskDetails.taskDetail_sort)
 
+    def plot_solution(self):
+        c = list(colors.TABLEAU_COLORS.values())
+        ylabs1 = []
+        ylabs2 = []
+        fig, ax = plt.subplots()
+        for machine_id, machine in enumerate(self.jobshop_schedule):
+            for task_id, task in enumerate(machine):
+                ax.broken_barh([(task.start_time, task.end_time - task.start_time)], (10 * (machine_id + 1), 5),
+                               color=c[task.job_id % len(c)], gid='Job ' + str(task.job_id))
+
+            ylabs1.append((10 * (machine_id + 1) + 2.5))
+            ylabs2.append('Machine ' + str(machine_id))
+
+        ax.set_ylim(0, (self.problem.n_machines + 1) * 10)
+        if self.value is not None:
+            ax.set_xlim(-1, self.value+1)
+        else:
+            ax.set_xlim(-1, self.problem.horizon+1)
+        ax.set_xlabel('Time')
+        ax.set_yticks(ylabs1, labels=ylabs2)  # Modify y-axis tick
+        plt.show()
+
     def print_solution(self):
         output = ''
         for machine_id, machine in enumerate(self.jobshop_schedule):
@@ -120,6 +144,9 @@ class JobShopProblem(Problem):
         self.jobs = jobs
         self.n_machines = 1 + max(task["machine_id"] for job in jobs for task in job)
         self.horizon = sum(task["processing_time"] for job in jobs for task in job)
+
+    def plot_problem(self):
+        pass
 
     def print_problem(self):
         final_output = 'Job_number       '
@@ -299,4 +326,3 @@ def create_jsplib_instance(instance_name) -> JSPLIBInstance:
     instance = instance[0]
     file.close()
     return JSPLIBInstance(instance)
-

@@ -225,11 +225,12 @@ class MyTestCase(unittest.TestCase):
         self.assertNotEqual(11, solution.value)
         self.assertEqual(True,
                          solution.problem.satisfy(solution))
+        solution.plot_solution()
         print("Done")
 
     def test_JSPLIB(self):
         print("\nTesting JSPLIB...")
-        target = "ta20"
+        target = "abz5"
         jsp_lib_instance = jobshop.jobshop_model.create_jsplib_instance(target)
         problem = jsp_lib_instance.jsplib_to_jobshop()
         print("\nJSPLIB %s in JobshopProblem :\n" % target)
@@ -249,6 +250,7 @@ class MyTestCase(unittest.TestCase):
         solution.print_solution()
         self.assertEqual(True,
                          solution.problem.satisfy(solution))
+        solution.plot_solution()
         print("Done")
 
     def test_jsplib_with_rcpsp_solver(self):
