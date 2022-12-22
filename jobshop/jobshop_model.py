@@ -79,27 +79,38 @@ class JobShopSolution(Solution):
         for machine in self.jobshop_schedule:
             machine.sort(key=TaskDetails.taskDetail_sort)
 
-    def plot_solution(self):
+    def plot_solution(self,save_figure=False):
         c = list(colors.TABLEAU_COLORS.values())
         ylabs1 = []
         ylabs2 = []
+        global_text = []
+        
         fig, ax = plt.subplots()
         for machine_id, machine in enumerate(self.jobshop_schedule):
+            text = []
             for task_id, task in enumerate(machine):
+                
                 ax.broken_barh([(task.start_time, task.end_time - task.start_time)], (10 * (machine_id + 1), 5),
                                color=c[task.job_id % len(c)], gid='Job ' + str(task.job_id))
-
+                text.append(((task.end_time+task.start_time)/2,'Job' + str(task.job_id) + '_Task' + str(task.task_id)))
             ylabs1.append((10 * (machine_id + 1) + 2.5))
-            ylabs2.append('Machine ' + str(machine_id))
-
+            ylabs2.append(str('Machine ' + str(machine_id)))
+            global_text.append((text))
         ax.set_ylim(0, (self.problem.n_machines + 1) * 10)
         if self.value is not None:
             ax.set_xlim(-1, self.value+1)
         else:
             ax.set_xlim(-1, self.problem.horizon+1)
         ax.set_xlabel('Time')
-        ax.set_yticks(ylabs1, labels=ylabs2)  # Modify y-axis tick
-        plt.show()
+        ax.set_yticks(ylabs1)
+        ax.set_yticklabels(ylabs2)
+        for i,txts in enumerate(global_text):
+            for (st,txt) in txts:
+                ax.text(st,10 * (i + 1) + 2.5, txt, ha="center", va="center")
+        if save_figure :
+            plt.savefig("fig.png")
+        else :
+            plt.show()
 
     def print_solution(self):
         output = ''
@@ -145,8 +156,8 @@ class JobShopProblem(Problem):
         self.n_machines = 1 + max(task["machine_id"] for job in jobs for task in job)
         self.horizon = sum(task["processing_time"] for job in jobs for task in job)
 
-    def plot_problem(self):
-        pass
+    def plot_problem(self): 
+        raise NotImplementedError
 
     def print_problem(self):
         final_output = 'Job_number       '
