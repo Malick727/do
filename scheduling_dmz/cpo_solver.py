@@ -111,7 +111,7 @@ class CPOptSolver(CPSolver):
                 ind_ = index_demand[j]
                 for k in range(ind_, len(self.rcpsp_model.resources_list)):
                     res_used_per_task[k][j] = integer_var(0, max_demand[j], name=f"Res_{k}_Task_{j}")
-                    pulse_res = pulse(tasks[j], height=(0, max_demand[j]+1))
+                    pulse_res = pulse(tasks[j], height=(0, max_demand[j]))
                     mdl.add(height_at_start(tasks[j], pulse_res) == res_used_per_task[k][j])
                     cumulative_task[j] += pulse_res
                     cumulative_res[k] += pulse_res
