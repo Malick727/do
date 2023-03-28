@@ -224,10 +224,11 @@ def create_rcpsp_model(file_data=default_data,
 def run():
     model = create_rcpsp_model(default_data)
     solver = CPOptSolver(rcpsp_model=model)
+    print(model)
     solver.init_model_with_alternative(resource_needed=model.extra[0],
                                        resource_forbidden=model.extra[1],
                                        include_instantaneous_resource_consumption=False,
-                                       resource_allocation_break=True)
+                                       resource_allocation_break=False)
     # solver.init_model(resource_needed=model.extra[0],
     #                   resource_forbidden=model.extra[1])
     params_cp = ParametersCP.default()
