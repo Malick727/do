@@ -37,10 +37,10 @@ class PathSolution(Solution):
         self.problem = problem
         self.path = path
 
-    def copy(self) -> "Solution":
+    def copy(self) -> "PathSolution":
         return deepcopy(self)
 
-    def change_problem(self, new_problem: "Problem") -> None:
+    def change_problem(self, new_problem: "PathPlanning") -> None:
         self.problem = new_problem
 
 
@@ -111,9 +111,40 @@ class PathPlanning(Problem):
         if path_constraints is None:
             self.path_constraints = PathConstraints()
         self.matrix_length_attr = {}
+        self.min_cost_attr = {}
+        self.max_cost_attr = {}
         if not self.path_constraints.is_empty():
             for attr in self.path_constraints.attributes:
-                self.matrix_length_attr[attr] = self.compute_matrix_attribute(attribute=attr)[0]
+                self.matrix_length_attr[attr], self.min_cost_attr[attr], self.max_cost_attr[attr] = \
+                    self.compute_matrix_attribute(attribute=attr)
+
+    def change_source(self, new_source):
+        self.source = new_source
+        self.index_source = self.index_nodes[new_source]
+
+    def change_sink(self, new_sink):
+        self.sink = new_sink
+        self.index_sink = self.index_nodes[new_sink]
+
+    def change_length_attribute(self, length_attribute):
+        if length_attribute != self.length_attribute:
+            self.length_attribute = length_attribute
+            attr = self.length_attribute
+            if attr not in self.matrix_length_attr:
+                self.matrix_length_attr[attr], self.min_cost_attr[attr], self.max_cost_attr[attr] = \
+                    self.compute_matrix_attribute(attribute=attr)
+            self.matrix_length, self.min_cost, self.max_cost = self.matrix_length_attr[attr], \
+                                                               self.min_cost_attr[attr], \
+                                                               self.max_cost_attr[attr]
+
+    def only_negative_length(self):
+        return self.max_cost <= 0
+
+    def only_positive_length(self):
+        return self.min_cost >= 0
+
+    def mixed_positive_negative_length(self):
+        return self.min_cost < 0 < self.max_cost
 
     def compute_matrix_attribute(self, attribute: Optional[str] = None):
         if attribute is None:
@@ -158,6 +189,16 @@ class PathPlanning(Problem):
                 info += [index]
         return cnstr_violated, info
 
+    def compute_cumulated_value_path(self, variable: PathSolution,
+                                     attribute: str):
+        if attribute not in self.matrix_length_attr:
+            self.matrix_length_attr[attribute], _, _ = self.compute_matrix_attribute(attribute)
+        return sum(self.matrix_length_attr[attribute][i, j]
+                   for i, j in zip(variable.path[:-1], variable.path[1:]))
+
+    def compute_value_path(self, variable: PathSolution):
+        return sum(self.matrix_length[i, j] for i, j in zip(variable.path[:-1], variable.path[1:]))
+
     def evaluate_path_constraints(self, variable: PathSolution):
         if self.path_constraints.is_empty():
             return 0, None
@@ -165,8 +206,7 @@ class PathPlanning(Problem):
         absolute_violation = 0
         vals_attribute = {}
         for attribute in self.path_constraints.attributes:
-            vals_attribute[attribute] = sum(self.matrix_length_attr[attribute][i, j]
-                                            for i, j in zip(variable.path[:-1], variable.path[1:]))
+            vals_attribute[attribute] = self.compute_cumulated_value_path(variable, attribute)
         for index in range(len(self.path_constraints.list_constraint)):
             constr = self.path_constraints.list_constraint[index]
             if not operator_map[constr[1]](vals_attribute[constr[0]], constr[2]):

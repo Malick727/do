@@ -118,7 +118,7 @@ class CPOptSolver(CPSolver):
                 mdl.add(sum_of([res_used_per_task[k][j] for k in range(ind_,
                                                                        len(self.rcpsp_model.resources_list))]) ==
                         max_demand[j])
-                #mdl.add(cumulative_task[j]-pulse(tasks[j], max_demand[j]) >= 0)
+                # mdl.add(cumulative_task[j]-pulse(tasks[j], max_demand[j]) >= 0)
                 mdl.add(height_at_start(tasks[j], cumulative_task[j]) == max_demand[j])
         for k in cumulative_res:
             mdl.add(cumulative_res[k] <= CAPACITIES[k])
