@@ -244,8 +244,8 @@ class CPOptSolver(CPSolver):
         # Add precedence constraints
         mdl.add(end_before_start(tasks[t], tasks[s]) for t in range(NB_TASKS) for s in SUCCESSORS[t])
         # Constrain capacity of resources
-        mdl.add(sum(pulse(tasks[t], DEMANDS[t][r]) for t in range(NB_TASKS) if DEMANDS[t][r] > 0) <= CAPACITIES[r]
-                for r in range(NB_RESOURCES))
+        #mdl.add(sum(pulse(tasks[t], DEMANDS[t][r]) for t in range(NB_TASKS) if DEMANDS[t][r] > 0) <= CAPACITIES[r]
+        #        for r in range(NB_RESOURCES))
 
         for r in alternative_tasks:
             for ri in range(len(alternative_tasks[r])):
@@ -338,7 +338,7 @@ class CPOptSolver(CPSolver):
                              mode_optim=self.params_objective_function.sense_function)
 
     def solve(self, parameters_cp: ParametersCP, **args) -> ResultStorage:
-        result: CpoSolveResult = self.model.solve(TimeLimit=parameters_cp.time_limit,
+        result: CpoSolveResult = self.model.solve(TimeLimit=parameters_cp.TimeLimit,
                                                   execfile="/Applications/CPLEX_Studio201/cpoptimizer/bin/x86-64_osx/cpoptimizer") # put yours instead.
         self.results = result
         self.solver_infos = result.solver_infos

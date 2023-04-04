@@ -6,7 +6,7 @@ from typing import Union, Callable
 from discrete_optimization.rcpsp import RCPSPModel, RCPSPModelCalendar
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPSolution
 from discrete_optimization.rcpsp.fast_function_rcpsp import sgs_fast, \
-    sgs_fast_partial_schedule_incomplete_permutation_tasks, compute_mean_ressource, compute_ressource_consumption
+    sgs_fast_partial_schedule_incomplete_permutation_tasks, compute_mean_ressource #, compute_ressource_consumption
 
 
 def compute_resource_consumption_function(
