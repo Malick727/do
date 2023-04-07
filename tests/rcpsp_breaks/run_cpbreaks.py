@@ -1,3 +1,4 @@
+import logging
 import os
 os.environ["DO_SKIP_MZN_CHECK"] = "1"
 from typing import Optional
@@ -44,29 +45,33 @@ def run_calendar_experiments():
     solver.init_model()
     results = solver.solve(parameters_cp=parameters_cp)
     sol, fit = results.get_best_solution_fit()
-    print(fit, " cpopt")
+    print(fit, " cpopt makespan ")
 
     sol: RCPSPSolution = sol
     for task in sol.rcpsp_schedule:
         duration = sol.rcpsp_schedule[task]["end_time"]-sol.rcpsp_schedule[task]["start_time"]
         exp_dur = model.mode_details[task][1]["duration"]
         if exp_dur != duration:
-            print(f"Length of size {task} different to its 'execution size' : {duration}!={exp_dur}")
+            logging.debug(f"Length of size {task} different to its 'execution size' : {duration}!={exp_dur}")
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=sol)
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=sol)
 
     solver2 = OrtoolsRCPSPBreakSolver(problem=model)
     parameters_cp = ParametersCP.default()
-    solver2.init_model()
-    results = solver2.solve(parameters_cp=parameters_cp)
+    # Method with element : Inspired by https://groups.google.com/g/or-tools-discuss/c/-HhchJcMTV4
+    # solver2.init_model_durations_element_constraint()
+    # Method with indicators : Inspired by https://groups.google.com/g/or-tools-discuss/c/DA_4Pniwhn8?pli=1
+    solver2.init_model_durations_indicator_method()
+
+    results = solver2.solve(parameters_cp=parameters_cp,
+                            add_solution_callback=True)
     sol2, fit2 = results.get_best_solution_fit()
-    print(fit2, " ortools")
+    print(fit2, " ortools makespan ")
     for task in sol2.rcpsp_schedule:
         duration = sol2.rcpsp_schedule[task]["end_time"] - sol2.rcpsp_schedule[task]["start_time"]
         exp_dur = model.mode_details[task][1]["duration"]
         if exp_dur != duration:
-            print(f"Length of size {task} different to its 'execution size' : {duration}!={exp_dur}")
-
+            logging.debug(f"Length of size {task} different to its 'execution size' : {duration}!={exp_dur}")
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=sol2)
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=sol2)
     plt.show()
