@@ -34,6 +34,7 @@ def create_variable_resource(rcpsp_model: RCPSPModel,
 
 
 def run_calendar_experiments():
+    logging.basicConfig(level=logging.INFO)
     file = [f for f in get_data_available() if "j601_1.sm" in f][0]
     print(file)
     model: RCPSPModel = parse_file(file_path=file)
@@ -61,7 +62,8 @@ def run_calendar_experiments():
     # Method with element : Inspired by https://groups.google.com/g/or-tools-discuss/c/-HhchJcMTV4
     # solver2.init_model_durations_element_constraint()
     # Method with indicators : Inspired by https://groups.google.com/g/or-tools-discuss/c/DA_4Pniwhn8?pli=1
-    solver2.init_model_durations_indicator_method()
+    # solver2.init_model_durations_indicator_method()
+    solver2.init_model_parallel_starts_vectors()  # init_model_parallel_starts_vectors
 
     results = solver2.solve(parameters_cp=parameters_cp,
                             add_solution_callback=True)

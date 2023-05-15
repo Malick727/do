@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
 from discrete_optimization.generic_tools.cp_tools import CPSolver, ParametersCP, SignEnum
@@ -7,6 +7,7 @@ from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFuncti
 from docplex.cp.model import interval_var, minimize, end_before_start, CpoModel, end_of, \
     pulse, start_of, CpoExpr, CpoStepFunction, CpoSolveResult, CpoIntervalVar
 from discrete_optimization.rcpsp.rcpsp_model_utils import create_fake_tasks
+import numpy as np
 
 
 def build_intensity_step_functions(rcpsp_model: RCPSPModel):
@@ -28,6 +29,34 @@ def build_intensity_step_functions(rcpsp_model: RCPSPModel):
         intensity = int((max_cap[res_key] - d[res_key]) / max_cap[res_key])
         step_dict[res_key].set_value(start, start + duration, intensity)
     return step_dict
+
+
+def intensity_step_functions(rcpsp_model: RCPSPModel, resources_interest: Tuple[str]):
+    max_cap = {r: rcpsp_model.get_max_resource_capacity(r)
+               for r in resources_interest}
+    resources_arrays = {
+        r: np.array(rcpsp_model.resources[r])
+        for r in resources_interest
+    }
+    merged = np.array(resources_arrays[resources_interest[0]]/max_cap[resources_interest[0]])
+    for i in range(1, len(resources_interest)):
+        merged *= resources_arrays[resources_interest[i]]/max_cap[resources_interest[i]]
+    merged *= 100
+    delta = merged[:-1] - merged[1:]
+    index_non_zero = np.nonzero(delta)[0]
+    step = CpoStepFunction()
+    step.set_value(0, rcpsp_model.horizon, 100)
+    if merged[0] < 100:
+        step.set_value(0, int(index_non_zero[0] + 1), int(merged[0]))
+    for j in range(len(index_non_zero) - 1):
+        ind = index_non_zero[j]
+        value = merged[ind + 1]
+        if value != 1:
+            step.set_value(int(ind+1), int(index_non_zero[j + 1] - ind)+int(ind + 1),
+                           int(merged[ind+1]))
+    return step
+
+
 
 
 class CPOptRCPSPBreakSolver(CPSolver):
@@ -76,21 +105,31 @@ class CPOptRCPSPBreakSolver(CPSolver):
             # find the resource needed by the resource. We will admit that there is at most 1 resource
             # (simplification !!!)
             if len(index_not_zeros) > 0:
-                intensity_per_tasks += [step_functions[resources_list[index_not_zeros[0]]]]
+                if len(index_not_zeros) == 1:
+                    intensity_per_tasks += [step_functions[resources_list[index_not_zeros[0]]]]
+                else:
+                    key = tuple([resources_list[ind] for ind in index_not_zeros])
+                    if key in step_functions:
+                        intensity_per_tasks += [step_functions[key]]
+                    else:
+                        step_functions[key] = intensity_step_functions(rcpsp_model=self.rcpsp_model,
+                                                                       resources_interest=key)
+                        intensity_per_tasks += [step_functions[key]]
+                        print(step_functions[key])
             else:
                 intensity_per_tasks += [None]
 
         # Create task interval variables
         tasks = [interval_var(name='Task_{}'.format(i + 1),
                               intensity=intensity_per_tasks[i],
-                              length=(durations[i], 10 * durations[i]),
+                              length=(durations[i], 100 * durations[i]),
                               # hardcoded for now.
                               size=durations[i]) for i in range(nb_tasks)]
         # Add precedence constraints
         mdl.add(end_before_start(tasks[t], tasks[s]) for t in range(nb_tasks) for s in successors[t])
         # Constrain capacity of resources
         mdl.add(sum(pulse(tasks[t], demands[t][r]) for t in range(nb_tasks)
-                    if demands[t][r] > 0) <= max_capacities[r]
+                    if demands[t][r] > 0) <= int(max_capacities[r])
                 for r in range(nb_resources))
         # Minimize end of all tasks
         # self.objective_expression = minimize(max([end_of(t) for t in tasks]))
@@ -112,6 +151,8 @@ class CPOptRCPSPBreakSolver(CPSolver):
                              mode_optim=self.params_objective_function.sense_function)
 
     def solve(self, parameters_cp: ParametersCP = None, **args) -> ResultStorage:
+        if self.model is None:
+            self.init_model(**args)
         result: CpoSolveResult = self.model.solve(TimeLimit=parameters_cp.time_limit,
                                                   execfile="/Applications/CPLEX_Studio201/cpoptimizer/"
                                                            "bin/x86-64_osx/cpoptimizer")

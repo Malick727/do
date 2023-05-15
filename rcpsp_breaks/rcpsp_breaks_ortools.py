@@ -83,12 +83,47 @@ def compute_duration_tasks_function_time(rcpsp_model: RCPSPModel, method=None):
                            if rcpsp_model.mode_details[t][1].get(r, 0) > 0]
         if len(index_not_zeros) == 0:
             continue
-        else:
+        elif len(index_not_zeros) == 1:
             orig_duration = rcpsp_model.mode_details[t][1]["duration"]
             durations[t] = method(orig_duration=orig_duration,
                                   resource_calendar=resource_calendar_dict[index_not_zeros[0]],
                                   cumulative_resource_calendar=cumulative_calendar_dict[index_not_zeros[0]])
+        else:
+            orig_duration = rcpsp_model.mode_details[t][1]["duration"]
+            tuple_res = tuple([(r, rcpsp_model.mode_details[t][1][r]) for r in index_not_zeros])
+            if tuple_res not in resource_calendar_dict:
+                b = np.array(resource_calendar_dict[index_not_zeros[0]])
+                for r in tuple_res[1:]:
+                    b *= resource_calendar_dict[r[0]]
+                resource_calendar_dict[tuple_res] = b
+                cumulative_calendar_dict[tuple_res] = np.cumsum(resource_calendar_dict[tuple_res])
+            durations[t] = method(orig_duration=orig_duration,
+                                  resource_calendar=resource_calendar_dict[tuple_res],
+                                  cumulative_resource_calendar=cumulative_calendar_dict[tuple_res])
     return durations
+
+
+def compute_res_of_tasks(rcpsp_model: RCPSPModel):
+    map_task_to_res = {}
+    for t in rcpsp_model.tasks_list:
+        index_not_zeros = [r for r in rcpsp_model.resources_list
+                           if rcpsp_model.mode_details[t][1].get(r, 0) > 0]
+        assert len(index_not_zeros) <= 1  # this modelisation only work with such problems
+        if len(index_not_zeros) > 0:
+            map_task_to_res[t] = index_not_zeros[0]
+    return map_task_to_res
+
+
+def compute_starts_per_resource(rcpsp_model: RCPSPModel):
+    resource_calendar_dict = {r: rcpsp_model.get_resource_availability_array(r)
+                              == rcpsp_model.get_max_resource_capacity(r)  # "binarize" the calendar
+                              for r in rcpsp_model.resources_list}
+    index_non_zeros = {r: np.nonzero(resource_calendar_dict[r])[0] for r in resource_calendar_dict}
+
+    def get_real_date(res_name, date_from_resource_point_of_view):
+        return index_non_zeros[res_name][date_from_resource_point_of_view]
+
+    return index_non_zeros, get_real_date
 
 
 class OrtoolsRCPSPBreakSolver(CPSolver):
@@ -163,7 +198,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             for i in range(nb_tasks)
         ]
         # durs = [model.NewConstant(int(duration[i])) for i in range(nb_tasks)]
-        duration_task = [model.NewIntVar(int(duration[i]), int(5 * duration[i]),
+        duration_task = [model.NewIntVar(int(duration[i]), int(100 * duration[i]),
                                          f"duration_task[{i}]") for i in range(nb_tasks)]
         durs = compute_duration_tasks_function_time(self.problem)
         for i in range(nb_tasks):
@@ -190,7 +225,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                  if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0],
                 [int(self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0)) for t in range(nb_tasks)
                  if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0],
-                self.problem.get_max_resource_capacity(r),
+                int(self.problem.get_max_resource_capacity(r)),
             )
         model.AddMaxEquality(makespan, ends)
         starts_hint = kwargs.get('starts_hint', None)
@@ -219,7 +254,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             for i in range(nb_tasks)
         ]
         # durs = [model.NewConstant(int(duration[i])) for i in range(nb_tasks)]
-        duration_task = [model.NewIntVar(int(duration[i]), int(5 * duration[i]),
+        duration_task = [model.NewIntVar(int(duration[i]), int(100 * duration[i]),
                                          f"duration_task[{i}]") for i in range(nb_tasks)]
         durs: Dict[Hashable, Tuple[List[int],
                                    Dict[int, List[Tuple[int, int]]]]] = \
@@ -229,6 +264,8 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         for i in range(nb_tasks):
             t = self.problem.tasks_list[i]
             if durs[t] is None:
+                continue
+            if duration[i] == 0:
                 continue
             keys_ = set()
             for possible_duration in durs[t][1]:
@@ -259,10 +296,12 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         for r in self.problem.resources_list:
             model.AddCumulative(
                 [intervals[t] for t in range(nb_tasks)
-                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0],
+                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0
+                 and self.problem.mode_details[self.problem.tasks_list[t]][1]["duration"] > 0],
                 [int(self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0)) for t in range(nb_tasks)
-                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0],
-                self.problem.get_max_resource_capacity(r),
+                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0
+                 and self.problem.mode_details[self.problem.tasks_list[t]][1]["duration"] > 0],
+                int(self.problem.get_max_resource_capacity(r)),
             )
         model.AddMaxEquality(makespan, ends)
         starts_hint = kwargs.get('starts_hint', None)
@@ -277,13 +316,105 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         self.variables["ends"] = ends
         self.variables["indicators"] = dictionnary_indicators
 
+    def init_model_parallel_starts_vectors(self, **kwargs):
+        model = cp_model.CpModel()
+        horizon = int(self.problem.horizon)
+        nb_tasks = self.problem.n_jobs
+        duration = [self.problem.mode_details[t][1]["duration"] for t in self.problem.tasks_list]
+        starts_real = [
+            model.NewIntVar(0, horizon - 1, f"start_task[{i}]")
+            for i in range(nb_tasks)
+        ]
+        ends_real = [
+            model.NewIntVar(0, horizon - 1, f"end_task[{i}]")
+            for i in range(nb_tasks)
+        ]
+        for i in range(nb_tasks):
+            model.Add(ends_real[i] >= starts_real[i]+duration[i])
+
+        starts_resource_view = [
+            model.NewIntVar(0, horizon - 1, f"start_task[{i}]")
+            for i in range(nb_tasks)
+        ]
+        ends_resource_view = [
+            model.NewIntVar(0, horizon - 1, f"end_task[{i}]")
+            for i in range(nb_tasks)
+        ]
+
+        res_of_tasks: Dict[Hashable, str] = compute_res_of_tasks(self.problem)
+        index_non_zeros, get_real_date = compute_starts_per_resource(self.problem)
+        self.variables["b_starts"] = {}
+        self.variables["b_ends"] = {}
+
+        for i in range(nb_tasks):
+            t = self.problem.tasks_list[i]
+            if t not in res_of_tasks:
+                model.Add(starts_real[i] == starts_resource_view[i])
+                model.Add(ends_real[i] == ends_resource_view[i])
+            else:
+                b_starts = [model.NewBoolVar(f"b_{i,time}")
+                            for time in range(self.problem.horizon)]
+                b_ends = [model.NewBoolVar(f"bends_{i, time}")
+                          for time in range(self.problem.horizon)]
+                self.variables["b_starts"][i] = b_starts
+                self.variables["b_ends"][i] = b_ends
+                model.AddMapDomain(starts_resource_view[i], b_starts)
+                model.AddMapDomain(ends_resource_view[i], b_ends)
+                model.Add(starts_real[i] ==
+                          LinearExpr.WeightedSum([b_starts[j]
+                                                  for j in range(len(index_non_zeros[res_of_tasks[t]]))],
+                                                 index_non_zeros[res_of_tasks[t]]))
+                model.Add(ends_real[i] ==
+                          LinearExpr.WeightedSum([b_ends[j]
+                                                  for j in range(len(index_non_zeros[res_of_tasks[t]]))],
+                                                 index_non_zeros[res_of_tasks[t]]))
+                if True:
+                    model.AddElement(index=starts_resource_view[i],
+                                     variables=[model.NewConstant(int(x))
+                                                for x in index_non_zeros[res_of_tasks[t]]],
+                                     target=starts_real[i])
+                    model.AddElement(index=ends_resource_view[i],
+                                     variables=[model.NewConstant(int(x))
+                                                for x in index_non_zeros[res_of_tasks[t]]],
+                                     target=ends_real[i])
+        durs = [model.NewConstant(int(duration[i])) for i in range(nb_tasks)]
+        intervals_resource_view = [model.NewIntervalVar(
+                starts_resource_view[i], durs[i], ends_resource_view[i], f"interval_task[{i}]"
+            )
+            for i in range(len(durs))]
+        makespan = model.NewIntVar(0, horizon - 1, "makespan")
+        for t in self.problem.successors:
+            for s in self.problem.successors[t]:
+                model.Add(ends_real[self.problem.index_task[t]] <= starts_real[self.problem.index_task[s]])
+        for r in self.problem.resources_list:
+            model.AddCumulative(
+                [intervals_resource_view[t] for t in range(nb_tasks)
+                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0
+                 and duration[t] > 0],
+                [int(self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0)) for t in range(nb_tasks)
+                 if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0
+                 and duration[t] > 0],
+                self.problem.get_max_resource_capacity(r),
+            )
+        model.AddMaxEquality(makespan, ends_real)
+        starts_hint = kwargs.get('starts_hint', None)
+        if starts_hint is not None:
+            for t in starts_hint:
+                if t in self.problem.index_task:
+                    index = self.problem.index_task[t]
+                    model.AddHint(starts_real[index], int(starts_hint[t]))
+        model.Minimize(makespan)
+        self.model = model
+        self.variables["starts"] = starts_real
+        self.variables["ends"] = ends_real
+
     def solve(self, parameters_cp: Optional[ParametersCP] = None, **kwargs) -> ResultStorage:
         if parameters_cp is None:
             parameters_cp = ParametersCP.default()
         # Search for a feasible solution
         if self.model is None:
             self.init_model(**kwargs)
-        add_solution_callback = kwargs.get("add_solution_callback", False)
+        add_solution_callback = kwargs.get("add_solution_callback", True)
         if add_solution_callback:
             solution_callback = VarArraySolutionPrinter(variables=
                                                         [self.variables["ends"]
@@ -305,6 +436,12 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         logger.info(f"Solver finished, status {st}")
         starts = [solver.Value(s) for s in self.variables["starts"]]
         ends = [solver.Value(s) for s in self.variables["ends"]]
+        if "b_starts" in self.variables:
+            for i in self.variables["b_starts"]:
+                for x in range(len(self.variables["b_starts"][i])):
+                    if solver.Value(self.variables["b_starts"][i][x]) >= 0.5:
+                        logger.debug(f"ends {solver.Value(self.variables['ends'][i])}")
+                        logger.debug(f"bstarts{i, x}")
         if "indicators" in self.variables:
             for key in self.variables["indicators"]:
                 logger.debug(f"key : {key,solver.Value(self.variables['indicators'][key])}")
