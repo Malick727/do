@@ -68,18 +68,20 @@ def parse_calendar():
         #print(max(d[i][1:]))
     model.is_calendar = True
     model.update_functions()
-
-    cpo_solver = CPOptRCPSPBreakSolver(model)
-    params_cp = ParametersCP.default()
-    result = cpo_solver.solve(params_cp)
-    solution = result.get_best_solution()
-    if False:
+    do_cpopt = False
+    do_ortools = True
+    solution = None
+    if do_cpopt:
+        cpo_solver = CPOptRCPSPBreakSolver(model)
+        params_cp = ParametersCP.default()
+        result = cpo_solver.solve(params_cp)
+        solution = result.get_best_solution()
+    if do_ortools:
         ortools_solver = OrtoolsRCPSPBreakSolver(model)
         params_cp = ParametersCP.default()
         ortools_solver.init_model_durations_indicator_method()
         result = ortools_solver.solve(params_cp, add_solution_callback=True)
         solution = result.get_best_solution()
-
     from discrete_optimization.rcpsp.rcpsp_utils import plot_task_gantt, plt, plot_ressource_view
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=solution)
@@ -95,31 +97,30 @@ def parse_calendar():
     dummy_solution = preemptive_model.get_dummy_solution()
     print(dummy_solution)
     print(preemptive_model.evaluate(dummy_solution))
-    from cpopt_solver import CPOSolverRCPSP
-
-    cp = CPOSolverRCPSP(preemptive_model)
-    cp.init_model(add_resource_constraint=True,
-                  add_worker_availability_constraint=True,
-                  add_alternative_worker_constraint=True,
-                  same_worker_by_task=False,
-                  create_worker_meta_task=False,
-                  nb_preemption=40,
-                  min_duration_preemption=None,
-                  symettry_breaking_subtasks=True,
-                  strictly_disjunctive_subtasks=True,
-                  force_minimal_preemption=False,
-                  add_penalty_on_preemption=True,
-                  include_generalized_precedence_constraints=False,
-                  soft_generalized_precedence_constraints=False,
-                  add_partially_preemptive=True,
-                  add_skills_constraints=True,
-                  include_search=False)
-    params_cp.time_limit = 10000
-    #cp.set_warm_start(None, nb_iteration=10)
-    cp.solve(parameters_cp=params_cp)
-    #import networkx as nx
-    #import matplotlib.pyplot as plt
-    #if False:
+    # from cpopt_solver import CPOSolverRCPSP
+    # cp = CPOSolverRCPSP(preemptive_model)
+    # cp.init_model(add_resource_constraint=True,
+    #               add_worker_availability_constraint=True,
+    #               add_alternative_worker_constraint=True,
+    #               same_worker_by_task=False,
+    #               create_worker_meta_task=False,
+    #               nb_preemption=40,
+    #               min_duration_preemption=None,
+    #               symettry_breaking_subtasks=True,
+    #               strictly_disjunctive_subtasks=True,
+    #               force_minimal_preemption=False,
+    #               add_penalty_on_preemption=True,
+    #               include_generalized_precedence_constraints=False,
+    #               soft_generalized_precedence_constraints=False,
+    #               add_partially_preemptive=True,
+    #               add_skills_constraints=True,
+    #               include_search=False)
+    # params_cp.time_limit = 10000
+    # #cp.set_warm_start(None, nb_iteration=10)
+    # cp.solve(parameters_cp=params_cp)
+    # import networkx as nx
+    # import matplotlib.pyplot as plt
+    # if False:
     #    for r in preemptive_model.resources:
     #        fig, ax = plt.subplots(1)
     #        ax.plot(preemptive_model.resources[r])
