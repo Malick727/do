@@ -1,13 +1,20 @@
-from typing import Type, Dict, Optional
-from discrete_optimization.generic_tools.do_problem import Problem, EncodingRegister, \
-    ObjectiveRegister, ModeOptim, \
-    Solution, ObjectiveHandling, ObjectiveDoc, TypeObjective
-from discrete_optimization.generic_tools.graph_api import Graph
-from typing import Hashable, List, Tuple
-from copy import deepcopy
-import numpy as np
-from enum import Enum
 import operator
+from copy import deepcopy
+from enum import Enum
+from typing import Dict, Hashable, List, Optional, Tuple, Type
+
+import numpy as np
+from discrete_optimization.generic_tools.do_problem import (
+    EncodingRegister,
+    ModeOptim,
+    ObjectiveDoc,
+    ObjectiveHandling,
+    ObjectiveRegister,
+    Problem,
+    Solution,
+    TypeObjective,
+)
+from discrete_optimization.generic_tools.graph_api import Graph
 
 
 class Comparison(Enum):
@@ -18,18 +25,22 @@ class Comparison(Enum):
     UEQ = ">="
 
 
-operator_map = {Comparison.EQ: operator.eq,
-                Comparison.LEQ: operator.le,
-                Comparison.LE: operator.lt,
-                Comparison.UEQ: operator.ge,
-                Comparison.UP: operator.gt}
+operator_map = {
+    Comparison.EQ: operator.eq,
+    Comparison.LEQ: operator.le,
+    Comparison.LE: operator.lt,
+    Comparison.UEQ: operator.ge,
+    Comparison.UP: operator.gt,
+}
 
 # Return positive values where the constraint is broken
-delta_map = {Comparison.EQ: lambda x, y: abs(x-y),
-             Comparison.LEQ: lambda x, y: x-y,
-             Comparison.LE: lambda x, y: x-y,
-             Comparison.UEQ: lambda x, y: y-x,
-             Comparison.UP: lambda x, y: y-x}
+delta_map = {
+    Comparison.EQ: lambda x, y: abs(x - y),
+    Comparison.LEQ: lambda x, y: x - y,
+    Comparison.LE: lambda x, y: x - y,
+    Comparison.UEQ: lambda x, y: y - x,
+    Comparison.UP: lambda x, y: y - x,
+}
 
 
 class PathSolution(Solution):
@@ -45,9 +56,10 @@ class PathSolution(Solution):
 
 
 class NodeConstraints:
-    def __init__(self, list_constraint: Optional[List[Tuple[List[Hashable],
-                                                            Comparison,
-                                                            int]]] = None):
+    def __init__(
+        self,
+        list_constraint: Optional[List[Tuple[List[Hashable], Comparison, int]]] = None,
+    ):
         self.list_constraint = list_constraint
         if list_constraint is None:
             self.list_constraint = []
@@ -63,8 +75,9 @@ class NodeConstraints:
         return self.nb_constraints == 0
 
 
-def reindex_constraint(node_constraints: NodeConstraints,
-                       index_nodes: Dict[Hashable, int]):
+def reindex_constraint(
+    node_constraints: NodeConstraints, index_nodes: Dict[Hashable, int]
+):
     list_constraints = []
     for i in range(len(node_constraints.list_constraint)):
         lc = node_constraints.list_constraint[i]
@@ -74,7 +87,9 @@ def reindex_constraint(node_constraints: NodeConstraints,
 
 class PathConstraints:
     # Object to specify constraints on the aggregated value along the chosen path.
-    def __init__(self, list_constraint: Optional[List[Tuple[str, Comparison, float]]] = None):
+    def __init__(
+        self, list_constraint: Optional[List[Tuple[str, Comparison, float]]] = None
+    ):
         self.list_constraint = list_constraint
         if list_constraint is None:
             self.list_constraint = []
@@ -86,12 +101,15 @@ class PathConstraints:
 
 
 class PathPlanning(Problem):
-    def __init__(self, graph: Graph,
-                 source: Hashable,
-                 sink: Hashable,
-                 length_attribute: str,
-                 node_constraints: Optional[NodeConstraints] = None,
-                 path_constraints: Optional[PathConstraints] = None):
+    def __init__(
+        self,
+        graph: Graph,
+        source: Hashable,
+        sink: Hashable,
+        length_attribute: str,
+        node_constraints: Optional[NodeConstraints] = None,
+        path_constraints: Optional[PathConstraints] = None,
+    ):
         self.graph = graph
         self.source = source
         self.sink = sink
@@ -101,12 +119,17 @@ class PathPlanning(Problem):
         self.index_to_nodes = {i: self.graph.nodes[i][0] for i in range(self.nb_nodes)}
         self.index_source = self.index_nodes[self.source]
         self.index_sink = self.index_nodes[self.sink]
-        self.matrix_length, self.min_cost, self.max_cost = self.compute_matrix_attribute(attribute=self.length_attribute)
+        (
+            self.matrix_length,
+            self.min_cost,
+            self.max_cost,
+        ) = self.compute_matrix_attribute(attribute=self.length_attribute)
         self.node_constraints = node_constraints
         if node_constraints is None:
             self.node_constraints = NodeConstraints()
-        self.node_constraints = reindex_constraint(node_constraints=self.node_constraints,
-                                                   index_nodes=self.index_nodes)
+        self.node_constraints = reindex_constraint(
+            node_constraints=self.node_constraints, index_nodes=self.index_nodes
+        )
         self.path_constraints = path_constraints
         if path_constraints is None:
             self.path_constraints = PathConstraints()
@@ -115,8 +138,11 @@ class PathPlanning(Problem):
         self.max_cost_attr = {}
         if not self.path_constraints.is_empty():
             for attr in self.path_constraints.attributes:
-                self.matrix_length_attr[attr], self.min_cost_attr[attr], self.max_cost_attr[attr] = \
-                    self.compute_matrix_attribute(attribute=attr)
+                (
+                    self.matrix_length_attr[attr],
+                    self.min_cost_attr[attr],
+                    self.max_cost_attr[attr],
+                ) = self.compute_matrix_attribute(attribute=attr)
 
     def change_source(self, new_source):
         self.source = new_source
@@ -131,11 +157,16 @@ class PathPlanning(Problem):
             self.length_attribute = length_attribute
             attr = self.length_attribute
             if attr not in self.matrix_length_attr:
-                self.matrix_length_attr[attr], self.min_cost_attr[attr], self.max_cost_attr[attr] = \
-                    self.compute_matrix_attribute(attribute=attr)
-            self.matrix_length, self.min_cost, self.max_cost = self.matrix_length_attr[attr], \
-                                                               self.min_cost_attr[attr], \
-                                                               self.max_cost_attr[attr]
+                (
+                    self.matrix_length_attr[attr],
+                    self.min_cost_attr[attr],
+                    self.max_cost_attr[attr],
+                ) = self.compute_matrix_attribute(attribute=attr)
+            self.matrix_length, self.min_cost, self.max_cost = (
+                self.matrix_length_attr[attr],
+                self.min_cost_attr[attr],
+                self.max_cost_attr[attr],
+            )
 
     def only_negative_length(self):
         return self.max_cost <= 0
@@ -149,7 +180,7 @@ class PathPlanning(Problem):
     def compute_matrix_attribute(self, attribute: Optional[str] = None):
         if attribute is None:
             attribute = self.length_attribute
-        matrix = 1000*np.ones((self.nb_nodes, self.nb_nodes))
+        matrix = 1000 * np.ones((self.nb_nodes, self.nb_nodes))
         min_ = float("inf")
         max_ = -float("inf")
         for e in self.graph.edges:
@@ -165,15 +196,24 @@ class PathPlanning(Problem):
         return matrix, min_, max_
 
     def evaluate(self, variable: PathSolution) -> Dict[str, float]:
-        length = sum(self.matrix_length[i, j] for i, j in zip(variable.path[:-1], variable.path[1:]))
+        length = sum(
+            self.matrix_length[i, j]
+            for i, j in zip(variable.path[:-1], variable.path[1:])
+        )
         cnstr_violated, _ = self.evaluate_node_constraints(variable)
         cnstr_violated_path, _ = self.evaluate_path_constraints(variable)
-        return {"length": length, "constraint_node": cnstr_violated, "constraint_path": cnstr_violated_path}
+        return {
+            "length": length,
+            "constraint_node": cnstr_violated,
+            "constraint_path": cnstr_violated_path,
+        }
 
     def evaluate_node_constraints(self, variable: PathSolution):
         if self.node_constraints.is_empty():
             return 0, None
-        values_constraints = {index: 0 for index in range(self.node_constraints.nb_constraints)}
+        values_constraints = {
+            index: 0 for index in range(self.node_constraints.nb_constraints)
+        }
         for i in variable.path:
             if i in self.node_constraints.node_to_index_constraint:
                 for index in self.node_constraints.node_to_index_constraint[i]:
@@ -189,15 +229,21 @@ class PathPlanning(Problem):
                 info += [index]
         return cnstr_violated, info
 
-    def compute_cumulated_value_path(self, variable: PathSolution,
-                                     attribute: str):
+    def compute_cumulated_value_path(self, variable: PathSolution, attribute: str):
         if attribute not in self.matrix_length_attr:
-            self.matrix_length_attr[attribute], _, _ = self.compute_matrix_attribute(attribute)
-        return sum(self.matrix_length_attr[attribute][i, j]
-                   for i, j in zip(variable.path[:-1], variable.path[1:]))
+            self.matrix_length_attr[attribute], _, _ = self.compute_matrix_attribute(
+                attribute
+            )
+        return sum(
+            self.matrix_length_attr[attribute][i, j]
+            for i, j in zip(variable.path[:-1], variable.path[1:])
+        )
 
     def compute_value_path(self, variable: PathSolution):
-        return sum(self.matrix_length[i, j] for i, j in zip(variable.path[:-1], variable.path[1:]))
+        return sum(
+            self.matrix_length[i, j]
+            for i, j in zip(variable.path[:-1], variable.path[1:])
+        )
 
     def evaluate_path_constraints(self, variable: PathSolution):
         if self.path_constraints.is_empty():
@@ -206,7 +252,9 @@ class PathPlanning(Problem):
         absolute_violation = 0
         vals_attribute = {}
         for attribute in self.path_constraints.attributes:
-            vals_attribute[attribute] = self.compute_cumulated_value_path(variable, attribute)
+            vals_attribute[attribute] = self.compute_cumulated_value_path(
+                variable, attribute
+            )
         for index in range(len(self.path_constraints.list_constraint)):
             constr = self.path_constraints.list_constraint[index]
             if not operator_map[constr[1]](vals_attribute[constr[0]], constr[2]):
@@ -226,17 +274,24 @@ class PathPlanning(Problem):
         return True
 
     def get_attribute_register(self) -> EncodingRegister:
-        return EncodingRegister(dict_attribute_to_type={"path": {"name": "path", "type": [None]}})
+        return EncodingRegister(
+            dict_attribute_to_type={"path": {"name": "path", "type": [None]}}
+        )
 
     def get_solution_type(self) -> Type[Solution]:
         return PathSolution
 
     def get_objective_register(self) -> ObjectiveRegister:
-        return ObjectiveRegister(objective_sense=ModeOptim.MINIMIZATION,
-                                 objective_handling=ObjectiveHandling.AGGREGATE,
-                                 dict_objective_to_doc={"length": ObjectiveDoc(type=TypeObjective.OBJECTIVE,
-                                                                               default_weight=1),
-                                                        "constraint_node": ObjectiveDoc(type=TypeObjective.PENALTY,
-                                                                                        default_weight=100),
-                                                        "constraint_path": ObjectiveDoc(type=TypeObjective.PENALTY,
-                                                                                        default_weight=100)})
+        return ObjectiveRegister(
+            objective_sense=ModeOptim.MINIMIZATION,
+            objective_handling=ObjectiveHandling.AGGREGATE,
+            dict_objective_to_doc={
+                "length": ObjectiveDoc(type=TypeObjective.OBJECTIVE, default_weight=1),
+                "constraint_node": ObjectiveDoc(
+                    type=TypeObjective.PENALTY, default_weight=100
+                ),
+                "constraint_path": ObjectiveDoc(
+                    type=TypeObjective.PENALTY, default_weight=100
+                ),
+            },
+        )

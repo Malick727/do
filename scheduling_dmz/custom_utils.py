@@ -1,12 +1,14 @@
 from functools import partial
+from typing import Callable, Union
 
 import numpy as np
-from typing import Union, Callable
-
 from discrete_optimization.rcpsp import RCPSPModel, RCPSPModelCalendar
+from discrete_optimization.rcpsp.fast_function_rcpsp import (  # , compute_ressource_consumption
+    compute_mean_ressource,
+    sgs_fast,
+    sgs_fast_partial_schedule_incomplete_permutation_tasks,
+)
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPSolution
-from discrete_optimization.rcpsp.fast_function_rcpsp import sgs_fast, \
-    sgs_fast_partial_schedule_incomplete_permutation_tasks, compute_mean_ressource #, compute_ressource_consumption
 
 
 def compute_resource_consumption_function(
@@ -107,27 +109,21 @@ def compute_resource_consumption_function(
     return func_compute_mean_resource
 
 
-def compute_res_consumption(problem: RCPSPModel,
-                            solution: RCPSPSolution,
-                            function_numba: Callable,):
+def compute_res_consumption(
+    problem: RCPSPModel,
+    solution: RCPSPSolution,
+    function_numba: Callable,
+):
     last_activity = problem.sink_task
     makespan = solution.rcpsp_schedule[last_activity]["end_time"]
     return function_numba(
-                        horizon=makespan,
-                        modes_array=np.array(
-                            problem.build_mode_array(solution.rcpsp_modes)
-                        )
-                        - 1,  # permutation_task=array(task)->task index
-                        start_array=np.array(
-                            [
-                                solution.rcpsp_schedule[t]["start_time"]
-                                for t in problem.tasks_list
-                            ]
-                        ),
-                        end_array=np.array(
-                            [
-                                solution.rcpsp_schedule[t]["end_time"]
-                                for t in problem.tasks_list
-                            ]
-                        ),
-                    )
+        horizon=makespan,
+        modes_array=np.array(problem.build_mode_array(solution.rcpsp_modes))
+        - 1,  # permutation_task=array(task)->task index
+        start_array=np.array(
+            [solution.rcpsp_schedule[t]["start_time"] for t in problem.tasks_list]
+        ),
+        end_array=np.array(
+            [solution.rcpsp_schedule[t]["end_time"] for t in problem.tasks_list]
+        ),
+    )

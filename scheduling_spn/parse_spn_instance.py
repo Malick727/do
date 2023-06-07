@@ -1,16 +1,37 @@
-import pandas as pd
+import logging
 import os
+
+import pandas as pd
+
 os.environ["DO_SKIP_MZN_CHECK"] = "1"
-from discrete_optimization.rcpsp.rcpsp_parser import parse_file, parse_psplib
+import matplotlib.pyplot as plt
+from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
+from discrete_optimization.rcpsp.rcpsp_parser import (
+    RCPSPModel,
+    parse_file,
+    parse_psplib,
+)
+from discrete_optimization.rcpsp.rcpsp_utils import plot_ressource_view, plot_task_gantt
+from discrete_optimization.rcpsp.solver.cpm import CPM
+from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import (
+    SpecialConstraintsDescription,
+    compute_constraints_details,
+    from_rcpsp_model,
+)
+
+from rcpsp_breaks.rcpsp_breaks_cpopt import CPOptRCPSPBreakSolver, ParametersCP
+from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver
+
 this_folder = os.path.dirname(os.path.abspath(__file__))
 data_folder = os.path.join(this_folder, "data/")
 file_rcpsp = os.path.join(data_folder, "Tablada_FLS.SM")
 file_calendar = os.path.join(data_folder, "Availability Matrix.xlsx")
-import logging
-#logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
-def parse_calendar():
+
+def parse_files() -> RCPSPModel:
     import logging
+
     logging.basicConfig(level=logging.INFO)
     # Parse Excel file as dictionary
     # Create a Pandas Excel file object
@@ -21,53 +42,64 @@ def parse_calendar():
         data_dict[sheet_name] = excel_file.parse(sheet_name)
     name_sheet = list(data_dict.keys())[0]
     dataf = data_dict[name_sheet]
-    #print(dataf.T)
+    # print(dataf.T)
     d = dataf.T
-    #print(d[0][1:])
+    # print(d[0][1:])
     model = parse_file(file_path=file_rcpsp)
     print(model)
     print(model.resources)
-    #model.horizon = len(d[0][1:])
+    # model.horizon = len(d[0][1:])
     import numpy as np
+
     calendars = {i: np.array(d[i][1:]) for i in range(len(model.resources_list))}
     binary_calendars = {i: np.array(calendars[i] > 0, dtype=int) for i in calendars}
     cumulated_calendars = {i: np.cumsum(binary_calendars[i]) for i in calendars}
-    #for k in cumulated_calendars:
+    # for k in cumulated_calendars:
     #    jj = next(j for j in range(len(cumulated_calendars[k])) if cumulated_calendars[k][j] >= 776)
     #    print("jj", jj)
     for j in binary_calendars:
         for k in binary_calendars:
             pass
-            #print("Max : ", max(binary_calendars[k]-binary_calendars[j]))
-    from discrete_optimization.rcpsp.solver.cpm import CPM
-    from rcpsp_breaks.rcpsp_breaks_cpopt import CPOptRCPSPBreakSolver, ParametersCP
-    from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver
+            # print("Max : ", max(binary_calendars[k]-binary_calendars[j]))
     cpm = CPM(model)
     cpm.run_classic_cpm()
     print(cpm.map_node[model.sink_task])
     for i in range(len(model.resources_list)):
         r = model.resources_list[i]
         model.resources[r] = np.empty((model.horizon))
-        #model.resources[r][:] = max(d[i][1:])
-        model.resources[r][:len(d[i][1:])] = np.array(d[i][1:], dtype=int)
-        model.resources[r][len(d[i][1:]):2*len(d[i][1:])] = np.array(d[i][1:], dtype=int)
-        model.resources[r][2*len(d[i][1:]):3*len(d[i][1:])] = np.array(d[i][1:], dtype=int)
-        model.resources[r][3*len(d[i][1:]):4*len(d[i][1:])] = np.array(d[i][1:], dtype=int)
-        model.resources[r][4*len(d[i][1:]):5*len(d[i][1:])] = np.array(d[i][1:], dtype=int)
-        model.resources[r][5*len(d[i][1:]):] = int(max(d[i][1:]))
+        # model.resources[r][:] = max(d[i][1:])
+        model.resources[r][: len(d[i][1:])] = np.array(d[i][1:], dtype=int)
+        model.resources[r][len(d[i][1:]) : 2 * len(d[i][1:])] = np.array(
+            d[i][1:], dtype=int
+        )
+        model.resources[r][2 * len(d[i][1:]) : 3 * len(d[i][1:])] = np.array(
+            d[i][1:], dtype=int
+        )
+        model.resources[r][3 * len(d[i][1:]) : 4 * len(d[i][1:])] = np.array(
+            d[i][1:], dtype=int
+        )
+        model.resources[r][4 * len(d[i][1:]) : 5 * len(d[i][1:])] = np.array(
+            d[i][1:], dtype=int
+        )
+        model.resources[r][5 * len(d[i][1:]) :] = int(max(d[i][1:]))
 
     # sanity check
     for t in model.mode_details:
         if model.mode_details[t][1]["duration"] == 0:
             for r in model.mode_details[t][1]:
                 model.mode_details[t][1][r] = 0
-        res = [r for r in model.resources_list if model.mode_details[t][1][r]>0]
+        res = [r for r in model.resources_list if model.mode_details[t][1][r] > 0]
         print(len(res))
-        print("task ", t,  res)
-        #assert len(res) <= 1
-        #print(max(d[i][1:]))
+        print("task ", t, res)
+        # assert len(res) <= 1
+        # print(max(d[i][1:]))
     model.is_calendar = True
     model.update_functions()
+    return model
+
+
+def run_solver_breaks():
+    model = parse_files()
     do_cpopt = False
     do_ortools = True
     solution = None
@@ -82,17 +114,28 @@ def parse_calendar():
         ortools_solver.init_model_durations_indicator_method()
         result = ortools_solver.solve(params_cp, add_solution_callback=True)
         solution = result.get_best_solution()
-    from discrete_optimization.rcpsp.rcpsp_utils import plot_task_gantt, plt, plot_ressource_view
+    from discrete_optimization.rcpsp.rcpsp_utils import (
+        plot_ressource_view,
+        plot_task_gantt,
+        plt,
+    )
+
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=solution)
-    #plt.show()
-    from discrete_optimization.rcpsp.rcpsp_model_preemptive import get_rcpsp_modelp_preemptive
-    from discrete_optimization.rcpsp.plots.rcpsp_utils_preemptive import plot_task_gantt, plt
+    # plt.show()
+    from discrete_optimization.rcpsp.plots.rcpsp_utils_preemptive import (
+        plot_task_gantt,
+        plt,
+    )
+    from discrete_optimization.rcpsp.rcpsp_model_preemptive import (
+        get_rcpsp_modelp_preemptive,
+    )
+
     dummy_solution = model.get_dummy_solution()
     preemptive_model = get_rcpsp_modelp_preemptive(model)
 
-    #print(dummy_solution)
-    #print(model.evaluate(dummy_solution))
+    # print(dummy_solution)
+    # print(model.evaluate(dummy_solution))
 
     dummy_solution = preemptive_model.get_dummy_solution()
     print(dummy_solution)
@@ -126,16 +169,54 @@ def parse_calendar():
     #        ax.plot(preemptive_model.resources[r])
     #        ax.set_title(f"Res {r}")
     plt.show()
-    #pos = nx.spring_layout(model.graph.graph_nx)
-    #nx.draw(model.graph.graph_nx, pos=pos, with_labels=True)
-    #plot_task_gantt(rcpsp_model=preemptive_model, rcpsp_sol=dummy_solution)
-    #plt.show()
-    #from discrete_optimization.rcpsp.solver.ls_solver import LS_RCPSP_Solver
-    #solver = LS_RCPSP_Solver(preemptive_model)
-    #res = solver.solve(nb_iteration_max=10000, nb_iteration_no_improvement=100)
-    #print(preemptive_model.evaluate(res.get_best_solution()))
+    # pos = nx.spring_layout(model.graph.graph_nx)
+    # nx.draw(model.graph.graph_nx, pos=pos, with_labels=True)
+    # plot_task_gantt(rcpsp_model=preemptive_model, rcpsp_sol=dummy_solution)
+    # plt.show()
+    # from discrete_optimization.rcpsp.solver.ls_solver import LS_RCPSP_Solver
+    # solver = LS_RCPSP_Solver(preemptive_model)
+    # res = solver.solve(nb_iteration_max=10000, nb_iteration_no_improvement=100)
+    # print(preemptive_model.evaluate(res.get_best_solution()))
 
+
+def run_solver_breaks_with_constraints():
+    model = parse_files()
+    do_cpopt = False
+    do_ortools = True
+    solution: RCPSPSolution = None
+    if do_cpopt:
+        cpo_solver = CPOptRCPSPBreakSolver(model)
+        params_cp = ParametersCP.default()
+        result = cpo_solver.solve(params_cp)
+        solution = result.get_best_solution()
+    if do_ortools:
+        ortools_solver = OrtoolsRCPSPBreakSolver(model)
+        params_cp = ParametersCP.default()
+        ortools_solver.init_model_durations_indicator_method()
+        result = ortools_solver.solve(params_cp, add_solution_callback=True)
+        solution = result.get_best_solution()
+    # Release and deadline constraints
+    # Here : instead of putting release/deadlines date values found by previous optimisation, you can put
+    # values that you want.. !
+    sc = SpecialConstraintsDescription(
+        start_times_window={
+            t: (max(solution.get_start_time(t) - 1, 0), None) for t in model.tasks_list
+        },
+        end_times_window={
+            t: (None, solution.get_end_time(t) + 1) for t in model.tasks_list
+        },
+    )
+    model_sc = from_rcpsp_model(rcpsp_model=model, constraints=sc)
+    ortools_solver = OrtoolsRCPSPBreakSolver(model_sc)
+    params_cp = ParametersCP.default()
+    ortools_solver.init_model_durations_element_constraint(partial_solution=sc)
+    result = ortools_solver.solve(params_cp, add_solution_callback=True)
+    solution = result.get_best_solution()
+    print(model_sc.evaluate(solution))
+    plot_task_gantt(rcpsp_model=model_sc, rcpsp_sol=solution)
+    plot_ressource_view(rcpsp_model=model_sc, rcpsp_sol=solution)
+    plt.show()
 
 
 if __name__ == "__main__":
-    parse_calendar()
+    run_solver_breaks_with_constraints()

@@ -1,20 +1,39 @@
-from typing import List, Optional, Dict, Tuple
-from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-from discrete_optimization.generic_tools.cp_tools import CPSolver, ParametersCP, SignEnum
-from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, \
-    build_aggreg_function_and_params_objective
-from docplex.cp.model import interval_var, minimize, end_before_start, CpoModel, end_of, \
-    pulse, start_of, CpoExpr, CpoStepFunction, CpoSolveResult, CpoIntervalVar
-from discrete_optimization.rcpsp.rcpsp_model_utils import create_fake_tasks
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+from discrete_optimization.generic_tools.cp_tools import (
+    CPSolver,
+    ParametersCP,
+    SignEnum,
+)
+from discrete_optimization.generic_tools.do_problem import (
+    ParamsObjectiveFunction,
+    build_aggreg_function_and_params_objective,
+)
+from discrete_optimization.generic_tools.result_storage.result_storage import (
+    ResultStorage,
+)
+from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
+from discrete_optimization.rcpsp.rcpsp_model_utils import create_fake_tasks
+from docplex.cp.model import (
+    CpoExpr,
+    CpoIntervalVar,
+    CpoModel,
+    CpoSolveResult,
+    CpoStepFunction,
+    end_before_start,
+    end_of,
+    interval_var,
+    minimize,
+    pulse,
+    start_of,
+)
 
 
 def build_intensity_step_functions(rcpsp_model: RCPSPModel):
     max_horizon = rcpsp_model.horizon
     resources = rcpsp_model.resources
-    max_cap = {r: rcpsp_model.get_max_resource_capacity(r)
-               for r in resources}
+    max_cap = {r: rcpsp_model.get_max_resource_capacity(r) for r in resources}
     # Dictionary of resource intensity step function
     step_dict = {r: CpoStepFunction() for r in resources}
     for r in step_dict:
@@ -32,15 +51,17 @@ def build_intensity_step_functions(rcpsp_model: RCPSPModel):
 
 
 def intensity_step_functions(rcpsp_model: RCPSPModel, resources_interest: Tuple[str]):
-    max_cap = {r: rcpsp_model.get_max_resource_capacity(r)
-               for r in resources_interest}
+    max_cap = {r: rcpsp_model.get_max_resource_capacity(r) for r in resources_interest}
     resources_arrays = {
-        r: np.array(rcpsp_model.resources[r])
-        for r in resources_interest
+        r: np.array(rcpsp_model.resources[r]) for r in resources_interest
     }
-    merged = np.array(resources_arrays[resources_interest[0]]/max_cap[resources_interest[0]])
+    merged = np.array(
+        resources_arrays[resources_interest[0]] / max_cap[resources_interest[0]]
+    )
     for i in range(1, len(resources_interest)):
-        merged *= resources_arrays[resources_interest[i]]/max_cap[resources_interest[i]]
+        merged *= (
+            resources_arrays[resources_interest[i]] / max_cap[resources_interest[i]]
+        )
     merged *= 100
     delta = merged[:-1] - merged[1:]
     index_non_zero = np.nonzero(delta)[0]
@@ -52,20 +73,29 @@ def intensity_step_functions(rcpsp_model: RCPSPModel, resources_interest: Tuple[
         ind = index_non_zero[j]
         value = merged[ind + 1]
         if value != 1:
-            step.set_value(int(ind+1), int(index_non_zero[j + 1] - ind)+int(ind + 1),
-                           int(merged[ind+1]))
+            step.set_value(
+                int(ind + 1),
+                int(index_non_zero[j + 1] - ind) + int(ind + 1),
+                int(merged[ind + 1]),
+            )
     return step
 
 
-
-
 class CPOptRCPSPBreakSolver(CPSolver):
-    def __init__(self, rcpsp_model: RCPSPModel,
-                 params_objective_function: ParamsObjectiveFunction = None, **kwargs):
+    def __init__(
+        self,
+        rcpsp_model: RCPSPModel,
+        params_objective_function: ParamsObjectiveFunction = None,
+        **kwargs
+    ):
         self.rcpsp_model = rcpsp_model
-        self.aggreg_sol, self.aggreg_from_dict_values, self.params_objective_function = \
-            build_aggreg_function_and_params_objective(self.rcpsp_model,
-                                                       params_objective_function=params_objective_function)
+        (
+            self.aggreg_sol,
+            self.aggreg_from_dict_values,
+            self.params_objective_function,
+        ) = build_aggreg_function_and_params_objective(
+            self.rcpsp_model, params_objective_function=params_objective_function
+        )
         self.index_task = self.rcpsp_model.index_task
         self.model: Optional[CpoModel] = None
         self.variables: Dict[str, List[CpoIntervalVar]] = {}
@@ -73,8 +103,13 @@ class CPOptRCPSPBreakSolver(CPSolver):
         self.solver_infos = None
 
     def init_model(self, **args):
-        nb_tasks, nb_resources = self.rcpsp_model.n_jobs, len(self.rcpsp_model.resources_list)
-        max_capacities = [self.rcpsp_model.get_max_resource_capacity(r) for r in self.rcpsp_model.resources_list]
+        nb_tasks, nb_resources = self.rcpsp_model.n_jobs, len(
+            self.rcpsp_model.resources_list
+        )
+        max_capacities = [
+            self.rcpsp_model.get_max_resource_capacity(r)
+            for r in self.rcpsp_model.resources_list
+        ]
         resources_list = self.rcpsp_model.resources_list
         tasks_list = self.rcpsp_model.tasks_list
         # -----------------------------------------------------------------------------
@@ -82,21 +117,32 @@ class CPOptRCPSPBreakSolver(CPSolver):
         # -----------------------------------------------------------------------------
 
         # Extract duration of each task
-        durations = [self.rcpsp_model.mode_details[t][1]["duration"] for t in tasks_list]
+        durations = [
+            self.rcpsp_model.mode_details[t][1]["duration"] for t in tasks_list
+        ]
         # Extract demand of each task
-        demands = [[self.rcpsp_model.mode_details[t][1][r] for r in self.rcpsp_model.resources_list]
-                   for t in tasks_list]
+        demands = [
+            [
+                self.rcpsp_model.mode_details[t][1][r]
+                for r in self.rcpsp_model.resources_list
+            ]
+            for t in tasks_list
+        ]
 
         # Extract successors of each task
-        successors = [[self.rcpsp_model.index_task[tt] for tt in self.rcpsp_model.successors[t]]
-                      for t in tasks_list]
+        successors = [
+            [self.rcpsp_model.index_task[tt] for tt in self.rcpsp_model.successors[t]]
+            for t in tasks_list
+        ]
         # -----------------------------------------------------------------------------
         # Build the model
         # -----------------------------------------------------------------------------
 
         # Create model
         mdl = CpoModel("RCPSPBreaks")
-        step_functions: Dict[str, CpoStepFunction] = build_intensity_step_functions(self.rcpsp_model)
+        step_functions: Dict[str, CpoStepFunction] = build_intensity_step_functions(
+            self.rcpsp_model
+        )
 
         # Compute intensity per tasks.
         intensity_per_tasks = []
@@ -106,56 +152,88 @@ class CPOptRCPSPBreakSolver(CPSolver):
             # (simplification !!!)
             if len(index_not_zeros) > 0:
                 if len(index_not_zeros) == 1:
-                    intensity_per_tasks += [step_functions[resources_list[index_not_zeros[0]]]]
+                    intensity_per_tasks += [
+                        step_functions[resources_list[index_not_zeros[0]]]
+                    ]
                 else:
                     key = tuple([resources_list[ind] for ind in index_not_zeros])
                     if key in step_functions:
                         intensity_per_tasks += [step_functions[key]]
                     else:
-                        step_functions[key] = intensity_step_functions(rcpsp_model=self.rcpsp_model,
-                                                                       resources_interest=key)
+                        step_functions[key] = intensity_step_functions(
+                            rcpsp_model=self.rcpsp_model, resources_interest=key
+                        )
                         intensity_per_tasks += [step_functions[key]]
                         print(step_functions[key])
             else:
                 intensity_per_tasks += [None]
 
         # Create task interval variables
-        tasks = [interval_var(name='Task_{}'.format(i + 1),
-                              intensity=intensity_per_tasks[i],
-                              length=(durations[i], 100 * durations[i]),
-                              # hardcoded for now.
-                              size=durations[i]) for i in range(nb_tasks)]
+        tasks = [
+            interval_var(
+                name="Task_{}".format(i + 1),
+                intensity=intensity_per_tasks[i],
+                length=(durations[i], 100 * durations[i]),
+                # hardcoded for now.
+                size=durations[i],
+            )
+            for i in range(nb_tasks)
+        ]
         # Add precedence constraints
-        mdl.add(end_before_start(tasks[t], tasks[s]) for t in range(nb_tasks) for s in successors[t])
+        mdl.add(
+            end_before_start(tasks[t], tasks[s])
+            for t in range(nb_tasks)
+            for s in successors[t]
+        )
         # Constrain capacity of resources
-        mdl.add(sum(pulse(tasks[t], demands[t][r]) for t in range(nb_tasks)
-                    if demands[t][r] > 0) <= int(max_capacities[r])
-                for r in range(nb_resources))
+        mdl.add(
+            sum(
+                pulse(tasks[t], demands[t][r])
+                for t in range(nb_tasks)
+                if demands[t][r] > 0
+            )
+            <= int(max_capacities[r])
+            for r in range(nb_resources)
+        )
         # Minimize end of all tasks
         # self.objective_expression = minimize(max([end_of(t) for t in tasks]))
-        mdl.add(minimize(end_of(tasks[self.rcpsp_model.index_task[self.rcpsp_model.sink_task]])))
+        mdl.add(
+            minimize(
+                end_of(tasks[self.rcpsp_model.index_task[self.rcpsp_model.sink_task]])
+            )
+        )
         self.model = mdl
         self.variables = {"tasks": tasks}
 
-    def retrieve_solutions(self, result: CpoSolveResult, parameters_cp: ParametersCP) -> ResultStorage:
+    def retrieve_solutions(
+        self, result: CpoSolveResult, parameters_cp: ParametersCP
+    ) -> ResultStorage:
         schedule = {}
         for i in range(len(self.variables["tasks"])):
             itv = result.get_var_solution(self.variables["tasks"][i])
-            schedule[self.rcpsp_model.tasks_list[i]] = {"start_time": itv.get_start(),
-                                                        "end_time": itv.get_end()}
-        solution = RCPSPSolution(problem=self.rcpsp_model,
-                                 rcpsp_schedule=schedule,
-                                 rcpsp_modes=[1] * self.rcpsp_model.n_jobs_non_dummy)
+            schedule[self.rcpsp_model.tasks_list[i]] = {
+                "start_time": itv.get_start(),
+                "end_time": itv.get_end(),
+            }
+        solution = RCPSPSolution(
+            problem=self.rcpsp_model,
+            rcpsp_schedule=schedule,
+            rcpsp_modes=[1] * self.rcpsp_model.n_jobs_non_dummy,
+        )
         fit = self.aggreg_sol(solution)
-        return ResultStorage(list_solution_fits=[(solution, fit)],
-                             mode_optim=self.params_objective_function.sense_function)
+        return ResultStorage(
+            list_solution_fits=[(solution, fit)],
+            mode_optim=self.params_objective_function.sense_function,
+        )
 
     def solve(self, parameters_cp: ParametersCP = None, **args) -> ResultStorage:
         if self.model is None:
             self.init_model(**args)
-        result: CpoSolveResult = self.model.solve(TimeLimit=parameters_cp.time_limit,
-                                                  execfile="/Applications/CPLEX_Studio201/cpoptimizer/"
-                                                           "bin/x86-64_osx/cpoptimizer")
+        result: CpoSolveResult = self.model.solve(
+            TimeLimit=parameters_cp.time_limit,
+            execfile="/Applications/CPLEX_Studio201/cpoptimizer/"
+            "bin/x86-64_osx/cpoptimizer",
+        )
         return self.retrieve_solutions(result, parameters_cp)
 
     def get_stats(self):
@@ -170,37 +248,64 @@ class CPOptRCPSPBreakSolver(CPSolver):
         pass
 
     def constraint_objective_max_time_set_of_jobs(self, set_of_jobs):
-        expression = minimize(max(end_of(self.variables["tasks"][self.index_task[t]])
-                                  for t in set_of_jobs))
+        expression = minimize(
+            max(
+                end_of(self.variables["tasks"][self.index_task[t]]) for t in set_of_jobs
+            )
+        )
         self.model.add(expression)
         return [expression]
 
-    def constraint_start_time_string(self, task, start_time, sign: SignEnum = SignEnum.EQUAL) -> List[CpoExpr]:
+    def constraint_start_time_string(
+        self, task, start_time, sign: SignEnum = SignEnum.EQUAL
+    ) -> List[CpoExpr]:
         expression = None
         if sign == SignEnum.EQUAL:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) == start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) == start_time
+            )
         elif sign == SignEnum.LEQ:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) <= start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) <= start_time
+            )
         elif sign == SignEnum.LESS:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) < start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) < start_time
+            )
         elif sign == SignEnum.UP:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) > start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) > start_time
+            )
         elif sign == SignEnum.UEQ:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) >= start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) >= start_time
+            )
         self.model.add(expression)
         return [expression]
 
-    def constraint_end_time_string(self, task, start_time, sign: SignEnum = SignEnum.EQUAL) -> List[CpoExpr]:
+    def constraint_end_time_string(
+        self, task, start_time, sign: SignEnum = SignEnum.EQUAL
+    ) -> List[CpoExpr]:
         expression = None
         if sign == SignEnum.EQUAL:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) == start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) == start_time
+            )
         elif sign == SignEnum.LEQ:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) <= start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) <= start_time
+            )
         elif sign == SignEnum.LESS:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) < start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) < start_time
+            )
         elif sign == SignEnum.UP:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) > start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) > start_time
+            )
         elif sign == SignEnum.UEQ:
-            expression = start_of(self.variables["tasks"][self.index_task[task]]) >= start_time
+            expression = (
+                start_of(self.variables["tasks"][self.index_task[task]]) >= start_time
+            )
         self.model.add(expression)
         return [expression]
