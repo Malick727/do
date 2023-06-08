@@ -16,7 +16,6 @@ from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints
     RCPSPModelSpecialConstraints,
     SpecialConstraintsDescription,
 )
-from minizinc import Result
 from ortools.sat.python import cp_model
 from ortools.sat.python.cp_model import Domain, LinearExpr, VarArraySolutionPrinter
 
@@ -207,6 +206,27 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         self.variables: Dict[str, List[LinearExpr]] = {}
 
     def init_model_fixed_duration_no_calendar(self, **kwargs):
+        partial_solution = kwargs.get("partial_solution", None)
+        if isinstance(self.problem, RCPSPModelSpecialConstraints):
+            if partial_solution is None:
+                partial_solution = self.problem.special_constraints
+        horizon = int(self.problem.horizon)
+        tasks_list = self.problem.tasks_list
+        min_start_time = {t: 0 for t in self.problem.tasks_list}
+        max_start_time = {t: horizon - 1 for t in self.problem.tasks_list}
+        min_end_time = {t: 0 for t in self.problem.tasks_list}
+        max_end_time = {t: horizon - 1 for t in self.problem.tasks_list}
+        if partial_solution is not None:
+            for t in partial_solution.start_times_window:
+                if partial_solution.start_times_window[t][0] is not None:
+                    min_start_time[t] = partial_solution.start_times_window[t][0]
+                if partial_solution.start_times_window[t][1] is not None:
+                    max_start_time[t] = partial_solution.start_times_window[t][1]
+            for t in partial_solution.end_times_window:
+                if partial_solution.end_times_window[t][0] is not None:
+                    min_end_time[t] = partial_solution.end_times_window[t][0]
+                if partial_solution.end_times_window[t][1] is not None:
+                    max_end_time[t] = partial_solution.end_times_window[t][1]
         model = cp_model.CpModel()
         horizon = int(self.problem.horizon)
         nb_tasks = self.problem.n_jobs
@@ -214,11 +234,28 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             self.problem.mode_details[t][1]["duration"] for t in self.problem.tasks_list
         ]
         starts = [
-            model.NewIntVar(0, horizon - 1, f"start_task[{i}]") for i in range(nb_tasks)
+            model.NewIntVar(
+                min_start_time[tasks_list[i]],
+                max_start_time[tasks_list[i]],
+                f"start_task[{i}]",
+            )
+            for i in range(nb_tasks)
         ]
         ends = [
-            model.NewIntVar(0, horizon - 1, f"end_task[{i}]") for i in range(nb_tasks)
+            model.NewIntVar(
+                min_end_time[tasks_list[i]],
+                max_end_time[tasks_list[i]],
+                f"end_task[{i}]",
+            )
+            for i in range(nb_tasks)
         ]
+        if partial_solution is not None:
+            self.add_generalized_constraints(
+                starts_var=starts,
+                ends_var=ends,
+                special_constraints=partial_solution,
+                model=model,
+            )
         durs = [model.NewConstant(int(duration[i])) for i in range(nb_tasks)]
         intervals = [
             model.NewIntervalVar(starts[i], durs[i], ends[i], f"interval_task[{i}]")
@@ -277,6 +314,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         max_start_time = {t: horizon - 1 for t in self.problem.tasks_list}
         min_end_time = {t: 0 for t in self.problem.tasks_list}
         max_end_time = {t: horizon - 1 for t in self.problem.tasks_list}
+        model = cp_model.CpModel()
         if partial_solution is not None:
             for t in partial_solution.start_times_window:
                 if partial_solution.start_times_window[t][0] is not None:
@@ -288,7 +326,6 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     min_end_time[t] = partial_solution.end_times_window[t][0]
                 if partial_solution.end_times_window[t][1] is not None:
                     max_end_time[t] = partial_solution.end_times_window[t][1]
-        model = cp_model.CpModel()
         tasks_list = self.problem.tasks_list
         nb_tasks = self.problem.n_jobs
         duration = [
@@ -310,6 +347,13 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             )
             for i in range(nb_tasks)
         ]
+        if partial_solution is not None:
+            self.add_generalized_constraints(
+                starts_var=starts,
+                ends_var=ends,
+                special_constraints=partial_solution,
+                model=model,
+            )
         duration_task = [
             model.NewIntVar(
                 int(duration[i]), int(100 * duration[i]), f"duration_task[{i}]"
@@ -421,6 +465,13 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             )
             for i in range(nb_tasks)
         ]
+        if partial_solution is not None:
+            self.add_generalized_constraints(
+                starts_var=starts,
+                ends_var=ends,
+                special_constraints=partial_solution,
+                model=model,
+            )
         durs: Dict[
             Hashable, Tuple[List[int], Dict[int, List[Tuple[int, int]]]]
         ] = compute_duration_tasks_function_time(
@@ -660,6 +711,51 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             self.init_model_fixed_duration_no_calendar(**args)
         if init_method == InitMethod.PARALLEL_TIMELINE:
             self.init_model_parallel_starts_vectors(**args)
+
+    def add_generalized_constraints(
+        self,
+        starts_var: List[cp_model.IntVar],
+        ends_var: List[cp_model.IntVar],
+        special_constraints: Optional[SpecialConstraintsDescription],
+        model: cp_model.CpModel,
+    ):
+        if special_constraints is None:
+            return
+        for task in special_constraints.start_times:
+            s = special_constraints.start_times[task]
+            if s is not None:
+                index_task = self.problem.index_task[task]
+                model.Add(starts_var[index_task] == s)
+        for task in special_constraints.end_times:
+            e = special_constraints.end_times[task]
+            if e is not None:
+                index_task = self.problem.index_task[task]
+                model.Add(ends_var[index_task] == e)
+        if (
+            special_constraints.start_at_end is not None
+            and len(special_constraints.start_at_end) >= 1
+        ):
+            for t1, t2 in special_constraints.start_at_end:
+                index_task_1 = self.problem.index_task[t1]
+                index_task_2 = self.problem.index_task[t2]
+                model.Add(starts_var[index_task_2] == ends_var[index_task_1])
+        if (
+            special_constraints.start_together is not None
+            and len(special_constraints.start_together) >= 1
+        ):
+            for t1, t2 in special_constraints.start_together:
+                index_task_1 = self.problem.index_task[t1]
+                index_task_2 = self.problem.index_task[t2]
+                model.Add(starts_var[index_task_2] == starts_var[index_task_1])
+
+        if (
+            special_constraints.start_at_end_plus_offset is not None
+            and len(special_constraints.start_at_end_plus_offset) >= 1
+        ):
+            for t1, t2, lag in special_constraints.start_together:
+                index_task_1 = self.problem.index_task[t1]
+                index_task_2 = self.problem.index_task[t2]
+                model.Add(starts_var[index_task_2] >= ends_var[index_task_1] + lag)
 
     def retrieve_solutions(
         self, result: cp_model.CpSolver, parameters_cp: ParametersCP
