@@ -3,6 +3,7 @@ import os
 
 import pandas as pd
 
+
 os.environ["DO_SKIP_MZN_CHECK"] = "1"
 import matplotlib.pyplot as plt
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
@@ -11,17 +12,24 @@ from discrete_optimization.rcpsp.rcpsp_parser import (
     parse_file,
     parse_psplib,
 )
+
+
 from discrete_optimization.rcpsp.rcpsp_utils import plot_ressource_view, plot_task_gantt
 from discrete_optimization.rcpsp.solver.cpm import CPM
 from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import (
     SpecialConstraintsDescription,
     compute_constraints_details,
-    from_rcpsp_model,
+
 )
+
+try:
+    from discrete_optimization.rcpsp.transform_model import from_rcpsp_model # Latest version of the cdoe
+except:
+    # Current pip version
+    from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import from_rcpsp_model
 
 from rcpsp_breaks.rcpsp_breaks_cpopt import CPOptRCPSPBreakSolver, ParametersCP
 from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver
-
 this_folder = os.path.dirname(os.path.abspath(__file__))
 data_folder = os.path.join(this_folder, "data/")
 file_rcpsp = os.path.join(data_folder, "Tablada_FLS.SM")
@@ -181,8 +189,8 @@ def run_solver_breaks():
 
 def run_solver_breaks_with_constraints():
     model = parse_files()
-    do_cpopt = False
-    do_ortools = True
+    do_cpopt = True
+    do_ortools = False
     solution: RCPSPSolution = None
     if do_cpopt:
         cpo_solver = CPOptRCPSPBreakSolver(model)

@@ -12,10 +12,14 @@ from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
 )
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import (
-    RCPSPModelSpecialConstraints,
-    SpecialConstraintsDescription,
-)
+try:
+    from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import (
+        RCPSPModelSpecialConstraints,
+        SpecialConstraintsDescription,
+    )
+except:
+    from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import \
+        SpecialConstraintsDescription
 from ortools.sat.python import cp_model
 from ortools.sat.python.cp_model import Domain, LinearExpr, VarArraySolutionPrinter
 
@@ -207,7 +211,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
 
     def init_model_fixed_duration_no_calendar(self, **kwargs):
         partial_solution = kwargs.get("partial_solution", None)
-        if isinstance(self.problem, RCPSPModelSpecialConstraints):
+        if "special_constraints" in self.problem.__dict__.keys():
             if partial_solution is None:
                 partial_solution = self.problem.special_constraints
         horizon = int(self.problem.horizon)
@@ -306,7 +310,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
 
     def init_model_durations_element_constraint(self, **kwargs):
         partial_solution = kwargs.get("partial_solution", None)
-        if isinstance(self.problem, RCPSPModelSpecialConstraints):
+        if "special_constraints" in self.problem.__dict__.keys():
             if partial_solution is None:
                 partial_solution = self.problem.special_constraints
         horizon = int(self.problem.horizon)
@@ -419,7 +423,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
     def init_model_durations_indicator_method(self, **kwargs):
         # https://groups.google.com/g/or-tools-discuss/c/DA_4Pniwhn8?pli=1 Solution
         partial_solution = kwargs.get("partial_solution", None)
-        if isinstance(self.problem, RCPSPModelSpecialConstraints):
+        if "special_constraints" in self.problem.__dict__.keys():
             if partial_solution is None:
                 partial_solution = self.problem.special_constraints
         horizon = int(self.problem.horizon)
@@ -721,16 +725,18 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
     ):
         if special_constraints is None:
             return
-        for task in special_constraints.start_times:
-            s = special_constraints.start_times[task]
-            if s is not None:
-                index_task = self.problem.index_task[task]
-                model.Add(starts_var[index_task] == s)
-        for task in special_constraints.end_times:
-            e = special_constraints.end_times[task]
-            if e is not None:
-                index_task = self.problem.index_task[task]
-                model.Add(ends_var[index_task] == e)
+        if special_constraints.start_times is not None:
+            for task in special_constraints.start_times:
+                s = special_constraints.start_times[task]
+                if s is not None:
+                    index_task = self.problem.index_task[task]
+                    model.Add(starts_var[index_task] == s)
+        if special_constraints.end_times is not None:
+            for task in special_constraints.end_times:
+                e = special_constraints.end_times[task]
+                if e is not None:
+                    index_task = self.problem.index_task[task]
+                    model.Add(ends_var[index_task] == e)
         if (
             special_constraints.start_at_end is not None
             and len(special_constraints.start_at_end) >= 1

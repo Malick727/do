@@ -14,7 +14,11 @@ from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
 )
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-from discrete_optimization.rcpsp.rcpsp_model_utils import create_fake_tasks
+try:
+    from discrete_optimization.rcpsp.rcpsp_model_utils import create_fake_tasks
+except:
+    from discrete_optimization.rcpsp.rcpsp_utils import create_fake_tasks
+
 from docplex.cp.model import (
     CpoExpr,
     CpoIntervalVar,
