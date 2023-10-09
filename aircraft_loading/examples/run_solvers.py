@@ -47,22 +47,22 @@ def run_ga():
     print("Eval ", problem.evaluate(solution))
 
 
-def run_ortools():
-    problem = create_problem(4)
+def run_ortools(size_instance: int = 4):
+    problem = create_problem(size_instance)
     solver = OrtoolsLpTeamAllocationSolver(problem=problem,
                                            solver_name=
                                            "SCIP")
     solver.init_model()
-
-    print([problem.slot_distances[x] if x != -1 else -20 for x in sol])
-    for i in range(len(sol)):
-        if sol[i] != -1:
-            solver.model.Add(solver.variables["allocation_binary"][i][sol[i]]==1)
+    # print([problem.slot_distances[x] if x != -1 else -20 for x in sol])
+    # for i in range(len(sol)):
+    #     if sol[i] != -1:
+    #         solver.model.Add(solver.variables["allocation_binary"][i][sol[i]]==1)
     result = solver.solve()
     solution, fit = result.get_best_solution_fit()
     print("Solution : ", solution)
     print("Sat ", problem.satisfy(solution))
     print("Eval ", problem.evaluate(solution))
+
 
 def debug():
     problem = create_problem(4)
@@ -72,4 +72,4 @@ def debug():
 
 
 if __name__ == "__main__":
-    run_local_solver()
+    run_ortools(10)

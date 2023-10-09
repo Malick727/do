@@ -1,10 +1,7 @@
 import os
-
 os.environ["DO_SKIP_MZN_CHECK"] = "1"
 import logging
-
 from discrete_optimization.generic_tools.graph_api import Graph
-
 from path_planning.path_planning import (
     Comparison,
     NodeConstraints,

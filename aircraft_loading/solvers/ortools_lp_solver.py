@@ -66,49 +66,40 @@ class OrtoolsLpTeamAllocationSolver(BaseSolver):
                        <= self.problem.max_loading_weight)
 
         # Center of gravity
-        if True:
-            total_weight = self.model.Sum([loaded[j]*int(self.problem.weights[j]) for j in loaded])
-            cog = self.model.Sum([self.problem.weights[i]*self.problem.slot_distances[j]*allocation_binary[i][j]
-                                  for i in allocation_binary
-                                  for j in allocation_binary[i]])
-            self.model.Add(cog <= self.problem.cog_bounds[1]*total_weight)
-            self.model.Add(cog >= self.problem.cog_bounds[0]*total_weight)
+        total_weight = self.model.Sum([loaded[j]*int(self.problem.weights[j]) for j in loaded])
+        cog = self.model.Sum([self.problem.weights[i]*self.problem.slot_distances[j]*allocation_binary[i][j]
+                              for i in allocation_binary
+                              for j in allocation_binary[i]])
+        self.model.Add(cog <= self.problem.cog_bounds[1]*total_weight)
+        self.model.Add(cog >= self.problem.cog_bounds[0]*total_weight)
 
         # Cumulative/Overlaps
-        if True:
-            for j in range(self.problem.number_of_slots):
-                current_pos = self.problem.slot_distances[j]
-                self.model.Add(
-                    self.model.Sum(allocation_binary[i][k] * self.problem.heigth_container[i]
-                                   for i in allocation_binary
-                                   for k in allocation_binary[i]
-                                   if
-                                   self.problem.slot_distances[k] <= current_pos
-                                   < self.problem.slot_distances[k] +
-                                   self.problem.length_container[i])
-                    <= 2
-                )
-                print(j, [(i,k) for i in allocation_binary for k in allocation_binary[i]
-                          if
-                          self.problem.slot_distances[k] <= current_pos
-                          < self.problem.slot_distances[k] +
-                          self.problem.length_container[i]])
-
+        for j in range(self.problem.number_of_slots):
+            current_pos = self.problem.slot_distances[j]
+            self.model.Add(
+                self.model.Sum(allocation_binary[i][k] * self.problem.heigth_container[i]
+                               for i in allocation_binary
+                               for k in allocation_binary[i]
+                               if
+                               self.problem.slot_distances[k] <= current_pos
+                               < self.problem.slot_distances[k] +
+                               self.problem.length_container[i])
+                <= 1
+            )
         # Shear :
-        if False:
-            for j in range(self.problem.number_of_slots):
-                current_pos = self.problem.slot_distances[j]
-                indexes = set()
-                if current_pos < 0:
-                    indexes = set(range(j))
-                if current_pos > 0:
-                    indexes = set(range(j+1, self.problem.number_of_slots))
-                weight_in_j = self.model.Sum([allocation_binary[i][j]*self.problem.weights[i]
-                                              for i in allocation_binary])
-                weights_further = self.model.Sum([allocation_binary[i][k]*self.problem.weights[i]
-                                                  for i in allocation_binary
-                                                  for k in indexes])
-                self.model.Add(0.5*weight_in_j+weights_further <= self.problem.shear_profile(current_pos))
+        for j in range(self.problem.number_of_slots):
+            current_pos = self.problem.slot_distances[j]
+            indexes = set()
+            if current_pos < 0:
+                indexes = set(range(j))
+            if current_pos > 0:
+                indexes = set(range(j+1, self.problem.number_of_slots))
+            weight_in_j = self.model.Sum([allocation_binary[i][j]*self.problem.weights[i]
+                                          for i in allocation_binary])
+            weights_further = self.model.Sum([allocation_binary[i][k]*self.problem.weights[i]
+                                              for i in allocation_binary
+                                              for k in indexes])
+            self.model.Add(0.5*weight_in_j+weights_further <= self.problem.shear_profile(current_pos))
         self.model.Maximize(self.model.Sum([loaded[j]*int(self.problem.weights[j]) for j in loaded]))
         self.variables["allocation_binary"] = allocation_binary
         self.variables["loaded"] = loaded
