@@ -19,6 +19,16 @@ def create_problem(j=2):
                                   cog_bounds=[-1, 1])
 
 
+def create_problem_toy_ionq():
+    return AircraftLoadingProblem(container_types=[2, 2, 1, 1],
+                                  weights=[4, 2, 5, 2],
+                                  slot_distances=[-3, 1],
+                                  max_loading_weight=9,
+                                  max_shear=4,
+                                  length=8,
+                                  cog_bounds=[-1, 1])
+
+
 def run_local_solver():
     problem = create_problem(j=4)
     solver = LocalSolverAircraftLoading(problem=problem)
@@ -47,11 +57,14 @@ def run_ga():
     print("Eval ", problem.evaluate(solution))
 
 
-def run_ortools(size_instance: int = 4):
-    problem = create_problem(size_instance)
+def run_ortools(size_instance: int = 4, toy: bool = False):
+    if not toy:
+        problem = create_problem(size_instance)
+    else:
+        problem = create_problem_toy_ionq()
     solver = OrtoolsLpTeamAllocationSolver(problem=problem,
                                            solver_name=
-                                           "SCIP")
+                                           "gurobi")
     solver.init_model()
     # print([problem.slot_distances[x] if x != -1 else -20 for x in sol])
     # for i in range(len(sol)):
@@ -72,4 +85,4 @@ def debug():
 
 
 if __name__ == "__main__":
-    run_ortools(10)
+    run_ortools(toy=True)
