@@ -97,7 +97,7 @@ class AircraftLoadingProblem(Problem):
     def sat_packing(self, variable: AircraftLoadingSolution):
         min_distance = min(self.slot_distances)
         max_distance = max(self.slot_distances)
-        length_array = max_distance - min_distance
+        length_array = max_distance - min_distance + 1
         width_array = np.zeros(length_array)
         height_array = np.zeros(length_array)
         for i in range(self.number_of_containers):

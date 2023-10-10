@@ -30,9 +30,9 @@ def create_problem_toy_ionq():
 
 
 def run_local_solver():
-    problem = create_problem(j=4)
+    problem = create_problem(j=10)
     solver = LocalSolverAircraftLoading(problem=problem)
-    result = solver.solve(nb_iteration_max=100000)
+    result = solver.solve(nb_iteration_max=20000)
     solution, fit = result.get_best_solution_fit()
     print("Solution : ", solution)
     print("Sat ", problem.satisfy(solution))
@@ -41,13 +41,13 @@ def run_local_solver():
 
 def run_ga():
     from discrete_optimization.generic_tools.ea.ga import Ga
-    problem = create_problem(2)
+    problem = create_problem(10)
     solver = Ga(problem=problem,
                 objectives=["value", "penalty_violation"],
                 objective_weights=[1, -100],
                 objective_handling=ObjectiveHandling.AGGREGATE,
                 pop_size=25,
-                max_evals=10000,
+                max_evals=100000,
                 mut_rate=0.1,
                 encoding="allocation")
     res = solver.solve()
@@ -65,11 +65,16 @@ def run_ortools(size_instance: int = 4, toy: bool = False):
     solver = OrtoolsLpTeamAllocationSolver(problem=problem,
                                            solver_name=
                                            "gurobi")
-    solver.init_model()
+    solver.init_model(overlap=False)
+    sol = [4, -1, -1, -1, 0, -1, -1, -1, 1, -1, -1, 6, -1, 3, 6, 6, -1, 5, -1, -1, 2, 3,
+           6, -1, 2, 5, -1, -1, -1, -1, -1, -1, 6, 4, -1, -1, 1, 0, -1, -1]
     # print([problem.slot_distances[x] if x != -1 else -20 for x in sol])
-    # for i in range(len(sol)):
-    #     if sol[i] != -1:
-    #         solver.model.Add(solver.variables["allocation_binary"][i][sol[i]]==1)
+    for i in range(len(sol)):
+        if sol[i] != -1:
+            solver.model.Add(solver.variables["allocation_binary"][i][sol[i]] == 1)
+        else:
+            for j in solver.variables["allocation_binary"][i]:
+                solver.model.Add(solver.variables["allocation_binary"][i][j] == 0)
     result = solver.solve()
     solution, fit = result.get_best_solution_fit()
     print("Solution : ", solution)
@@ -85,4 +90,4 @@ def debug():
 
 
 if __name__ == "__main__":
-    run_ortools(toy=True)
+    run_local_solver()
