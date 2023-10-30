@@ -304,6 +304,7 @@ class PathPlanningColumnGen(PathPlanningSolver):
                 )
                 result = self.sub_solver.solve(**self.params_subsolver)
                 best_solution, fit = result.get_best_solution_fit()
+                print("Fit ", fit, new_problem.evaluate(best_solution), new_problem.satisfy(best_solution))
                 min_rc = new_problem.compute_cumulated_value_path(
                     attribute=new_problem.length_attribute, variable=best_solution
                 )
@@ -320,12 +321,14 @@ class PathPlanningColumnGen(PathPlanningSolver):
                 logger.info("Opt. Sol. bound: [%f, %f]" % (largest_lb, smallest_ub))
                 # Once the reduced costs are positive we have a solution
                 if min_rc >= 0:
+                    print(min_rc, " quit ")
                     logger.info("Min rc >0, quit the algo")
                     break
                 # Consider only reduced costs below 0+ epsilon to deal with
                 # numeric instability
                 epsilon = 1e-7
                 if min_rc + epsilon >= 0:
+                    print(min_rc, " quit 2")
                     logger.info("Reduced costs are epsilon-close to 0., leaving")
                     break
                 for sol, fit in result.list_solution_fits:
@@ -437,4 +440,5 @@ def create_new_problem(original_problem: PathPlanning, cost_shifts: CostShift):
         length_attribute="shifted_cost",
         node_constraints=original_problem.node_constraints,
         path_constraints=original_problem.path_constraints,
+        reindex_node_constraints=False
     )

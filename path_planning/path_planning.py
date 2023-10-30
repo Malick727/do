@@ -109,6 +109,7 @@ class PathPlanning(Problem):
         length_attribute: str,
         node_constraints: Optional[NodeConstraints] = None,
         path_constraints: Optional[PathConstraints] = None,
+        reindex_node_constraints: bool = True
     ):
         self.graph = graph
         self.source = source
@@ -127,9 +128,12 @@ class PathPlanning(Problem):
         self.node_constraints = node_constraints
         if node_constraints is None:
             self.node_constraints = NodeConstraints()
-        self.node_constraints = reindex_constraint(
-            node_constraints=self.node_constraints, index_nodes=self.index_nodes
-        )
+        if reindex_node_constraints:
+            self.node_constraints = reindex_constraint(
+                node_constraints=self.node_constraints, index_nodes=self.index_nodes
+            )
+        else:
+            self.node_constraints = node_constraints
         self.path_constraints = path_constraints
         if path_constraints is None:
             self.path_constraints = PathConstraints()

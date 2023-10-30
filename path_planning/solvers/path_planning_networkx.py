@@ -83,6 +83,7 @@ class PathPlanningNX(SolverDO):
     ) -> ResultStorage:
         path = []
         weight = kwargs.get("weight", self.default_attribute)
+        print("weight : ", weight)
         if shortest_path_method == ShortestPathMethod.ASTAR_PATH:
             heuristic = kwargs.get("heuristic", None)
             if (
