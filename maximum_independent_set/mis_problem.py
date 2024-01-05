@@ -1,0 +1,87 @@
+import networkx as nx
+from typing import Type, Dict, List, Union
+import numpy as np
+from copy import deepcopy
+from discrete_optimization.generic_tools.do_problem import (Problem, ObjectiveDoc, Solution,
+                                                            ObjectiveRegister, TypeObjective,
+                                                            ModeOptim, ObjectiveHandling,
+                                                            TypeAttribute, Solution, EncodingRegister)
+from discrete_optimization.generic_tools.graph_api import Graph
+
+class MisSolution(Solution):
+    def __init__(self, problem: "MisProblem",
+                 chosen: Union[List, np.ndarray]):
+        self.problem = problem
+        self.chosen = chosen
+
+    def copy(self) -> "Solution":
+        return MisSolution(problem=self.problem,
+                           chosen=deepcopy(self.chosen))
+
+    def lazy_copy(self) -> "Solution":
+        return MisSolution(problem=self.problem,
+                           chosen=self.chosen)
+
+    def change_problem(self, new_problem: "Problem") -> None:
+        self.problem = new_problem
+
+
+class MisProblem(Problem):
+    def __init__(self, graph: Union[Graph,nx.Graph],
+                 attribute_aggregate:str="size"):
+        self.graph = graph
+        if isinstance(graph, Graph):
+            self.nodes = self.graph.get_nodes()
+            self.edges = self.graph.get_edges()
+        else:
+            self.nodes = list(self.graph.nodes())
+            self.edges = list(self.graph.edges())
+        self.number_nodes = len(self.nodes)
+        self.attribute_aggregate = attribute_aggregate
+        self.nodes_to_index = {self.nodes[i]: i for i in range(len(self.nodes))}
+        self.index_to_nodes = {i: self.nodes[i] for i in range(len(self.nodes))}
+        if self.attribute_aggregate == "size":
+            self.attr_list = {i: 1 for i in self.index_to_nodes}
+            self.func = sum
+        else:
+            if isinstance(self.graph, Graph):
+                self.attr_list = [self.graph.get_attr_node(self.nodes[i], self.attribute_aggregate)
+                                  for i in range(self.number_nodes)]
+            else:
+                self.attr_list = [self.graph.nodes[self.nodes[i]][self.attribute_aggregate]
+                                  for i in range(self.number_nodes)]
+            self.func = lambda x: sum(attr*xi for attr, xi in zip(self.attr_list, x))
+
+    def evaluate(self, variable: Solution) -> Dict[str, float]:
+        return {"value": self.func(variable.chosen),
+                "penalty": self.compute_violation(variable)}
+
+    def satisfy(self, variable: Solution) -> bool:
+        return self.compute_violation(variable) == 0
+
+    def compute_violation(self, variable: MisSolution) -> int:
+        v = 0
+        for e in self.edges:
+            if variable.chosen[self.nodes_to_index[e[0]]] == variable.chosen[self.nodes_to_index[e[1]]] == 1:
+                v += 1
+        return v
+
+    def get_attribute_register(self) -> EncodingRegister:
+        return EncodingRegister(dict_attribute_to_type=
+        {"chosen": {
+            "name": "chosen",
+            "type": [TypeAttribute.LIST_BOOLEAN],
+            "n": len(self.nodes),
+        }
+        })
+
+    def get_solution_type(self) -> Type[Solution]:
+        return MisSolution
+
+    def get_objective_register(self) -> ObjectiveRegister:
+        return ObjectiveRegister(objective_sense=ModeOptim.MAXIMIZATION,
+                                 objective_handling=ObjectiveHandling.AGGREGATE,
+                                 dict_objective_to_doc={"value": ObjectiveDoc(type=TypeObjective.OBJECTIVE,
+                                                                              default_weight=1),
+                                                        "penalty": ObjectiveDoc(type=TypeObjective.OBJECTIVE,
+                                                                                default_weight=-100)})
