@@ -2,8 +2,7 @@ import logging
 import os
 
 import pandas as pd
-
-
+import numpy as np
 os.environ["DO_SKIP_MZN_CHECK"] = "1"
 import matplotlib.pyplot as plt
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
@@ -37,13 +36,13 @@ file_calendar = os.path.join(data_folder, "Availability Matrix.xlsx")
 logging.basicConfig(level=logging.INFO)
 
 
-def parse_files() -> RCPSPModel:
+def parse_files(file=file_calendar,
+                file_sm=file_rcpsp) -> RCPSPModel:
     import logging
-
     logging.basicConfig(level=logging.INFO)
     # Parse Excel file as dictionary
     # Create a Pandas Excel file object
-    excel_file = pd.ExcelFile(file_calendar)
+    excel_file = pd.ExcelFile(file)
     # Parse each sheet into a dictionary where the key is the sheet name and the value is a DataFrame
     data_dict = {}
     for sheet_name in excel_file.sheet_names:
@@ -53,7 +52,7 @@ def parse_files() -> RCPSPModel:
     # print(dataf.T)
     d = dataf.T
     # print(d[0][1:])
-    model = parse_file(file_path=file_rcpsp)
+    model = parse_file(file_path=file_sm)
     print(model)
     print(model.resources)
     # model.horizon = len(d[0][1:])
@@ -104,6 +103,75 @@ def parse_files() -> RCPSPModel:
     model.is_calendar = True
     model.update_functions()
     return model
+def parse_files_2024(file,
+                     file_sm) -> RCPSPModel:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    # Parse Excel file as dictionary
+    # Create a Pandas Excel file object
+    excel_file = pd.ExcelFile(file)
+    # Parse each sheet into a dictionary where the key is the sheet name and the value is a DataFrame
+    data_dict = {}
+    for sheet_name in excel_file.sheet_names:
+        data_dict[sheet_name] = excel_file.parse(sheet_name)
+    dataf = data_dict["Resource Calendars"]
+    start_window = np.array(data_dict["Start Window SC"])
+    end_window = np.array(data_dict["End Window SC"])
+    start_window_dict = {}
+    end_window_dict = {}
+    for i in range(start_window.shape[0]):
+        ac = int(start_window[i, 0])
+        lb = None
+        ub = None
+        if not np.isnan(start_window[i, 1]):
+            lb = int(start_window[i, 1])
+        if not np.isnan(start_window[i, 2]):
+            ub = int(start_window[i, 2])
+        if lb is not None or ub is not None:
+            start_window_dict[ac] = (lb, ub)
+    for i in range(end_window.shape[0]):
+        ac = int(end_window[i, 0])
+        lb = None
+        ub = None
+        if not np.isnan(end_window[i, 1]):
+            lb = int(end_window[i, 1])
+        if not np.isnan(end_window[i, 2]):
+            ub = int(end_window[i, 2])
+        if lb is not None or ub is not None:
+            end_window_dict[ac] = (lb, ub)
+    sc = SpecialConstraintsDescription(start_times_window=start_window_dict,
+                                       end_times_window=end_window_dict)
+    # print(dataf.T)
+    d = np.array(dataf.T)[1:, :]
+    # print(d[0][1:])
+    model = parse_file(file_path=file_sm)
+    print(model.tasks_list)
+    print(model.resources)
+    # model.horizon = len(d[0][1:])
+    calendars = {i: d[i, :] for i in range(len(model.resources_list))}
+    for i in range(len(model.resources_list)):
+        # print(model.resources_list[i])
+        # print(len(d[i]))
+        model.resources[model.resources_list[i]] = calendars[i]
+        if model.resources_list[i] == "R26":
+            print(model.resources["R26"][30])
+            model.resources["R26"][30] = 21
+            print(model.resources["R26"][30])
+    for t in model.mode_details:
+        if model.mode_details[t][1]["duration"] == 0:
+            for r in model.mode_details[t][1]:
+                model.mode_details[t][1][r] = 0
+        res = [r for r in model.resources_list if model.mode_details[t][1][r] > 0]
+        # print(len(res))
+        # print("task ", t, res)
+        # assert len(res) <= 1
+        # print(max(d[i][1:]))
+    model.is_calendar = True
+    model.update_functions()
+    model = from_rcpsp_model(rcpsp_model=model,
+                             constraints=sc,
+                             preemptive=False)
+    return model
 
 
 def run_solver_breaks():
@@ -127,7 +195,6 @@ def run_solver_breaks():
         plot_task_gantt,
         plt,
     )
-
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=solution)
     # plt.show()
@@ -138,7 +205,6 @@ def run_solver_breaks():
     from discrete_optimization.rcpsp.rcpsp_model_preemptive import (
         get_rcpsp_modelp_preemptive,
     )
-
     dummy_solution = model.get_dummy_solution()
     preemptive_model = get_rcpsp_modelp_preemptive(model)
 
@@ -189,8 +255,8 @@ def run_solver_breaks():
 
 def run_solver_breaks_with_constraints():
     model = parse_files()
-    do_cpopt = True
-    do_ortools = False
+    do_cpopt = False
+    do_ortools = True
     solution: RCPSPSolution = None
     if do_cpopt:
         cpo_solver = CPOptRCPSPBreakSolver(model)
@@ -214,7 +280,7 @@ def run_solver_breaks_with_constraints():
             t: (None, solution.get_end_time(t) + 1) for t in model.tasks_list
         },
     )
-    model_sc = from_rcpsp_model(rcpsp_model=model, constraints=sc)
+    model_sc = from_rcpsp_model(rcpsp_model=model, constraints=sc, preemptive=False)
     ortools_solver = OrtoolsRCPSPBreakSolver(model_sc)
     params_cp = ParametersCP.default()
     ortools_solver.init_model_durations_element_constraint(partial_solution=sc)
@@ -226,5 +292,31 @@ def run_solver_breaks_with_constraints():
     plt.show()
 
 
+def run_solver_breaks_2024():
+    folder = os.path.join(this_folder, "data_24/")
+    file_rcpsp = os.path.join(folder, "Tablada_FLS.sm")
+    file_calendar = os.path.join(folder, "Special Constraints.xlsx")
+    model = parse_files_2024(file=file_calendar,
+                             file_sm=file_rcpsp)
+    do_cpopt = False
+    do_ortools = True
+    solution: RCPSPSolution = None
+    if do_cpopt:
+        cpo_solver = CPOptRCPSPBreakSolver(model)
+        params_cp = ParametersCP.default()
+        result = cpo_solver.solve(params_cp)
+        solution = result.get_best_solution()
+    if do_ortools:
+        ortools_solver = OrtoolsRCPSPBreakSolver(model)
+        params_cp = ParametersCP.default()
+        ortools_solver.init_model_durations_element_constraint()
+        result = ortools_solver.solve(params_cp, add_solution_callback=True)
+        solution = result.get_best_solution()
+    print(model.satisfy(solution), model.evaluate(solution))
+    plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
+    plot_ressource_view(rcpsp_model=model, rcpsp_sol=solution)
+    plt.show()
+
+
 if __name__ == "__main__":
-    run_solver_breaks_with_constraints()
+    run_solver_breaks_2024()

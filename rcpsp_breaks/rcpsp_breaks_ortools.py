@@ -12,17 +12,12 @@ from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
 )
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-try:
-    from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import (
-        RCPSPModelSpecialConstraints,
-        SpecialConstraintsDescription,
-    )
-except:
-    from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import \
+
+from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import \
         SpecialConstraintsDescription
+from discrete_optimization.rcpsp.rcpsp_utils import create_fake_tasks
 from ortools.sat.python import cp_model
 from ortools.sat.python.cp_model import Domain, LinearExpr, VarArraySolutionPrinter
-
 logger = logging.getLogger(__name__)
 
 
@@ -107,8 +102,8 @@ def compute_duration_tasks_function_time(rcpsp_model: RCPSPModel, method=None):
     if method is None:
         method = compute_duration_function_time
     resource_calendar_dict = {
-        r: rcpsp_model.get_resource_availability_array(r)
-        == rcpsp_model.get_max_resource_capacity(r)  # "binarize" the calendar
+        r: rcpsp_model.get_resource_availability_array(r) > 0
+        # == rcpsp_model.get_max_resource_capacity(r)  # "binarize" the calendar
         for r in rcpsp_model.resources_list
     }
     cumulative_calendar_dict = {
@@ -384,28 +379,26 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     ends[self.problem.index_task[t]]
                     <= starts[self.problem.index_task[s]]
                 )
+        fake_tasks = create_fake_tasks(rcpsp_problem=self.problem)
         for r in self.problem.resources_list:
+            tasks_and_consumption = [(intervals[t],
+                                      int(self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0)))
+                                     for t in range(self.problem.n_jobs)
+                                     if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0]
+            fake_task_res = [
+                (
+                    model.NewFixedSizeIntervalVar(
+                        start=f["start"], size=f["duration"], name=f"res_"
+                    ),
+                    f.get(r, 0),
+                )
+                for f in fake_tasks
+                if f.get(r, 0) > 0 and f.get(r, 0) != self.problem.get_max_resource_capacity(r)
+            ]
+            print("Fake tasks ", r,  fake_task_res)
             model.AddCumulative(
-                [
-                    intervals[t]
-                    for t in range(nb_tasks)
-                    if self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                        r, 0
-                    )
-                    > 0
-                ],
-                [
-                    int(
-                        self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                            r, 0
-                        )
-                    )
-                    for t in range(nb_tasks)
-                    if self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                        r, 0
-                    )
-                    > 0
-                ],
+                [x[0] for x in tasks_and_consumption]+[x[0] for x in fake_task_res],
+                [x[1] for x in tasks_and_consumption]+[x[1] for x in fake_task_res],
                 int(self.problem.get_max_resource_capacity(r)),
             )
         model.AddMaxEquality(makespan, ends)
@@ -522,36 +515,26 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     ends[self.problem.index_task[t]]
                     <= starts[self.problem.index_task[s]]
                 )
+        fake_tasks = create_fake_tasks(rcpsp_problem=self.problem)
         for r in self.problem.resources_list:
+            tasks_and_consumption = [(intervals[t],
+                                      int(self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0)))
+                                     for t in range(self.problem.n_jobs)
+                                     if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0]
+            fake_task_res = [
+                (
+                    model.NewFixedSizeIntervalVar(
+                        start=f["start"], size=f["duration"], name=f"res_"
+                    ),
+                    f.get(r, 0),
+                )
+                for f in fake_tasks
+                if f.get(r, 0) > 0 and f.get(r, 0) != self.problem.get_max_resource_capacity(r)
+            ]
+            print("Fake tasks ", r, fake_task_res)
             model.AddCumulative(
-                [
-                    intervals[t]
-                    for t in range(nb_tasks)
-                    if self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                        r, 0
-                    )
-                    > 0
-                    and self.problem.mode_details[self.problem.tasks_list[t]][1][
-                        "duration"
-                    ]
-                    > 0
-                ],
-                [
-                    int(
-                        self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                            r, 0
-                        )
-                    )
-                    for t in range(nb_tasks)
-                    if self.problem.mode_details[self.problem.tasks_list[t]][1].get(
-                        r, 0
-                    )
-                    > 0
-                    and self.problem.mode_details[self.problem.tasks_list[t]][1][
-                        "duration"
-                    ]
-                    > 0
-                ],
+                [x[0] for x in tasks_and_consumption] + [x[0] for x in fake_task_res],
+                [x[1] for x in tasks_and_consumption] + [x[1] for x in fake_task_res],
                 int(self.problem.get_max_resource_capacity(r)),
             )
         model.AddMaxEquality(makespan, ends)
