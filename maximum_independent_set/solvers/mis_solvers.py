@@ -7,6 +7,7 @@ from maximum_independent_set.mis_problem import MisProblem
 
 class MisSolver(SolverDO):
     problem: MisProblem
+
     def __init__(self, problem: MisProblem,
                  params_objective_function: Optional[ParamsObjectiveFunction] = None):
         self.problem = problem

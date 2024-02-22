@@ -17,6 +17,8 @@ tmp_dir = os.path.join(this_dir, "tmp/")
 import time
 import logging
 logger = logging.getLogger(__file__)
+
+
 class MisKamisSolver(MisSolver):
     def init_model(self):
         t = time.time_ns()
@@ -36,6 +38,7 @@ class MisKamisSolver(MisSolver):
         print(nb_edge, len(self.problem.edges))
         with open(file, "w") as f:
             f.writelines(lines_to_write)
+        print("path file : ", file)
         self.current_tag = t
         self.current_file = file
 
@@ -50,13 +53,15 @@ class MisKamisSolver(MisSolver):
         command = (f"{methods[method]} {self.current_file} "
                    f"--output {output} --time_limit={time_limit} --console_log")
         # Launch the command and wait for it to finish
-        result = subprocess.run(command, shell=True, check=True)
+        print("Launching command")
+        result = subprocess.run(command, shell=True, check=True, timeout=time_limit+50)
         chosen = []
         with open(output, "r") as file:
             for line in file:
                 # Convert each line to an integer and append to the list
                 number = int(line.strip())  # Remove leading/trailing whitespaces and convert to int
                 chosen.append(number)
+        os.remove(self.current_file)
         sol = MisSolution(problem=self.problem, chosen=chosen)
         fit = self.aggreg_sol(sol)
         return ResultStorage([(sol, fit)],

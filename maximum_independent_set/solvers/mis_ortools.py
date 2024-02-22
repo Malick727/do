@@ -1,5 +1,5 @@
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from typing import Any, List
+from typing import Any, List, Optional
 from maximum_independent_set.solvers.mis_solvers import MisSolver
 from maximum_independent_set.mis_problem import MisProblem, MisSolution
 from discrete_optimization.generic_tools.cp_tools import ParametersCP, StatusSolver
@@ -8,6 +8,7 @@ from ortools.sat.python import cp_model
 import logging
 import tqdm
 logger = logging.getLogger(__file__)
+
 
 class MisOrtoolsSolver(MisSolver):
     def init_model(self, **kwargs):
@@ -29,7 +30,9 @@ class MisOrtoolsSolver(MisSolver):
         self.model = model
         self.variables = {"in_set": in_set, "objective": objective}
 
-    def solve(self, parameters_cp: ParametersCP, **kwargs: Any) -> ResultStorage:
+    def solve(self, parameters_cp: Optional[ParametersCP] = None, **kwargs: Any) -> ResultStorage:
+        if parameters_cp is None:
+            parameters_cp = ParametersCP.default()
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = parameters_cp.time_limit
         solver.parameters.num_search_workers = parameters_cp.nb_process
@@ -57,5 +60,7 @@ class MisOrtoolsSolver(MisSolver):
         chosen: List[int] = [int(solver.Value(var)) for var in self.variables["in_set"]]
         sol = MisSolution(problem=self.problem, chosen=chosen)
         fit = self.aggreg_sol(sol)
+        self.infos = {"status": self.status_solver.value,
+                      "bound": solver.BestObjectiveBound()}
         return ResultStorage([(sol, fit)], mode_optim=self.params_objective_function.sense_function)
 

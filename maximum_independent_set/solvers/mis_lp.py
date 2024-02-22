@@ -11,7 +11,7 @@ import docplex.mp.model as cplex
 class MISLpSolver(CplexMilpSolver, MisSolver):
 
     def init_model(self, **kwargs: Any) -> None:
-        self.model = cplex.Model("MRCPSP")
+        self.model = cplex.Model("mis")
         x = self.model.var_list(keys=range(self.problem.number_nodes),
                                 vartype=self.model.binary_vartype)
         self.model.add_constraints(

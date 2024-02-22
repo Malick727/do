@@ -8,6 +8,7 @@ from discrete_optimization.generic_tools.do_problem import (Problem, ObjectiveDo
                                                             TypeAttribute, Solution, EncodingRegister)
 from discrete_optimization.generic_tools.graph_api import Graph
 
+
 class MisSolution(Solution):
     def __init__(self, problem: "MisProblem",
                  chosen: Union[List, np.ndarray]):
@@ -28,7 +29,7 @@ class MisSolution(Solution):
 
 class MisProblem(Problem):
     def __init__(self, graph: Union[Graph,nx.Graph],
-                 attribute_aggregate:str="size"):
+                 attribute_aggregate: str = "size"):
         self.graph = graph
         if isinstance(graph, Graph):
             self.nodes = self.graph.get_nodes()
@@ -41,7 +42,7 @@ class MisProblem(Problem):
         self.nodes_to_index = {self.nodes[i]: i for i in range(len(self.nodes))}
         self.index_to_nodes = {i: self.nodes[i] for i in range(len(self.nodes))}
         if self.attribute_aggregate == "size":
-            self.attr_list = {i: 1 for i in self.index_to_nodes}
+            self.attr_list = [1 for i in self.index_to_nodes]
             self.func = sum
         else:
             if isinstance(self.graph, Graph):

@@ -14,7 +14,6 @@ class BaseSolver(SolverDO):
         **kwargs
     ):
         self.problem = problem
-        self.problem = problem
         (
             self.aggreg_sol,
             self.aggreg_dict,
