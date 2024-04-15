@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ModelisationLSolver(Enum):
-    INTEGER = 0
+    #INTEGER = 0
     INTERVAL = 1
 
 
@@ -44,58 +44,58 @@ class LSolverMultiModeRCPSP(SolverDO):
         if modelisation_type == ModelisationLSolver.INTERVAL:
             self.init_model_interval(**kwargs)
             self.modelisation = modelisation_type
-        if modelisation_type == ModelisationLSolver.INTEGER:
-            self.init_model_integer(**kwargs)
-            self.modelisation = modelisation_type
+        #if modelisation_type == ModelisationLSolver.INTEGER:
+        #    self.init_model_integer(**kwargs)
+        #    self.modelisation = modelisation_type
 
-    def init_model_integer(self, **kwargs):
-        ls = localsolver.LocalSolver()
-        #
-        # Declare the optimization model
-        #
-        model = ls.model
-        # Trivial upper bound for the start times of the tasks
-        horizon = self.rcpsp_model.horizon
-        # Integer decisions: start time of each task
-        tasks = self.rcpsp_model.tasks_list
-        start = {t: model.int(0, horizon) for t in tasks}
-        end = {t: start[t] + self.rcpsp_model.mode_details[t][1]["duration"]
-               for t in tasks}
-        for t in tasks:
-            for s_t in self.rcpsp_model.successors[t]:
-                model.constraint(end[t] <= start[s_t])
-        # Makespan: end of the last task
-        makespan = end[self.rcpsp_model.sink_task]
-        nb_resources = len(self.rcpsp_model.resources_list)
-        # Cumulative resource constraints
-        # capacity = [self.rcpsp_model.get_max_resource_capacity(r) for r in self.rcpsp_model.resources_list]
-        weight = [[self.rcpsp_model.mode_details[t][1][r] for r in self.rcpsp_model.resources_list] for t in tasks]
-        for i_r in range(nb_resources):
-            capacity_respected = model.lambda_function(
-                lambda d: model.leq(
-                    model.sum(
-                        weight[t][i_r] * model.and_(model.leq(start[tasks[t]], d), model.gt(end[tasks[t]], d))
-                        for t in range(self.rcpsp_model.n_jobs)),
-                    self.rcpsp_model.get_resource_available(self.rcpsp_model.resources_list[i_r],
-                                                            d)))
-            model.constraint(model.and_(model.range(makespan), capacity_respected))
-
-        # Minimize the makespan
-        model.minimize(makespan)
-        model.close()
-        self.ls = ls
-        self.model = model
-        self.vars["start"] = start
-        self.vars["end"] = end
-
-        warm_start = kwargs.get("warm_start", True)
-        warm_start_solution: Optional[RCPSPSolution] = kwargs.get("warm_start_solution", None)
-        if warm_start:
-            if warm_start_solution is None:
-                warm_start_solution = self.rcpsp_model.get_dummy_solution()
-            for st in self.vars["start"]:
-                self.vars["start"][st].value = warm_start_solution.get_start_time(st)
-                # self.vars["end"][st].value = warm_start_solution.get_end_time(st)
+    # def init_model_integer(self, **kwargs):
+    #     ls = localsolver.LocalSolver()
+    #     #
+    #     # Declare the optimization model
+    #     #
+    #     model = ls.model
+    #     # Trivial upper bound for the start times of the tasks
+    #     horizon = self.rcpsp_model.horizon
+    #     # Integer decisions: start time of each task
+    #     tasks = self.rcpsp_model.tasks_list
+    #     start = {t: model.int(0, horizon) for t in tasks}
+    #     end = {t: start[t] + self.rcpsp_model.mode_details[t][1]["duration"]
+    #            for t in tasks}
+    #     for t in tasks:
+    #         for s_t in self.rcpsp_model.successors[t]:
+    #             model.constraint(end[t] <= start[s_t])
+    #     # Makespan: end of the last task
+    #     makespan = end[self.rcpsp_model.sink_task]
+    #     nb_resources = len(self.rcpsp_model.resources_list)
+    #     # Cumulative resource constraints
+    #     # capacity = [self.rcpsp_model.get_max_resource_capacity(r) for r in self.rcpsp_model.resources_list]
+    #     weight = [[self.rcpsp_model.mode_details[t][1][r] for r in self.rcpsp_model.resources_list] for t in tasks]
+    #     for i_r in range(nb_resources):
+    #         capacity_respected = model.lambda_function(
+    #             lambda d: model.leq(
+    #                 model.sum(
+    #                     weight[t][i_r] * model.and_(model.leq(start[tasks[t]], d), model.gt(end[tasks[t]], d))
+    #                     for t in range(self.rcpsp_model.n_jobs)),
+    #                 self.rcpsp_model.get_resource_available(self.rcpsp_model.resources_list[i_r],
+    #                                                         d)))
+    #         model.constraint(model.and_(model.range(makespan), capacity_respected))
+    #
+    #     # Minimize the makespan
+    #     model.minimize(makespan)
+    #     model.close()
+    #     self.ls = ls
+    #     self.model = model
+    #     self.vars["start"] = start
+    #     self.vars["end"] = end
+    #
+    #     warm_start = kwargs.get("warm_start", True)
+    #     warm_start_solution: Optional[RCPSPSolution] = kwargs.get("warm_start_solution", None)
+    #     if warm_start:
+    #         if warm_start_solution is None:
+    #             warm_start_solution = self.rcpsp_model.get_dummy_solution()
+    #         for st in self.vars["start"]:
+    #             self.vars["start"][st].value = warm_start_solution.get_start_time(st)
+    #             # self.vars["end"][st].value = warm_start_solution.get_end_time(st)
 
     def init_model_interval(self, **kwargs):
         ls = localsolver.LocalSolver()
@@ -194,8 +194,8 @@ class LSolverMultiModeRCPSP(SolverDO):
     def retrieve_solution(self) -> ResultStorage:
         if self.modelisation == ModelisationLSolver.INTERVAL:
             return self.retrieve_solution_interval()
-        if self.modelisation == ModelisationLSolver.INTEGER:
-            return self.retrieve_solution_integer()
+        # if self.modelisation == ModelisationLSolver.INTEGER:
+        #     return self.retrieve_solution_integer()
 
     def solve(self, **kwargs: Any) -> ResultStorage:
         if self.ls is None:
@@ -208,18 +208,18 @@ class LSolverMultiModeRCPSP(SolverDO):
         logger.info(f"Stats of solver : {self.ls.statistics}")
         return self.retrieve_solution()
 
-    def retrieve_solution_integer(self)->ResultStorage:
-        schedule = {}
-        for t in self.rcpsp_model.tasks_list:
-            start = int(self.vars["start"][t].value)
-            end = int(self.vars["end"][t].value)
-            schedule[t] = {"start_time": start, "end_time": end}
-        sol = RCPSPSolution(problem=self.rcpsp_model,
-                            rcpsp_schedule=schedule)
-        fit = self.aggreg_sol(sol)
-        list_solution_fit = [(sol, fit)]
-        return ResultStorage(list_solution_fits=list_solution_fit,
-                             mode_optim=self.params_objective_function.sense_function)
+    # def retrieve_solution_integer(self) -> ResultStorage:
+    #     schedule = {}
+    #     for t in self.rcpsp_model.tasks_list:
+    #         start = int(self.vars["start"][t].value)
+    #         end = int(self.vars["end"][t].value)
+    #         schedule[t] = {"start_time": start, "end_time": end}
+    #     sol = RCPSPSolution(problem=self.rcpsp_model,
+    #                         rcpsp_schedule=schedule)
+    #     fit = self.aggreg_sol(sol)
+    #     list_solution_fit = [(sol, fit)]
+    #     return ResultStorage(list_solution_fits=list_solution_fit,
+    #                          mode_optim=self.params_objective_function.sense_function)
 
     def retrieve_solution_interval(self):
         schedule = {}

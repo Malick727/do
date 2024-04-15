@@ -5,10 +5,15 @@ from maximum_independent_set.mis_problem import MisProblem, MisSolution
 import os
 this_dir = os.path.abspath(os.path.dirname(__file__))
 # TODO : put this in config file
-redumis = "/Users/poveda_g/Documents/git_repos/pub_repo/KaMIS/deploy/redumis"
-online_mis = "/Users/poveda_g/Documents/git_repos/pub_repo/KaMIS/deploy/online_mis"
-weighted = "/Users/poveda_g/Documents/git_repos/pub_repo/KaMIS/deploy/weighted_branch_reduce"
-weighted_local_search = "/Users/poveda_g/Documents/git_repos/pub_repo/KaMIS/deploy/weighted_local_search"
+import configparser
+config = configparser.ConfigParser()
+this_folder = os.path.abspath(os.path.dirname(__file__))
+config.read(os.path.join(this_folder, "config_kamis.cfg"))
+folder_ = config["path_folder_kamis_binary"]["folder"]
+redumis = os.path.join(folder_, "redumis")
+online_mis =  os.path.join(folder_, "online_mis")
+weighted =  os.path.join(folder_, "weighted_branch_reduce")
+weighted_local_search =  os.path.join(folder_, "weighted_local_search")
 methods = {"redumis": redumis,
            "weighted": weighted,
            "weighted_local_search": weighted_local_search,
@@ -26,13 +31,14 @@ class MisKamisSolver(MisSolver):
         if not os.path.exists(tmp_dir):
             os.makedirs(tmp_dir)
         lines_to_write = []
-        lines_to_write += [f"{self.problem.number_nodes} {len(self.problem.edges)} 10\n"]
+        lines_to_write += [f"{self.problem.number_nodes} {len(self.problem.graph_nx.edges())} 10\n"]
         nb_edge = 0
         for i in range(self.problem.number_nodes):
             node = self.problem.index_to_nodes[i]
-            neighs = list(self.problem.graph.neighbors(node))
+            # neighs = list(self.problem.graph.neighbors(node))
+            neighs = sorted(self.problem.graph_nx.neighbors(node), key=lambda x: self.problem.nodes_to_index[x])
             s = f"{int(self.problem.attr_list[i])} "+" ".join([f"{self.problem.nodes_to_index[x]+1}"
-                                                          for x in neighs])
+                                                               for x in neighs])
             nb_edge += len(neighs)
             lines_to_write += [s+"\n"]
         print(nb_edge, len(self.problem.edges))

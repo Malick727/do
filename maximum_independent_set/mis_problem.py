@@ -34,9 +34,11 @@ class MisProblem(Problem):
         if isinstance(graph, Graph):
             self.nodes = self.graph.get_nodes()
             self.edges = self.graph.get_edges()
+            self.graph_nx = self.graph.graph_nx
         else:
             self.nodes = list(self.graph.nodes())
             self.edges = list(self.graph.edges())
+            self.graph_nx = self.graph
         self.number_nodes = len(self.nodes)
         self.attribute_aggregate = attribute_aggregate
         self.nodes_to_index = {self.nodes[i]: i for i in range(len(self.nodes))}

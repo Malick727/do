@@ -6,6 +6,7 @@ from maximum_independent_set.mis_problem import MisProblem
 from maximum_independent_set.solvers.mis_asp import MisASPSolver
 from maximum_independent_set.solvers.mis_networkx import MisNXSolver
 from maximum_independent_set.solvers.mis_ortools import MisOrtoolsSolver, ParametersCP
+from maximum_independent_set.solvers.mis_kamis import MisKamisSolver
 import logging
 logging.basicConfig(level=logging.INFO)
 
@@ -53,5 +54,21 @@ def run_ortools():
     print(problem.satisfy(sol))
 
 
+def run_kamis():
+    graph = nx.Graph()
+    graph.add_nodes_from([i for i in range(5)])
+    graph.add_edge(0, 1)
+    graph.add_edge(2, 3)
+    g = from_networkx(graph)
+    problem = MisProblem(g, attribute_aggregate="size")
+    solver = MisKamisSolver(problem)
+    solver.init_model()
+    res = solver.solve(time_limit=20, method="redumis")
+    sol, fit = res.get_best_solution_fit()
+    print(problem.evaluate(sol))
+    print(problem.satisfy(sol))
+
+
+
 if __name__ == "__main__":
-    run_ortools()
+    run_kamis()
