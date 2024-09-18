@@ -5,6 +5,8 @@ import networkx as nx
 import numpy as np
 
 from discrete_optimization.generic_tools.callbacks.callback import Callback
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import IntegerHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparametrizable import Hyperparametrizable
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 
 from satellite_path_planning.solver.spp_solver import SppSolver
@@ -239,14 +241,19 @@ def long_path_DAG_backward_forward_with_memory_way(graph: nx.DiGraph, nb_way_mem
     return best_value, best_chemin
 
 
-class SppBackwardForwardSolver(SppSolver):
+class SppBackwardForwardSolver(SppSolver, Hyperparametrizable):
+    hyperparameters = [
+        IntegerHyperparameter(name="nb_way_memory", low=1, high=10, default=1),
+    ]
 
     def __init__(self, problem: SppProblem, **kwargs: Any):
         super().__init__(problem, **kwargs)
 
     def solve(self, callbacks: Optional[List[Callback]] = None, **kwargs: Any) -> ResultStorage:
 
-        if kwargs["nb_way_memory"]:
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
+
+        if kwargs["nb_way_memory"] > 1:
             best_value, best_chemin = long_path_DAG_backward_forward_with_memory_way(self.problem.graph, nb_way_memory=kwargs["nb_way_memory"])
         else:
             best_value, best_chemin = long_path_DAG_backward_forward(self.problem.graph)
