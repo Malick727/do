@@ -13,15 +13,18 @@ from discrete_optimization.generic_tools.do_problem import (
 
 class SppSolution(Solution):
 
-    def __init__(self, problem: "SppProblem", solution_path: list[int]):
+    def __init__(self, problem: "SppProblem", solution_path: list[int], solution_value: float = None):
         self.problem = problem
         self.solution_path = solution_path
+        self.solution_value = solution_value
+        if self.solution_value is None:
+            problem.func(solution_path=self.solution_path)
 
     def __str__(self) -> str:
         pass
 
     def copy(self) -> "Solution":
-        return SppSolution(problem=self.problem, solution_path=deepcopy(self.solution_path))
+        return SppSolution(problem=self.problem, solution_path=deepcopy(self.solution_path), solution_value=self.solution_value)
 
     def change_problem(self, new_problem: "Problem") -> None:
         self.problem = new_problem

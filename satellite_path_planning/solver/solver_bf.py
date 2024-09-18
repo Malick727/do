@@ -258,7 +258,60 @@ class SppBackwardForwardSolver(SppSolver, Hyperparametrizable):
         else:
             best_value, best_chemin = long_path_DAG_backward_forward(self.problem.graph)
 
-        sol = SppSolution(problem=self.problem, solution_path=best_chemin)
+        sol = SppSolution(problem=self.problem, solution_path=best_chemin, solution_value=best_value)
+        fit = self.aggreg_from_sol(sol)
+        return self.create_result_storage(
+            [(sol, fit)],
+        )
+
+
+class SppForwardSolver(SppSolver, Hyperparametrizable):
+    hyperparameters = [
+        IntegerHyperparameter(name="nb_way_memory", low=1, high=10, default=1),
+    ]
+
+    def __init__(self, problem: SppProblem, **kwargs: Any):
+        super().__init__(problem, **kwargs)
+
+    def solve(self, callbacks: Optional[List[Callback]] = None, **kwargs: Any) -> ResultStorage:
+
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
+
+        if kwargs["nb_way_memory"] > 1:
+            value_chemin, all_chemin, all_acquisition_set = long_path_DAG_with_memory_way(
+                self.problem.graph, kwargs["nb_way_memory"], self.problem.graph.nodes())
+        else:
+            value_chemin, all_chemin, all_acquisition_set = long_path_DAG(
+                self.problem.graph, self.problem.graph.nodes())
+
+        sol = SppSolution(problem=self.problem, solution_path=all_chemin[len(self.problem.graph.nodes())], solution_value=value_chemin[len(self.problem.graph.nodes())])
+        fit = self.aggreg_from_sol(sol)
+        return self.create_result_storage(
+            [(sol, fit)],
+        )
+
+
+class SppBackwardSolver(SppSolver, Hyperparametrizable):
+    hyperparameters = [
+        IntegerHyperparameter(name="nb_way_memory", low=1, high=10, default=1),
+    ]
+
+    def __init__(self, problem: SppProblem, **kwargs: Any):
+        super().__init__(problem, **kwargs)
+
+    def solve(self, callbacks: Optional[List[Callback]] = None, **kwargs: Any) -> ResultStorage:
+
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
+
+        graph_reverse = self.problem.graph.reverse(copy=False)
+        if kwargs["nb_way_memory"] > 1:
+            value_chemin_reverse, all_chemin_reverse, all_acquisition_set_reverse = long_path_DAG_with_memory_way(
+                graph_reverse, kwargs["nb_way_memory"], reversed(list(self.problem.graph.nodes())))
+        else:
+            value_chemin_reverse, all_chemin_reverse, all_acquisition_set_reverse = long_path_DAG(
+                graph_reverse, reversed(list(self.problem.graph.nodes())))
+
+        sol = SppSolution(problem=self.problem, solution_path=all_chemin_reverse[1], solution_value=value_chemin_reverse[1])
         fit = self.aggreg_from_sol(sol)
         return self.create_result_storage(
             [(sol, fit)],
