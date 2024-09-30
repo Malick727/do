@@ -28,7 +28,8 @@ except:
     from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import from_rcpsp_model
 
 from rcpsp_breaks.rcpsp_breaks_cpopt import CPOptRCPSPBreakSolver, ParametersCP
-from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver
+from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver, InitMethod
+
 this_folder = os.path.dirname(os.path.abspath(__file__))
 data_folder = os.path.join(this_folder, "data/")
 file_rcpsp = os.path.join(data_folder, "Tablada_FLS.SM")
@@ -103,6 +104,8 @@ def parse_files(file=file_calendar,
     model.is_calendar = True
     model.update_functions()
     return model
+
+
 def parse_files_2024(file,
                      file_sm) -> RCPSPModel:
     import logging
@@ -186,9 +189,9 @@ def run_solver_breaks():
         solution = result.get_best_solution()
     if do_ortools:
         ortools_solver = OrtoolsRCPSPBreakSolver(model)
-        params_cp = ParametersCP.default()
+        params_cp = ParametersCP.default_cpsat()
         ortools_solver.init_model_durations_indicator_method()
-        result = ortools_solver.solve(params_cp, add_solution_callback=True)
+        result = ortools_solver.solve(parameters_cp=params_cp, add_solution_callback=True)
         solution = result.get_best_solution()
     from discrete_optimization.rcpsp.rcpsp_utils import (
         plot_ressource_view,
@@ -253,6 +256,28 @@ def run_solver_breaks():
     # print(preemptive_model.evaluate(res.get_best_solution()))
 
 
+def run_solver_breaks_hexaly():
+    from rcpsp_breaks.rcpsp_breaks_hexaly import HexalyRCPSPBreakSolver
+    folder = os.path.join(this_folder, "data_24/")
+    file_rcpsp = os.path.join(folder, "Tablada_FLS.sm")
+    file_calendar = os.path.join(folder, "Special Constraints.xlsx")
+    model = parse_files_2024(file=file_calendar,
+                             file_sm=file_rcpsp)
+    model.horizon = 1100
+    # model.horizon = 10000
+    solver = HexalyRCPSPBreakSolver(model)
+    result = solver.solve(timeout_seconds=200)
+    solution = result.get_best_solution()
+    from discrete_optimization.rcpsp.rcpsp_utils import (
+        plot_ressource_view,
+        plot_task_gantt,
+        plt,
+    )
+    plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
+    plot_ressource_view(rcpsp_model=model, rcpsp_sol=solution)
+    plt.show()
+
+
 def run_solver_breaks_with_constraints():
     model = parse_files()
     do_cpopt = False
@@ -265,9 +290,9 @@ def run_solver_breaks_with_constraints():
         solution = result.get_best_solution()
     if do_ortools:
         ortools_solver = OrtoolsRCPSPBreakSolver(model)
-        params_cp = ParametersCP.default()
+        params_cp = ParametersCP.default_cpsat()
         ortools_solver.init_model_durations_indicator_method()
-        result = ortools_solver.solve(params_cp, add_solution_callback=True)
+        result = ortools_solver.solve(parameters_cp=params_cp, add_solution_callback=True)
         solution = result.get_best_solution()
     # Release and deadline constraints
     # Here : instead of putting release/deadlines date values found by previous optimisation, you can put
@@ -282,9 +307,9 @@ def run_solver_breaks_with_constraints():
     )
     model_sc = from_rcpsp_model(rcpsp_model=model, constraints=sc, preemptive=False)
     ortools_solver = OrtoolsRCPSPBreakSolver(model_sc)
-    params_cp = ParametersCP.default()
+    params_cp = ParametersCP.default_cpsat()
     ortools_solver.init_model_durations_element_constraint(partial_solution=sc)
-    result = ortools_solver.solve(params_cp, add_solution_callback=True)
+    result = ortools_solver.solve(parameters_cp=params_cp, add_solution_callback=True)
     solution = result.get_best_solution()
     print(model_sc.evaluate(solution))
     plot_task_gantt(rcpsp_model=model_sc, rcpsp_sol=solution)
@@ -308,9 +333,10 @@ def run_solver_breaks_2024():
         solution = result.get_best_solution()
     if do_ortools:
         ortools_solver = OrtoolsRCPSPBreakSolver(model)
-        params_cp = ParametersCP.default()
-        ortools_solver.init_model_durations_element_constraint()
-        result = ortools_solver.solve(params_cp, add_solution_callback=True)
+        params_cp = ParametersCP.default_cpsat()
+        ortools_solver.init_model(method_encoding=InitMethod.INDICATOR_CNSTR)
+        params_cp.nb_process = 12
+        result = ortools_solver.solve(parameters_cp=params_cp)
         solution = result.get_best_solution()
     print(model.satisfy(solution), model.evaluate(solution))
     plot_task_gantt(rcpsp_model=model, rcpsp_sol=solution)
@@ -319,4 +345,5 @@ def run_solver_breaks_2024():
 
 
 if __name__ == "__main__":
+    # run_solver_breaks_hexaly()
     run_solver_breaks_2024()

@@ -1,27 +1,23 @@
-from typing import Optional, Dict, Hashable
+from typing import Optional, Dict, Hashable, Any
 import localsolver
-
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.tsp.common_tools_tsp import build_matrice_distance
 from discrete_optimization.tsp.tsp_model import TSPModel, TSPModelDistanceMatrix, SolutionTSP
+from discrete_optimization.tsp.solver.tsp_solver import SolverTSP
 from discrete_optimization.generic_tools.do_solver import SolverDO
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, \
     build_aggreg_function_and_params_objective
+from hexaly_solvers.hexaly_solver import HexalySolver
 import logging
 logger = logging.getLogger(__name__)
 
 
-class TspHexalySolver(SolverDO):
-    def __init__(self, problem: TSPModelDistanceMatrix,
-                 params_objective_function: Optional[ParamsObjectiveFunction] = None):
-        self.problem = problem
-        (
-            self.aggreg_sol,
-            self.aggreg_from_dict_values,
-            self.params_objective_function,
-        ) = build_aggreg_function_and_params_objective(
-            self.problem, params_objective_function=params_objective_function
-        )
+class TspHexalySolver(HexalySolver, SolverDO):
+    problem: TSPModel
+
+    def __init__(self, problem: TSPModel,
+                 params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs: Any):
+        super().__init__(problem, params_objective_function, **kwargs)
         self.ls: Optional[localsolver.LocalSolver] = None
         self.model: Optional[localsolver.LSModel] = None
         self.vars: Optional[Dict[str, localsolver.LSExpression]] = {}
@@ -39,14 +35,11 @@ class TspHexalySolver(SolverDO):
         routing = model.list(len(self.problem.list_points))
         model.constraint(model.count(routing) == len(self.problem.list_points))
         objective_lambda = model.lambda_function(lambda i: model.at(matrix, routing[i], routing[i+1]))
-        model.constraint(routing[0]==self.problem.start_index)
-        print(self.problem.start_index, self.problem.end_index)
-        print("Nb nodes ", nb_nodes)
+        model.constraint(routing[0] == self.problem.start_index)
         if self.problem.start_index == self.problem.end_index:
             objective = (model.sum(model.range(nb_nodes-1), objective_lambda) +
                          model.at(matrix, routing[nb_nodes-1], routing[0]))
         else:
-            model.constraint(routing[0] == self.problem.start_index)
             objective = model.sum(model.range(nb_nodes-1),
                                   objective_lambda)
             model.constraint(routing[nb_nodes-1] == self.problem.end_index)
@@ -56,24 +49,14 @@ class TspHexalySolver(SolverDO):
         self.model = model
         model.close()
 
-    def solve(self, **kwargs):
-        if self.ls is None:
-            self.init_model(**kwargs)
-        time_limit = kwargs.get("timeout_seconds", 100)
-        self.ls.param.time_limit = time_limit
-        logger.info("Solve started")
-        self.ls.solve()
-        logger.info("Solve finished")
-        logger.info(f"Stats of solver : {self.ls.statistics}")
-        return self.retrieve_solution()
-
-    def retrieve_solution(self) -> ResultStorage:
+    def retrieve_solution(self) -> SolutionTSP:
         value = self.vars["routing"].value
         sol = SolutionTSP(problem=self.problem,
+                          start_index=self.problem.start_index,
+                          end_index=self.problem.end_index,
                           permutation=[v for v in value][1:])
-        eval = self.aggreg_sol(sol)
-        logger.info(f"eval = {eval}")
+        evaluation = self.aggreg_from_sol(sol)
+        logger.info(f"eval = {evaluation}")
         logger.info(f"sat = {self.problem.satisfy(sol)}")
-        return ResultStorage([(sol, eval)],
-                             mode_optim=self.params_objective_function.sense_function)
+        return sol
 

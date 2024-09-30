@@ -7,8 +7,8 @@ from maximum_independent_set.solvers.mis_solvers import MisSolver
 from maximum_independent_set.mis_problem import MisProblem, MisSolution
 import docplex.mp.model as cplex
 
-
 class MISLpSolver(CplexMilpSolver, MisSolver):
+    problem: MisProblem
 
     def init_model(self, **kwargs: Any) -> None:
         self.model = cplex.Model("mis")

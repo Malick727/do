@@ -235,8 +235,7 @@ class CPOptRCPSPBreakSolver(CPSolver):
             self.init_model(**args)
         result: CpoSolveResult = self.model.solve(
             TimeLimit=parameters_cp.time_limit,
-            execfile="/Applications/CPLEX_Studio201/cpoptimizer/"
-            "bin/x86-64_osx/cpoptimizer",
+            execfile="/Applications/CPLEX_Studio2211/cpoptimizer/bin/arm64_osx/cpoptimizer",
         )
         return self.retrieve_solutions(result, parameters_cp)
 

@@ -33,6 +33,7 @@ class MisOrtoolsSolver(MisSolver):
     def solve(self, parameters_cp: Optional[ParametersCP] = None, **kwargs: Any) -> ResultStorage:
         if parameters_cp is None:
             parameters_cp = ParametersCP.default()
+            ParametersCP.default_cpsat()
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = parameters_cp.time_limit
         solver.parameters.num_search_workers = parameters_cp.nb_process
@@ -56,7 +57,7 @@ class MisOrtoolsSolver(MisSolver):
             f"best obj bound = {solver.BestObjectiveBound()}"
         )
         print(status, f"Solver finished, status={solver.StatusName(status)}, objective = {solver.ObjectiveValue()},"
-            f"best obj bound = {solver.BestObjectiveBound()}")
+              f"best obj bound = {solver.BestObjectiveBound()}")
         chosen: List[int] = [int(solver.Value(var)) for var in self.variables["in_set"]]
         sol = MisSolution(problem=self.problem, chosen=chosen)
         fit = self.aggreg_sol(sol)

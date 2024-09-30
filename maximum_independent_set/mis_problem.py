@@ -28,7 +28,7 @@ class MisSolution(Solution):
 
 
 class MisProblem(Problem):
-    def __init__(self, graph: Union[Graph,nx.Graph],
+    def __init__(self, graph: Union[Graph, nx.Graph],
                  attribute_aggregate: str = "size"):
         self.graph = graph
         if isinstance(graph, Graph):

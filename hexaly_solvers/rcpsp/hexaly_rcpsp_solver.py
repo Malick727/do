@@ -1,11 +1,10 @@
 # Monomode rcpsp solver
 
 import logging
-from typing import Any, Dict, List, Optional, Hashable
+from typing import Any, Dict, Optional, Hashable
 import localsolver
 from discrete_optimization.generic_tools.do_problem import (
     ParamsObjectiveFunction,
-    build_aggreg_function_and_params_objective,
 )
 from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
@@ -13,7 +12,8 @@ from discrete_optimization.generic_tools.result_storage.result_storage import (
 from discrete_optimization.rcpsp.rcpsp_model import (
     RCPSPModel, RCPSPSolution
 )
-from discrete_optimization.generic_tools.do_solver import SolverDO
+from discrete_optimization.rcpsp.solver.rcpsp_solver import SolverRCPSP
+from hexaly_solvers.hexaly_solver import HexalySolver
 from enum import Enum
 logger = logging.getLogger(__name__)
 
@@ -23,24 +23,18 @@ class ModelisationLSolver(Enum):
     INTERVAL = 1
 
 
-class LSolverMonomodeRCPSP(SolverDO):
-    def __init__(self,  rcpsp_model: RCPSPModel,
-                 params_objective_function: Optional[ParamsObjectiveFunction] = None):
-        self.rcpsp_model = rcpsp_model
-        assert not rcpsp_model.is_rcpsp_multimode()
-        (
-            self.aggreg_sol,
-            self.aggreg_from_dict_values,
-            self.params_objective_function,
-        ) = build_aggreg_function_and_params_objective(
-            self.rcpsp_model, params_objective_function=params_objective_function
-        )
+class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
+    def __init__(self, problem: RCPSPModel,
+                 params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs: Any):
+        super().__init__(problem, params_objective_function, **kwargs)
+        self.rcpsp_model = problem
+        assert not problem.is_rcpsp_multimode()
         self.ls: Optional[localsolver.LocalSolver] = None
         self.model: Optional[localsolver.LSModel] = None
         self.vars: Optional[Dict[str, Dict[Hashable, localsolver.LSExpression]]] = {}
         self.modelisation: Optional[ModelisationLSolver] = None
 
-    def init_model(self, modelisation_type: ModelisationLSolver=ModelisationLSolver.INTERVAL,
+    def init_model(self, modelisation_type: ModelisationLSolver = ModelisationLSolver.INTERVAL,
                    **kwargs):
         if modelisation_type == ModelisationLSolver.INTERVAL:
             self.init_model_interval(**kwargs)
@@ -116,7 +110,7 @@ class LSolverMonomodeRCPSP(SolverDO):
             if t not in self.rcpsp_model.successors:
                 continue
             for s_t in self.rcpsp_model.successors[t]:
-                model.constraint(interval_tasks[t]<interval_tasks[s_t])
+                model.constraint(interval_tasks[t] < interval_tasks[s_t])
         # Makespan: end of the last task
         makespan = model.end(interval_tasks[self.rcpsp_model.sink_task])
         nb_resources = len(self.rcpsp_model.resources_list)
@@ -128,8 +122,8 @@ class LSolverMonomodeRCPSP(SolverDO):
                 lambda time: model.sum(
                         weight[index_task][i_r] * model.contains(interval_tasks[tasks[index_task]], time)
                         for index_task in range(self.rcpsp_model.n_jobs)) <=
-                             self.rcpsp_model.get_resource_available(self.rcpsp_model.resources_list[i_r],
-                                                                     time))
+                self.rcpsp_model.get_resource_available(self.rcpsp_model.resources_list[i_r],
+                                                        time))
             model.constraint(model.and_(model.range(makespan), capacity_respected))
         # Minimize the makespan
         model.minimize(makespan)
@@ -153,18 +147,7 @@ class LSolverMonomodeRCPSP(SolverDO):
         if self.modelisation == ModelisationLSolver.INTEGER:
             return self.retrieve_solution_integer()
 
-    def solve(self, **kwargs: Any) -> ResultStorage:
-        if self.ls is None:
-            self.init_model(**kwargs)
-        time_limit = kwargs.get("timeout_seconds", 100)
-        self.ls.param.time_limit = time_limit
-        logger.info("Solve started")
-        self.ls.solve()
-        logger.info("Solve finished")
-        logger.info(f"Stats of solver : {self.ls.statistics}")
-        return self.retrieve_solution()
-
-    def retrieve_solution_integer(self)->ResultStorage:
+    def retrieve_solution_integer(self) -> ResultStorage:
         schedule = {}
         for t in self.rcpsp_model.tasks_list:
             start = int(self.vars["start"][t].value)
@@ -172,10 +155,7 @@ class LSolverMonomodeRCPSP(SolverDO):
             schedule[t] = {"start_time": start, "end_time": end}
         sol = RCPSPSolution(problem=self.rcpsp_model,
                             rcpsp_schedule=schedule)
-        fit = self.aggreg_sol(sol)
-        list_solution_fit = [(sol, fit)]
-        return ResultStorage(list_solution_fits=list_solution_fit,
-                             mode_optim=self.params_objective_function.sense_function)
+        return sol
 
     def retrieve_solution_interval(self):
         schedule = {}
@@ -185,10 +165,4 @@ class LSolverMonomodeRCPSP(SolverDO):
             schedule[t] = {"start_time": start, "end_time": end}
         sol = RCPSPSolution(problem=self.rcpsp_model,
                             rcpsp_schedule=schedule)
-        fit = self.aggreg_sol(sol)
-        list_solution_fit = [(sol, fit)]
-        return ResultStorage(list_solution_fits=list_solution_fit,
-                             mode_optim=self.params_objective_function.sense_function)
-
-
-
+        return sol

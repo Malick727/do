@@ -16,7 +16,7 @@ from discrete_optimization.rcpsp.rcpsp_utils import (
 )
 
 from rcpsp_breaks.rcpsp_breaks_cpopt import CPOptRCPSPBreakSolver
-from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver
+from rcpsp_breaks.rcpsp_breaks_ortools import OrtoolsRCPSPBreakSolver, InitMethod
 
 
 def create_variable_resource(
@@ -71,13 +71,14 @@ def run_calendar_experiments():
     plot_ressource_view(rcpsp_model=model, rcpsp_sol=sol)
 
     solver2 = OrtoolsRCPSPBreakSolver(problem=model)
-    parameters_cp = ParametersCP.default()
+    parameters_cp = ParametersCP.default_cpsat()
     # Method with element : Inspired by https://groups.google.com/g/or-tools-discuss/c/-HhchJcMTV4
     # solver2.init_model_durations_element_constraint()
     # Method with indicators : Inspired by https://groups.google.com/g/or-tools-discuss/c/DA_4Pniwhn8?pli=1
     # solver2.init_model_durations_indicator_method()
-    solver2.init_model_parallel_starts_vectors()  # init_model_parallel_starts_vectors
-
+    # solver2.init_model_parallel_starts_vectors()
+    # init_model_parallel_starts_vectors
+    solver2.init_model(method_encoding=InitMethod.ELEMENT_CNSTR)
     results = solver2.solve(parameters_cp=parameters_cp, add_solution_callback=True)
     sol2, fit2 = results.get_best_solution_fit()
     print(fit2, " ortools makespan ")

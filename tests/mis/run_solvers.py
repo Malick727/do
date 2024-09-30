@@ -63,12 +63,22 @@ def run_kamis():
     problem = MisProblem(g, attribute_aggregate="size")
     solver = MisKamisSolver(problem)
     solver.init_model()
-    res = solver.solve(time_limit=20, method="redumis")
+    res = solver.solve(time_limit=20, method="weighted_local_search")
     sol, fit = res.get_best_solution_fit()
     print(problem.evaluate(sol))
     print(problem.satisfy(sol))
 
+def run_one_exemple():
+    from maximum_independent_set.solvers.mis_kamis import methods
+    import subprocess
+    file = "file_1712838486005060503_true.graph"
+    method = "redumis"
+    command = (f"{methods[method]} {file} "
+               f"--output test.txt --time_limit=50 --console_log")
+    # Launch the command and wait for it to finish
+    print("Launching command")
+    result = subprocess.run(command, shell=True, check=True, timeout=100)
 
 
 if __name__ == "__main__":
-    run_kamis()
+    run_one_exemple()

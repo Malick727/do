@@ -3,21 +3,18 @@ from enum import Enum
 from typing import Any, Dict, Hashable, List, Optional, Tuple
 
 import numpy as np
-from discrete_optimization.generic_tools.cp_tools import CPSolver, ParametersCP
+from discrete_optimization.generic_tools.ortools_cpsat_tools import OrtoolsCPSatSolver
 from discrete_optimization.generic_tools.do_problem import (
-    ParamsObjectiveFunction,
-    build_aggreg_function_and_params_objective,
+    ParamsObjectiveFunction, Solution,
 )
-from discrete_optimization.generic_tools.result_storage.result_storage import (
-    ResultStorage,
-)
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import EnumHyperparameter
 from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-
 from discrete_optimization.rcpsp.specialized_rcpsp.rcpsp_specialized_constraints import \
         SpecialConstraintsDescription
 from discrete_optimization.rcpsp.rcpsp_utils import create_fake_tasks
 from ortools.sat.python import cp_model
-from ortools.sat.python.cp_model import Domain, LinearExpr, VarArraySolutionPrinter
+from ortools.sat.python.cp_model import Domain, LinearExpr, CpSolverSolutionCallback
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,26 +184,20 @@ class InitMethod(Enum):
     PARALLEL_TIMELINE = 3
 
 
-class OrtoolsRCPSPBreakSolver(CPSolver):
-    def __init__(
-        self,
-        problem: RCPSPModel,
-        params_objective_function: Optional[ParamsObjectiveFunction] = None,
-    ):
-        self.problem = problem
-        (
-            self.aggreg_sol,
-            self.aggreg_from_dict_values,
-            self.params_objective_function,
-        ) = build_aggreg_function_and_params_objective(
-            self.problem, params_objective_function=params_objective_function
-        )
-        self.model: cp_model.CpModel = None
+class OrtoolsRCPSPBreakSolver(OrtoolsCPSatSolver):
+    hyperparameters = [EnumHyperparameter(name="method_encoding", enum=InitMethod,
+                                          default=InitMethod.ELEMENT_CNSTR)]
+    problem: RCPSPModel
+
+    def __init__(self, problem: RCPSPModel, params_objective_function: Optional[ParamsObjectiveFunction] = None,
+                 **kwargs: Any):
+        super().__init__(problem, params_objective_function, **kwargs)
         self.variables: Dict[str, List[LinearExpr]] = {}
+        self.method_encoding: InitMethod = None
 
     def init_model_fixed_duration_no_calendar(self, **kwargs):
         partial_solution = kwargs.get("partial_solution", None)
-        if "special_constraints" in self.problem.__dict__.keys():
+        if self.problem.includes_special_constraint():
             if partial_solution is None:
                 partial_solution = self.problem.special_constraints
         horizon = int(self.problem.horizon)
@@ -301,7 +292,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
         model.Minimize(makespan)
         self.variables["starts"] = starts
         self.variables["ends"] = ends
-        self.model = model
+        self.cp_model = model
 
     def init_model_durations_element_constraint(self, **kwargs):
         partial_solution = kwargs.get("partial_solution", None)
@@ -387,7 +378,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                                      if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0]
             fake_task_res = [
                 (
-                    model.NewFixedSizeIntervalVar(
+                    model.NewFixedSizedIntervalVar(
                         start=f["start"], size=f["duration"], name=f"res_"
                     ),
                     f.get(r, 0),
@@ -409,7 +400,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     index = self.problem.index_task[t]
                     model.AddHint(starts[index], int(starts_hint[t]))
         model.Minimize(makespan)
-        self.model = model
+        self.cp_model = model
         self.variables["starts"] = starts
         self.variables["ends"] = ends
 
@@ -523,7 +514,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                                      if self.problem.mode_details[self.problem.tasks_list[t]][1].get(r, 0) > 0]
             fake_task_res = [
                 (
-                    model.NewFixedSizeIntervalVar(
+                    model.NewFixedSizedIntervalVar(
                         start=f["start"], size=f["duration"], name=f"res_"
                     ),
                     f.get(r, 0),
@@ -531,7 +522,6 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                 for f in fake_tasks
                 if f.get(r, 0) > 0 and f.get(r, 0) != self.problem.get_max_resource_capacity(r)
             ]
-            print("Fake tasks ", r, fake_task_res)
             model.AddCumulative(
                 [x[0] for x in tasks_and_consumption] + [x[0] for x in fake_task_res],
                 [x[1] for x in tasks_and_consumption] + [x[1] for x in fake_task_res],
@@ -545,7 +535,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     index = self.problem.index_task[t]
                     model.AddHint(starts[index], int(starts_hint[t]))
         model.Minimize(makespan)
-        self.model = model
+        self.cp_model = model
         self.variables["starts"] = starts
         self.variables["ends"] = ends
         self.variables["indicators"] = dictionnary_indicators
@@ -594,8 +584,8 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                 ]
                 self.variables["b_starts"][i] = b_starts
                 self.variables["b_ends"][i] = b_ends
-                model.AddMapDomain(starts_resource_view[i], b_starts)
-                model.AddMapDomain(ends_resource_view[i], b_ends)
+                model.add_map_domain(starts_resource_view[i], b_starts)
+                model.add_map_domain(ends_resource_view[i], b_ends)
                 model.Add(
                     starts_real[i]
                     == LinearExpr.WeightedSum(
@@ -684,12 +674,13 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                     index = self.problem.index_task[t]
                     model.AddHint(starts_real[index], int(starts_hint[t]))
         model.Minimize(makespan)
-        self.model = model
+        self.cp_model = model
         self.variables["starts"] = starts_real
         self.variables["ends"] = ends_real
 
     def init_model(self, **args: Any) -> None:
-        init_method = args.get("init_method", InitMethod.INDICATOR_CNSTR)
+        args = self.complete_with_default_hyperparameters(args)
+        init_method = args["method_encoding"]
         if init_method == InitMethod.INDICATOR_CNSTR:
             self.init_model_durations_indicator_method(**args)
         if init_method == InitMethod.ELEMENT_CNSTR:
@@ -698,6 +689,7 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             self.init_model_fixed_duration_no_calendar(**args)
         if init_method == InitMethod.PARALLEL_TIMELINE:
             self.init_model_parallel_starts_vectors(**args)
+        self.method_encoding = init_method
 
     def add_generalized_constraints(
         self,
@@ -746,21 +738,19 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
                 index_task_2 = self.problem.index_task[t2]
                 model.Add(starts_var[index_task_2] >= ends_var[index_task_1] + lag)
 
-    def retrieve_solutions(
-        self, result: cp_model.CpSolver, parameters_cp: ParametersCP
-    ) -> ResultStorage:
-        starts = [result.Value(s) for s in self.variables["starts"]]
-        ends = [result.Value(s) for s in self.variables["ends"]]
+    def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> Solution:
+        starts = [cpsolvercb.Value(s) for s in self.variables["starts"]]
+        ends = [cpsolvercb.Value(s) for s in self.variables["ends"]]
         if "b_starts" in self.variables:
             for i in self.variables["b_starts"]:
                 for x in range(len(self.variables["b_starts"][i])):
-                    if result.Value(self.variables["b_starts"][i][x]) >= 0.5:
-                        logger.debug(f"ends {result.Value(self.variables['ends'][i])}")
+                    if cpsolvercb.Value(self.variables["b_starts"][i][x]) >= 0.5:
+                        logger.debug(f"ends {cpsolvercb.Value(self.variables['ends'][i])}")
                         logger.debug(f"bstarts{i, x}")
         if "indicators" in self.variables:
             for key in self.variables["indicators"]:
                 logger.debug(
-                    f"key : {key, result.Value(self.variables['indicators'][key])}"
+                    f"key : {key, cpsolvercb.Value(self.variables['indicators'][key])}"
                 )
         schedule = {
             self.problem.tasks_list[t]: {"start_time": starts[t], "end_time": ends[t]}
@@ -771,44 +761,6 @@ class OrtoolsRCPSPBreakSolver(CPSolver):
             rcpsp_modes=[1] * self.problem.n_jobs_non_dummy,
             rcpsp_schedule=schedule,
         )
-        fit = self.aggreg_sol(sol)
-        res = ResultStorage(
-            list_solution_fits=[(sol, fit)],
-            mode_optim=self.params_objective_function.sense_function,
-        )
-        return res
-
-    def solve(
-        self, parameters_cp: Optional[ParametersCP] = None, **kwargs
-    ) -> ResultStorage:
-        if parameters_cp is None:
-            parameters_cp = ParametersCP.default()
-        # Search for a feasible solution
-        if self.model is None:
-            self.init_model(**kwargs)
-        add_solution_callback = kwargs.get("add_solution_callback", True)
-        if add_solution_callback:
-            solution_callback = VarArraySolutionPrinter(
-                variables=[
-                    self.variables["ends"][
-                        self.problem.index_task[self.problem.sink_task]
-                    ]
-                ]
-            )
-        else:
-            solution_callback = None
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = parameters_cp.time_limit
-        status = solver.Solve(self.model, solution_callback=solution_callback)
-
-        st = ""
-        if status == cp_model.OPTIMAL:
-            st = "OPTIMAL"
-        elif status == cp_model.INFEASIBLE:
-            st = "INFEASIBLE"
-        elif status == cp_model.FEASIBLE:
-            st = "FEASIBLE"
-        elif status == cp_model.UNKNOWN:
-            st = "UNKNOWN"
-        logger.info(f"Solver finished, status {st}")
-        return self.retrieve_solutions(result=solver, parameters_cp=parameters_cp)
+        fit = self.aggreg_from_sol(sol)
+        logger.info(f"Sol found with fitness = {fit}")
+        return sol

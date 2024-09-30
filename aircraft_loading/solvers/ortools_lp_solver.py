@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class OrtoolsLpTeamAllocationSolver(BaseSolver):
-
+    problem: AircraftLoadingProblem
     CLP_LINEAR_PROGRAMMING = _pywraplp.Solver_CLP_LINEAR_PROGRAMMING
     GLPK_LINEAR_PROGRAMMING = _pywraplp.Solver_GLPK_LINEAR_PROGRAMMING
     GLOP_LINEAR_PROGRAMMING = _pywraplp.Solver_GLOP_LINEAR_PROGRAMMING
