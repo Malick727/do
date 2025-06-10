@@ -1,9 +1,9 @@
 from abc import abstractmethod
 from typing import Optional, List, Any
 from discrete_optimization.generic_tools.do_problem import Solution
-from discrete_optimization.generic_tools.do_solver import SolverDO
+from discrete_optimization.generic_tools.do_solver import SolverDO, BoundsProviderMixin
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
-import localsolver
+import hexaly.optimizer
 
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from discrete_optimization.generic_tools.cp_tools import StatusSolver
@@ -13,10 +13,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class HexalySolver(SolverDO):
+class HexalySolver(SolverDO, BoundsProviderMixin):
     status_solver: Optional[StatusSolver] = None
-    ls: Optional[localsolver.LocalSolver] = None
-    model: Optional[localsolver.LSModel] = None
+    ls: Optional[hexaly.optimizer.HexalyOptimizer] = None
+    model: Optional[hexaly.optimizer.HxModel] = None
 
     @abstractmethod
     def init_model(self, **kwargs: Any) -> None:
@@ -29,12 +29,14 @@ class HexalySolver(SolverDO):
         if self.ls is None:
             self.init_model(**kwargs)
         self.ls.param.time_limit = time_limit
+        self.ls.param.nb_threads = kwargs.get("nb_threads", 1)
         logger.info("Solve started")
         callback = CallbackList(callbacks)
         ls_callback = LocalSearchIntermediaryCallback(do_solver=self,
                                                       callback=callback)
+        callback.on_solve_start(solver=self)
         self.ls.add_callback(
-            localsolver.LSCallbackType.ITERATION_TICKED, ls_callback.my_callback
+            hexaly.optimizer.HxCallbackType.ITERATION_TICKED, ls_callback.my_callback
         )
         self.ls.solve()
         logger.info("Solve finished")
@@ -45,11 +47,18 @@ class HexalySolver(SolverDO):
         sol = self.retrieve_solution()
         fit = self.aggreg_from_sol(sol)
         ls_callback.res.append((sol, fit))
+        callback.on_solve_end(ls_callback.res, solver=self)
         return ls_callback.res
 
     @abstractmethod
     def retrieve_solution(self, **args) -> Solution:
         pass
+
+    def get_current_best_internal_objective_bound(self) -> Optional[float]:
+        return self.ls.solution.get_objective_bound(0)
+
+    def get_current_best_internal_objective_value(self) -> Optional[float]:
+        return self.ls.model.objectives[0].value
 
 
 class LocalSearchIntermediaryCallback:
@@ -68,13 +77,13 @@ class LocalSearchIntermediaryCallback:
         self.nb_solutions = 0
         self.objs_value = []
 
-    def my_callback(self, ls: localsolver.LocalSolver, cb_type):
+    def my_callback(self, ls: hexaly.optimizer.HexalyOptimizer, cb_type):
         # stats = ls.statistics
-        if cb_type == localsolver.LSCallbackType.ITERATION_TICKED:
+        if cb_type == hexaly.optimizer.HxCallbackType.ITERATION_TICKED:
             objs = tuple([ls.model.objectives[i].value for i in range(ls.model.nb_objectives)])
             if ((len(self.objs_value) == 0 or objs != self.objs_value[-1])
-                and ls.solution.status in {localsolver.LSSolutionStatus.OPTIMAL,
-                                           localsolver.LSSolutionStatus.FEASIBLE}):
+                and ls.solution.status in {hexaly.optimizer.HxSolutionStatus.OPTIMAL,
+                                           hexaly.optimizer.HxSolutionStatus.FEASIBLE}):
                 logger.info(f"Objs = {objs}")
                 logger.info(
                     f"Gaps = {tuple(ls.solution.get_objective_gap(i)*100 for i in range(ls.model.nb_objectives))}")
@@ -100,12 +109,12 @@ class LocalSearchIntermediaryCallback:
                     ls.stop()
 
 
-def hexaly_status_to_dostatus(hexaly_status: localsolver.LSSolutionStatus) -> StatusSolver:
-    if hexaly_status == localsolver.LSSolutionStatus.OPTIMAL:
+def hexaly_status_to_dostatus(hexaly_status: hexaly.optimizer.HxSolutionStatus) -> StatusSolver:
+    if hexaly_status == hexaly.optimizer.HxSolutionStatus.OPTIMAL:
         return StatusSolver.OPTIMAL
-    if hexaly_status == localsolver.LSSolutionStatus.FEASIBLE:
+    if hexaly_status == hexaly.optimizer.HxSolutionStatus.FEASIBLE:
         return StatusSolver.SATISFIED
-    if hexaly_status == localsolver.LSSolutionStatus.INFEASIBLE:
+    if hexaly_status == hexaly.optimizer.HxSolutionStatus.INFEASIBLE:
         return StatusSolver.UNKNOWN
-    if hexaly_status == localsolver.LSSolutionStatus.INCONSISTENT:
+    if hexaly_status == hexaly.optimizer.HxSolutionStatus.INCONSISTENT:
         return StatusSolver.UNSATISFIABLE

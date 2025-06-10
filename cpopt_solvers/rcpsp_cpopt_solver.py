@@ -1,15 +1,15 @@
 from docplex.cp.solution import CpoSolveResult, CpoIntervalVarSolution
 from typing import Any, Optional
 from discrete_optimization.generic_tools.do_problem import Solution, ParamsObjectiveFunction
-from discrete_optimization.rcpsp.rcpsp_model import RCPSPModel, RCPSPSolution
-from discrete_optimization.rcpsp.solver.rcpsp_solver import SolverRCPSP
+from discrete_optimization.rcpsp.problem import RcpspProblem, RcpspSolution
+from discrete_optimization.rcpsp.solvers.rcpsp_solver import RcpspSolver
 from cpopt_solvers.cpopt_solver import CPOSolver
 from docplex.cp.model import (CpoModel, interval_var, integer_var, alternative,
                               pulse, end_before_start, minimize, end_of)
 
 
-class CPOptRCPSPSolver(CPOSolver, SolverRCPSP):
-    def __init__(self, problem: RCPSPModel, params_objective_function: Optional[ParamsObjectiveFunction] = None,
+class CPOptRCPSPSolver(CPOSolver, RcpspSolver):
+    def __init__(self, problem: RcpspProblem, params_objective_function: Optional[ParamsObjectiveFunction] = None,
                  **kwargs):
         super().__init__(problem, params_objective_function, **kwargs)
         self.variables = None
@@ -22,7 +22,7 @@ class CPOptRCPSPSolver(CPOSolver, SolverRCPSP):
             end = itv.get_end()
             rcpsp_schedule[t] = {"start_time": start,
                                  "end_time": end}
-        return RCPSPSolution(problem=self.problem,
+        return RcpspSolution(problem=self.problem,
                              rcpsp_schedule=rcpsp_schedule,
                              rcpsp_modes=[1 for _ in range(self.problem.n_jobs_non_dummy)])
 

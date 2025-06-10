@@ -1,19 +1,15 @@
 from typing import Optional, List, Any
-
-from docplex.cp.model import CpoModel, CpoSolver, integer_var, interval_var, sequence_var
-from docplex.cp.modeler import sequence, first, last
 from docplex.cp.model import *
 
-from discrete_optimization.generic_tools.callbacks.callback import Callback
-from discrete_optimization.generic_tools.cp_tools import ParametersCP
-from discrete_optimization.generic_tools.do_problem import Problem, ParamsObjectiveFunction
-from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.vrp.vrp_toolbox import compute_length_matrix
-from discrete_optimization.vrp.vrp_model import VrpProblem, VrpSolution
-from discrete_optimization.vrp.solver.vrp_solver import SolverVrp
+from cpopt_solvers.cpopt_solver import CPOSolver
+from discrete_optimization.generic_tools.do_problem import Problem, ParamsObjectiveFunction, Solution
+from discrete_optimization.vrp.utils import compute_length_matrix
+from discrete_optimization.vrp.problem import VrpProblem, VrpSolution
+from discrete_optimization.vrp.solvers.vrp_solver import VrpSolver
 
 
-class CPOptSolverTSP(SolverVrp):
+class CPOptSolverVRP(VrpSolver, CPOSolver):
+
     def __init__(self, problem: Problem, params_objective_function: Optional[ParamsObjectiveFunction] = None,
                  **kwargs: Any):
         super().__init__(problem, params_objective_function, **kwargs)
@@ -83,20 +79,10 @@ class CPOptSolverTSP(SolverVrp):
         # mdl.add(minimize(sum(number_of_vehicles)))
         mdl.add(minimize_static_lex([last_time,
                                      max([end_of(s) for s in intervals_non_dummy])]))
-        self.cpo_model = mdl
+        self.cp_model = mdl
         self.variables["intervals"] = intervals_var_dict
 
-    def solve(self, callbacks: Optional[List[Callback]] = None,
-              parameters_cp: ParametersCP=None,
-              **kwargs: Any) -> ResultStorage:
-        if parameters_cp is None:
-            parameters_cp = ParametersCP.default()
-        result: CpoSolveResult = self.cpo_model.solve(
-            TimeLimit=parameters_cp.time_limit,
-            execfile="/Applications/CPLEX_Studio2211/cpoptimizer/bin/arm64_osx/cpoptimizer",
-            trace_log=True,
-            #SearchType="IterativeDiving"
-        )  # put yours instead.
+    def retrieve_solution(self, sres: CpoSolveResult) -> Solution:
         sol = VrpSolution(problem=self.problem,
                           list_start_index=self.problem.start_indexes,
                           list_end_index=self.problem.end_indexes,
@@ -104,13 +90,13 @@ class CPOptSolverTSP(SolverVrp):
         for vehicle in self.variables["intervals"]:
             sched = {}
             for i in range(len(self.variables["intervals"][vehicle])):
-                itv: CpoIntervalVarSolution = result.get_var_solution(self.variables["intervals"][vehicle][i])
+                itv: CpoIntervalVarSolution = sres.get_var_solution(self.variables["intervals"][vehicle][i])
                 is_present = itv.is_present()
                 if is_present:
                     start = itv.get_start()
                     sched[i] = start
             p = sorted(sched, key=lambda x: sched[x])
             sol.list_paths.append(p[1:-1])
-        fit = self.aggreg_from_sol(sol)
-        return ResultStorage([(sol, fit)], mode_optim=self.params_objective_function.sense_function)
+        return sol
+
 

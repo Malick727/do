@@ -2,7 +2,8 @@
 
 import logging
 from typing import Dict, Optional, Hashable
-import localsolver
+import hexaly.optimizer
+import hexaly.modeler
 from discrete_optimization.generic_tools.do_problem import (
     Problem,
     ParamsObjectiveFunction,
@@ -10,8 +11,8 @@ from discrete_optimization.generic_tools.do_problem import (
 from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
 )
-from discrete_optimization.rcpsp.rcpsp_model import RCPSPSolution
-from discrete_optimization.rcpsp.solver.rcpsp_solver import SolverRCPSP
+from discrete_optimization.rcpsp.problem import RcpspProblem, RcpspSolution
+from discrete_optimization.rcpsp.solvers.rcpsp_solver import RcpspSolver
 from hexaly_solvers.hexaly_solver import HexalySolver
 from enum import Enum
 logger = logging.getLogger(__name__)
@@ -22,23 +23,23 @@ class ModelisationLSolver(Enum):
     INTERVAL = 1
 
 
-class LSolverMultiModeRCPSP(HexalySolver, SolverRCPSP):
+class LSolverMultiModeRCPSP(HexalySolver, RcpspSolver):
     def __init__(self, problem: Problem, params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs):
         super().__init__(problem, params_objective_function, **kwargs)
-        self.ls: Optional[localsolver.LocalSolver] = None
-        self.model: Optional[localsolver.LSModel] = None
-        self.vars: Optional[Dict[str, Dict[Hashable, localsolver.LSExpression]]] = {}
+        self.ls: Optional[hexaly.optimizer.HexalyOptimizer] = None
+        self.model: Optional[hexaly.optimizer.HxModel] = None
+        self.vars: Optional[Dict[str, Dict[Hashable, hexaly.modeler.HxExpression]]] = {}
         self.modelisation: Optional[ModelisationLSolver] = None
         self.modes_correspondance = None
 
-    def init_model(self, modelisation_type: ModelisationLSolver=ModelisationLSolver.INTERVAL,
+    def init_model(self, modelisation_type: ModelisationLSolver = ModelisationLSolver.INTERVAL,
                    **kwargs):
         if modelisation_type == ModelisationLSolver.INTERVAL:
             self.init_model_interval(**kwargs)
             self.modelisation = modelisation_type
 
     def init_model_interval(self, **kwargs):
-        ls = localsolver.LocalSolver()
+        ls = hexaly.optimizer.HexalyOptimizer()
         #
         # Declare the optimization model
         #
@@ -122,13 +123,13 @@ class LSolverMultiModeRCPSP(HexalySolver, SolverRCPSP):
         self.vars["modes"] = modes_var
         self.modes_correspondance = [list(self.problem.mode_details[t]) for t in tasks]
         warm_start = kwargs.get("warm_start", False)
-        warm_start_solution: Optional[RCPSPSolution] = kwargs.get("warm_start_solution", None)
+        warm_start_solution: Optional[RcpspSolution] = kwargs.get("warm_start_solution", None)
         if warm_start:
             if warm_start_solution is None:
                 warm_start_solution = self.problem.get_dummy_solution()
             for st in self.vars["intervals"]:
-                self.vars["intervals"][st].value = localsolver.LSInterval(warm_start_solution.get_start_time(st),
-                                                                          warm_start_solution.get_end_time(st))
+                self.vars["intervals"][st].value = hexaly.optimizer.HxInterval(warm_start_solution.get_start_time(st),
+                                                                               warm_start_solution.get_end_time(st))
                 # self.vars["end"][st].value = warm_start_solution.get_end_time(st)
 
     def retrieve_solution(self) -> ResultStorage:
@@ -148,7 +149,7 @@ class LSolverMultiModeRCPSP(HexalySolver, SolverRCPSP):
             real_mode = self.modes_correspondance[i][mode]
             modes[t] = real_mode
             schedule[t] = {"start_time": start, "end_time": end}
-        sol = RCPSPSolution(problem=self.problem,
+        sol = RcpspSolution(problem=self.problem,
                             rcpsp_schedule=schedule,
                             rcpsp_modes=[modes[k] for k in self.problem.tasks_list_non_dummy])
         fit = self.aggreg_from_sol(sol)

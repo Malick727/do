@@ -7,7 +7,7 @@ from docplex.cp.solution import (SOLVE_STATUS_UNKNOWN, SOLVE_STATUS_INFEASIBLE,
 from docplex.cp.solver.cpo_callback import EVENT_SOLUTION, CpoCallback
 from typing import Optional, List, Any
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
-from discrete_optimization.generic_tools.cp_tools import CPSolver, ParametersCP, StatusSolver
+from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, StatusSolver
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from docplex.cp.model import CpoModel
@@ -27,7 +27,7 @@ def cpostatus_to_dostatus(status_from_cpo: str)->StatusSolver:
         return StatusSolver.UNSATISFIABLE
 
 
-class CPOSolver(CPSolver):
+class CPOSolver(CpSolver):
     """Generic ortools cpo solver."""
 
     cp_model: Optional[CpoModel] = None
@@ -47,7 +47,7 @@ class CPOSolver(CPSolver):
     def solve(
         self,
         callbacks: Optional[List[Callback]] = None,
-        parameters_cp: Optional[ParametersCP] = None,
+        parameters_cp: Optional[ParametersCp] = None,
         time_limit: Optional[float] = 100.0,
         **kwargs: Any,
     ) -> ResultStorage:
@@ -75,7 +75,7 @@ class CPOSolver(CPSolver):
         if self.cp_model is None:
             self.init_model(**kwargs)
         if parameters_cp is None:
-            parameters_cp = ParametersCP.default_cpsat()
+            parameters_cp = ParametersCp.default_cpsat()
         callback = CpoSolutionCallback(do_solver=self,
                                        callback=callbacks_list)
         self.cp_model.add_solver_callback(callback)
@@ -93,12 +93,12 @@ class CPOSolver(CPSolver):
         self.status_solver = cpostatus_to_dostatus(status_from_cpo=result.solve_status)
         return callback.res
 
-    def explain_infeasibility(self, parameters_cp: Optional[ParametersCP] = None,
+    def explain_infeasibility(self, parameters_cp: Optional[ParametersCp] = None,
                               explain_failure: bool = False,
                               refine_conflict: bool = True,
                               **args):
         if parameters_cp is None:
-            parameters_cp = ParametersCP.default()
+            parameters_cp = ParametersCp.default()
         if self.cp_model is None:
             self.init_model(**args)
         res_ = []

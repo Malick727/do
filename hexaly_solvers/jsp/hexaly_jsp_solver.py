@@ -1,8 +1,8 @@
 from typing import Any
 
 from discrete_optimization.generic_tools.do_problem import Solution
-from discrete_optimization.jsp.job_shop_problem import JobShopProblem, SolutionJobshop
-import localsolver
+from discrete_optimization.jsp.problem import JobShopProblem, JobShopSolution
+import hexaly.optimizer
 from hexaly_solvers.hexaly_solver import HexalySolver
 
 
@@ -12,7 +12,7 @@ class HexalyJspSolver(HexalySolver):
     def init_model(self, **kwargs: Any) -> None:
         horizon = kwargs.get("horizon",
                              sum(sum(subjob.processing_time for subjob in job) for job in self.problem.list_jobs))
-        ls = localsolver.LocalSolver()
+        ls = hexaly.optimizer.HexalyOptimizer()
         #
         # Declare the optimization model
         #
@@ -58,7 +58,7 @@ class HexalyJspSolver(HexalySolver):
         self.variables = {}
         self.variables["intervals"] = interval_tasks
 
-    def retrieve_solution(self, **args) -> SolutionJobshop:
+    def retrieve_solution(self, **args) -> JobShopSolution:
         schedule = {}
         objs = tuple([self.ls.model.objectives[i].value for i in range(self.ls.model.nb_objectives)])
         print("Objs =", objs)
@@ -67,7 +67,7 @@ class HexalyJspSolver(HexalySolver):
                 start = int(self.variables["intervals"][i][j].value.start())
                 end = int(self.variables["intervals"][i][j].value.end())
                 schedule[(i,j)] = (start, end)
-        return SolutionJobshop(problem=self.problem,
+        return JobShopSolution(problem=self.problem,
                                schedule=[[schedule[(i, j)]
                                          for j in range(len(self.problem.list_jobs[i]))]
                                          for i in range(len(self.problem.list_jobs))])

@@ -75,7 +75,7 @@ class SppProblem(Problem):
         )
 
     def valid_path(self, variable) -> bool:
-        for i in range(len(variable.solution_path - 1)):
+        for i in range(len(variable.solution_path) - 1):
             if (variable.solution_path[i], variable.solution_path[i+1]) not in self.graph.edges:
                 return False
         return True
@@ -83,6 +83,6 @@ class SppProblem(Problem):
     def func(self, solution_path) -> float:
         val = 0
         for node in solution_path:
-            val += self.acquisition_dict[self.graph.nodes[node]["acquisition_request"]]
+            val += self.acquisition_dict[self.graph.nodes[node]["acquisition_request_id"]]
         return val
 

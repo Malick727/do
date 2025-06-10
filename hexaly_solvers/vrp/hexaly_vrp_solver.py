@@ -1,28 +1,28 @@
 import numpy as np
 from typing import Optional, Dict, List, Any
-import localsolver
+import hexaly.optimizer
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.vrp.vrp_model import VrpProblem, VrpSolution
-from discrete_optimization.vrp.vrp_toolbox import compute_length_matrix
+from discrete_optimization.vrp.problem import VrpProblem, VrpSolution
+from discrete_optimization.vrp.utils import compute_length_matrix
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction
-from discrete_optimization.vrp.solver.vrp_solver import SolverVrp
+from discrete_optimization.vrp.solvers.vrp_solver import VrpSolver
 from hexaly_solvers.hexaly_solver import HexalySolver
 import logging
 logger = logging.getLogger(__name__)
 
 
-class VrpHexalySolver(HexalySolver, SolverVrp):
+class VrpHexalySolver(HexalySolver, VrpSolver):
     problem: VrpProblem
 
     def __init__(self, problem: VrpProblem, params_objective_function: Optional[ParamsObjectiveFunction] = None,
                  **kwargs: Any):
         super().__init__(problem, params_objective_function, **kwargs)
-        self.ls: Optional[localsolver.LocalSolver] = None
-        self.model: Optional[localsolver.LSModel] = None
-        self.vars: Optional[Dict[str, List[localsolver.LSExpression]]] = {}
+        self.ls: Optional[hexaly.optimizer.HexalyOptimizer] = None
+        self.model: Optional[hexaly.optimizer.HxModel] = None
+        self.vars: Optional[Dict[str, List[hexaly.optimizer.HxExpression]]] = {}
 
     def init_model(self, **kwargs):
-        ls = localsolver.LocalSolver()
+        ls = hexaly.optimizer.HexalyOptimizer()
         model = ls.model
         nb_vehicle = self.problem.vehicle_count
         indexes_start = self.problem.start_indexes
@@ -33,7 +33,7 @@ class VrpHexalySolver(HexalySolver, SolverVrp):
         array_nodes = model.array(nodes_non_dummy)
 
         nb_non_dummy = len(nodes_non_dummy)
-        _, matrix = compute_length_matrix(vrp_model=self.problem)
+        _, matrix = compute_length_matrix(vrp_problem=self.problem)
         matrix_all_ = np.copy(matrix)
         matrix_all_ = model.array(matrix_all_)
         matrix = np.array([[matrix[i, j] for j in nodes_non_dummy]

@@ -9,10 +9,10 @@ from discrete_optimization.generic_tools.do_problem import (
 from discrete_optimization.generic_tools.result_storage.result_storage import (
     ResultStorage,
 )
-from discrete_optimization.rcpsp.rcpsp_model import (
-    RCPSPModel, RCPSPSolution
+from discrete_optimization.rcpsp.problem import (
+    RcpspProblem, RcpspSolution
 )
-from discrete_optimization.rcpsp.solver.rcpsp_solver import SolverRCPSP
+from discrete_optimization.rcpsp.solvers import RcpspSolver
 from hexaly_solvers.hexaly_solver import HexalySolver
 from enum import Enum
 logger = logging.getLogger(__name__)
@@ -23,8 +23,8 @@ class ModelisationLSolver(Enum):
     INTERVAL = 1
 
 
-class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
-    def __init__(self, problem: RCPSPModel,
+class LSolverMonomodeRCPSP(HexalySolver, RcpspSolver):
+    def __init__(self, problem: RcpspProblem,
                  params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs: Any):
         super().__init__(problem, params_objective_function, **kwargs)
         self.rcpsp_model = problem
@@ -84,7 +84,7 @@ class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
         self.vars["end"] = end
 
         warm_start = kwargs.get("warm_start", True)
-        warm_start_solution: Optional[RCPSPSolution] = kwargs.get("warm_start_solution", None)
+        warm_start_solution: Optional[RcpspSolution] = kwargs.get("warm_start_solution", None)
         if warm_start:
             if warm_start_solution is None:
                 warm_start_solution = self.rcpsp_model.get_dummy_solution()
@@ -132,7 +132,7 @@ class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
         self.model = model
         self.vars["intervals"] = interval_tasks
         warm_start = kwargs.get("warm_start", True)
-        warm_start_solution: Optional[RCPSPSolution] = kwargs.get("warm_start_solution", None)
+        warm_start_solution: Optional[RcpspSolution] = kwargs.get("warm_start_solution", None)
         if warm_start:
             if warm_start_solution is None:
                 warm_start_solution = self.rcpsp_model.get_dummy_solution()
@@ -153,7 +153,7 @@ class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
             start = int(self.vars["start"][t].value)
             end = int(self.vars["end"][t].value)
             schedule[t] = {"start_time": start, "end_time": end}
-        sol = RCPSPSolution(problem=self.rcpsp_model,
+        sol = RcpspSolution(problem=self.rcpsp_model,
                             rcpsp_schedule=schedule)
         return sol
 
@@ -163,6 +163,6 @@ class LSolverMonomodeRCPSP(HexalySolver, SolverRCPSP):
             start = int(self.vars["intervals"][t].value.start())
             end = int(self.vars["intervals"][t].value.end())
             schedule[t] = {"start_time": start, "end_time": end}
-        sol = RCPSPSolution(problem=self.rcpsp_model,
+        sol = RcpspSolution(problem=self.rcpsp_model,
                             rcpsp_schedule=schedule)
         return sol

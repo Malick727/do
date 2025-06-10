@@ -4,8 +4,8 @@
 
 import logging
 import sys
-from discrete_optimization.jsp.job_shop_parser import get_data_available, parse_file
-from discrete_optimization.jsp.job_shop_problem import JobShopProblem
+from discrete_optimization.jsp.parser import get_data_available, parse_file
+from discrete_optimization.jsp.parser import JobShopProblem
 from hexaly_solvers.jsp.hexaly_jsp_solver import HexalyJspSolver
 
 logging.basicConfig(level=logging.INFO)

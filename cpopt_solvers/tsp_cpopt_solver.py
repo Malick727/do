@@ -5,16 +5,13 @@ from docplex.cp.modeler import sequence, first, last
 from docplex.cp.model import *
 
 from cpopt_solvers.cpopt_solver import CPOSolver
-from discrete_optimization.generic_tools.callbacks.callback import Callback
-from discrete_optimization.generic_tools.cp_tools import ParametersCP
 from discrete_optimization.generic_tools.do_problem import Problem, ParamsObjectiveFunction, Solution
-from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.tsp.common_tools_tsp import build_matrice_distance
-from discrete_optimization.tsp.tsp_model import TSPModel, SolutionTSP
-from discrete_optimization.tsp.solver.tsp_solver import SolverTSP
+from discrete_optimization.tsp.utils import build_matrice_distance
+from discrete_optimization.tsp.problem import TspProblem, TspSolution
+from discrete_optimization.tsp.solvers.tsp_solver import TspSolver
 
 
-class CPOptSolverTSP(CPOSolver, SolverTSP):
+class CPOptSolverTSP(CPOSolver, TspSolver):
     def __init__(self, problem: Problem, params_objective_function: Optional[ParamsObjectiveFunction] = None,
                  **kwargs: Any):
         super().__init__(problem, params_objective_function, **kwargs)
@@ -52,7 +49,7 @@ class CPOptSolverTSP(CPOSolver, SolverTSP):
             start = itv.get_start()
             schedule[i] = start
         sort_ = sorted(schedule, key=lambda x: schedule[x])
-        sol = SolutionTSP(problem=self.problem,
+        sol = TspSolution(problem=self.problem,
                           start_index=self.problem.start_index,
                           end_index=self.problem.end_index,
                           permutation=sort_[1:-1])

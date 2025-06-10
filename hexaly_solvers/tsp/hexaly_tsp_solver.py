@@ -1,9 +1,9 @@
 from typing import Optional, Dict, Hashable, Any
-import localsolver
+import hexaly.optimizer
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.tsp.common_tools_tsp import build_matrice_distance
-from discrete_optimization.tsp.tsp_model import TSPModel, TSPModelDistanceMatrix, SolutionTSP
-from discrete_optimization.tsp.solver.tsp_solver import SolverTSP
+from discrete_optimization.tsp.utils import build_matrice_distance
+from discrete_optimization.tsp.problem import TspProblem, Point2DTspProblem, TspSolution
+from discrete_optimization.tsp.solvers.tsp_solver import TspSolver
 from discrete_optimization.generic_tools.do_solver import SolverDO
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, \
     build_aggreg_function_and_params_objective
@@ -13,17 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class TspHexalySolver(HexalySolver, SolverDO):
-    problem: TSPModel
+    problem: TspProblem
 
-    def __init__(self, problem: TSPModel,
+    def __init__(self, problem: TspProblem,
                  params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs: Any):
         super().__init__(problem, params_objective_function, **kwargs)
-        self.ls: Optional[localsolver.LocalSolver] = None
-        self.model: Optional[localsolver.LSModel] = None
-        self.vars: Optional[Dict[str, localsolver.LSExpression]] = {}
+        self.ls: Optional[hexaly.optimizer.HexalyOptimizer] = None
+        self.model: Optional[hexaly.optimizer.HxModel] = None
+        self.vars: Optional[Dict[str, hexaly.optimizer.HxExpression]] = {}
 
     def init_model(self, **kwargs):
-        ls = localsolver.LocalSolver()
+        ls = hexaly.optimizer.HexalyOptimizer()
         #
         # Declare the optimization model
         #
@@ -49,9 +49,9 @@ class TspHexalySolver(HexalySolver, SolverDO):
         self.model = model
         model.close()
 
-    def retrieve_solution(self) -> SolutionTSP:
+    def retrieve_solution(self) -> TspSolution:
         value = self.vars["routing"].value
-        sol = SolutionTSP(problem=self.problem,
+        sol = TspSolution(problem=self.problem,
                           start_index=self.problem.start_index,
                           end_index=self.problem.end_index,
                           permutation=[v for v in value][1:])

@@ -1,7 +1,7 @@
 from docplex.cp.solution import CpoSolveResult, CpoIntervalVarSolution
 from typing import Any, Optional
 from discrete_optimization.generic_tools.do_problem import Solution, ParamsObjectiveFunction
-from discrete_optimization.jsp.job_shop_problem import JobShopProblem, SolutionJobshop
+from discrete_optimization.jsp.problem import JobShopProblem, JobShopSolution
 from cpopt_solvers.cpopt_solver import CPOSolver
 from docplex.cp.model import (CpoModel, interval_var,
                               no_overlap,
@@ -46,6 +46,6 @@ class CPOJspSolver(CPOSolver):
                 start = itv.get_start()
                 end = itv.get_end()
                 schedule_dict[(i, j)] = (start, end)
-        return SolutionJobshop(problem=self.problem,
+        return JobShopSolution(problem=self.problem,
                                schedule=[[schedule_dict[(i,j)] for j in range(len(self.problem.list_jobs[i]))]
                                          for i in range(self.problem.n_jobs)])
