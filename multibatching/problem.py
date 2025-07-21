@@ -21,7 +21,7 @@ class Product:
     id: int
     size: int
     value: int
-    valid_transports: frozenset[TransportType] = field(default_factory=set)
+    valid_transports: frozenset[TransportType] = field(default_factory=set, hash=False)
 
 
 @dataclass(frozen=True)
@@ -82,9 +82,12 @@ class MultibatchingProblem(Problem):
         self.transport_links_to_index = {self.transport_links[i]: i for i in range(self.nb_transport_links)}
 
     def evaluate(self, variable: "MultibatchingSolution") -> dict[str, float]:
-        transport_cost = sum([flow.transport_link.transport_type.cost*flow.transport_link.distance*flow.nb_packing
+        transport_cost = sum([flow.transport_link.transport_type.cost
+                              * flow.transport_link.distance*flow.nb_packing
                               for flow in variable.list_flows])
-        emission_co2 = sum([flow.transport_link.transport_type.emissions * flow.transport_link.distance * flow.nb_packing
+        emission_co2 = sum([flow.transport_link.transport_type.emissions
+                            * flow.transport_link.distance
+                            * flow.nb_packing
                             for flow in variable.list_flows])
         compound = 0
         for flow in variable.list_flows:

@@ -15,7 +15,7 @@ from multibatching.problem import (MultibatchingProblem, Location, TransportLink
 Product, MultibatchingSolution)
 import logging
 from enum import Enum
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import EnumHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import EnumHyperparameter, CategoricalHyperparameter
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +27,11 @@ class ModelingMultiBatch(Enum):
 class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
 
     hyperparameters = [EnumHyperparameter(name="modeling", enum=ModelingMultiBatch,
-                                          default=ModelingMultiBatch.FLOW)]
+                                          default=ModelingMultiBatch.FLOW),
+                       CategoricalHyperparameter(name="detailed_capacity_constraint",
+                                                 choices=[True, False],
+                                                 default=False,
+                                                 depends_on=[("modeling", [ModelingMultiBatch.FLOW])])]
     problem: MultibatchingProblem
 
     def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
@@ -35,6 +39,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         super().__init__(problem, **kwargs)
         self.variables = {}
         self.modeling: ModelingMultiBatch = None
+        self.scaling_factor = 10**3
 
     def set_warm_start_from_prev_solve(self):
         if self.solver is not None:
@@ -181,6 +186,37 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             model.Add(cp_model.LinearExpr.weighted_sum([x[0] for x in list_var_weight],
                                                        [x[1] for x in list_var_weight])
                       <= nb_trips_per_link[index_tl]*tl.transport_type.capacity)
+        if args["detailed_capacity_constraint"]:
+            nb_trips_min_for_product_flows = {}
+            for index_product in range(self.problem.nb_products):
+                product = self.problem.products[index_product]
+                size_product = product.size
+                for tl in range(self.problem.nb_transport_types):
+                    tt: TransportType = self.problem.transport_types[tl]
+                    capa_transport = tt.capacity
+                    nb_trips_min_for_product_flows[(index_product, tt)] = [0]
+                    current_greedy_bins = defaultdict(lambda: 0)
+                    current_bin = 0
+                    current_greedy_bins[0] = 0
+                    for i in range(30):
+                        if current_greedy_bins[current_bin] + size_product <= capa_transport:
+                            current_greedy_bins[current_bin] += size_product
+                        else:
+                            current_bin += 1
+                            current_greedy_bins[current_bin] = size_product
+                        nb_trips_min_for_product_flows[(index_product, tt)].append(current_bin+1)
+            for index_tl in flows_variables:
+                transport_link = self.problem.transport_links[index_tl]
+                transport_type = transport_link.transport_type
+                for index_product in flows_variables[index_tl]:
+                    nb_trips_min = nb_trips_min_for_product_flows[(index_product, transport_type)]
+                    binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
+                                         for k in range(len(nb_trips_min))]
+                    model.add_map_domain(flows_variables[index_tl][index_product],
+                                         binary_indicators)
+                    for j in range(1, len(binary_indicators)):
+                        (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
+                         .OnlyEnforceIf(binary_indicators[j]))
 
         # Flows constraint
         for location in self.problem.locations:
@@ -195,20 +231,21 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                                    keys_outflow_location_product.get(loc_id, {}).get(product.id, set())])
                 model.Add(flow_in+net_supply-flow_out == 0)
 
-        transport_cost = sum([nb_trips_per_link[index_tl]*transport_links[index_tl].distance
-                              * transport_links[index_tl].transport_type.cost
-                              for index_tl in range(self.problem.nb_transport_links)])
-        emission_cost = sum([nb_trips_per_link[index_tl]*transport_links[index_tl].distance
-                             * transport_links[index_tl].transport_type.emissions
+        transport_cost = sum([nb_trips_per_link[index_tl]*int(self.scaling_factor*transport_links[index_tl].distance
+                                                              * transport_links[index_tl].transport_type.cost)
+                             for index_tl in range(self.problem.nb_transport_links)])
+        emission_cost = sum([nb_trips_per_link[index_tl]*int(self.scaling_factor*transport_links[index_tl].distance
+                                                             * transport_links[index_tl].transport_type.emissions)
                              for index_tl in range(self.problem.nb_transport_links)])
         estimated_compound = []
         for index_tl in range(self.problem.nb_transport_links):
             tl = self.problem.transport_links[index_tl]
             time = tl.distance/tl.transport_type.speed
-            value = sum(flows_variables[index_tl][index_product]*self.problem.products[index_product].value
+            value = sum(flows_variables[index_tl][index_product]*int(self.problem.products[index_product].value)
                         for index_product in flows_variables[index_tl])
-            estimated_compound.append(value*((1+self.problem.capital_factor)**time-1))
-        model.Minimize(transport_cost+emission_cost+sum(estimated_compound))
+            estimated_compound.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
+        self.variables["total_obj"] = transport_cost+emission_cost+sum(estimated_compound)
+        model.Minimize(self.variables["total_obj"])
         self.cp_model = model
         self.variables["flows"] = flows_variables
         self.variables["nb_trips"] = nb_trips_per_link
@@ -243,9 +280,11 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             list_var_weight = []
             for nb_trip in range(max_nb_trips_per_link):
                 trips_variables[index_tl][nb_trip] = {}
+                # means "nb_trip-th" vehicle is used.
                 used_trips_variables[index_tl][nb_trip] = model.NewBoolVar(name=f"used_{index_tl}_{nb_trip}")
             # Symmetry breaking
             for i in range(1, max_nb_trips_per_link):
+                # ensure that if used_trip[i] == 0 then used_trip[i+1] == 0
                 model.Add(used_trips_variables[index_tl][i] <= used_trips_variables[index_tl][i-1])
             for index_product in range(self.problem.nb_products):
                 product = self.problem.products[index_product]
@@ -262,17 +301,21 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                             model.NewIntVar(lb=0,
                                             ub=math.floor(tl.transport_type.capacity/product.size),
                                             name=f"flow_{index_tl}_{nb_trip}_{index_product}"))
+                    # Total flows of product in this edge ==
+                    # the sum of transport product on individual trips on this edge.
                     model.Add(sum([trips_variables[index_tl][nb_trip][index_product]
                                    for nb_trip in trips_variables[index_tl]]) ==
                               flows_variables[index_tl][index_product])
             for i in used_trips_variables[index_tl]:
                 model.Add(sum([trips_variables[index_tl][i][p]
-                              for p in trips_variables[index_tl][i]]) > 0).OnlyEnforceIf(used_trips_variables[index_tl][i])
+                              for p in trips_variables[index_tl][i]]) > 0).OnlyEnforceIf(
+                    used_trips_variables[index_tl][i])
 
                 model.Add(sum([trips_variables[index_tl][i][p]
-                              for p in trips_variables[index_tl][i]]) == 0).OnlyEnforceIf(used_trips_variables[index_tl][i].Not())
+                              for p in trips_variables[index_tl][i]]) == 0).OnlyEnforceIf(
+                    used_trips_variables[index_tl][i].Not())
                 (model.Add(sum([trips_variables[index_tl][i][p]*self.problem.products[p].size
-                              for p in trips_variables[index_tl][i]]) <= tl.transport_type.capacity)
+                                for p in trips_variables[index_tl][i]]) <= tl.transport_type.capacity)
                  .OnlyEnforceIf(used_trips_variables[index_tl][i]))
 
             # Global capacity constraint
@@ -296,11 +339,11 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                                                                                       set())])
                 model.Add(flow_in + net_supply - flow_out == 0)
 
-        transport_cost = sum([nb_trips_per_link[index_tl] * transport_links[index_tl].distance
+        transport_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl] * transport_links[index_tl].distance
                               * transport_links[index_tl].transport_type.cost
                               for index_tl in range(self.problem.nb_transport_links)])
 
-        emission_cost = sum([nb_trips_per_link[index_tl] * transport_links[index_tl].distance
+        emission_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl] * transport_links[index_tl].distance
                              * transport_links[index_tl].transport_type.emissions
                              for index_tl in range(self.problem.nb_transport_links)])
 
@@ -314,10 +357,9 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             for i in trips_variables[index_tl]:
                 value = sum([trips_variables[index_tl][i][index_p]*self.problem.products[index_p].value
                              for index_p in trips_variables[index_tl][i]])
-                compound_cost.append(value*((1+self.problem.capital_factor)**time-1))
-
-        model.Minimize(# 1000 * nb_trips_cost +
-                       transport_cost + emission_cost + sum(compound_cost))
+                compound_cost.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
+        self.variables["total_obj"] = transport_cost + emission_cost + sum(compound_cost)
+        model.Minimize(self.variables["total_obj"])
         self.cp_model = model
         self.variables["flows"] = flows_variables
         self.variables["nb_trips"] = nb_trips_per_link
@@ -334,6 +376,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
         self.variables = {}
         # self.modeling: ModelingMultiBatch = None
         self.base_solution = None
+        self.scaling_factor = 10**3
 
     def init_model(self, solution: MultibatchingSolution, **args: Any) -> None:
         model = cp_model.CpModel()
@@ -405,15 +448,15 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
             for i in packed_on_trip[link]:
                 value = sum([packed_on_trip[link][i][p] * p.value
                              for p in packed_on_trip[link][i]])
-                compound_cost.append(value * ((1 + self.problem.capital_factor) ** time - 1))
+                compound_cost.append(value * int(self.scaling_factor*((1 + self.problem.capital_factor) ** time - 1)))
 
         nb_trips_link = {link: sum(is_trip_used[link][i]
                                   for i in is_trip_used[link]) for link in is_trip_used}
-        transport_cost = sum([nb_trips_link[link] * link.distance
+        transport_cost = self.scaling_factor*sum([nb_trips_link[link] * link.distance
                               * link.transport_type.cost
                               for link in is_trip_used])
 
-        emission_cost = sum([nb_trips_link[link] * link.distance
+        emission_cost = self.scaling_factor*sum([nb_trips_link[link] * link.distance
                              * link.transport_type.emissions
                              for link in is_trip_used])
         model.Minimize(transport_cost+emission_cost+sum(compound_cost))
@@ -482,10 +525,10 @@ class CpsatBendersMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         self.solver_master = CpsatMultibatchingSolver(problem=self.problem)
-        self.solver_master.init_model(modeling=ModelingMultiBatch.FLOW)
+        self.solver_master.init_model(modeling=ModelingMultiBatch.FLOW, **kwargs)
 
     def update_model_master(self, changed: list[tuple[TransportLink, dict[Product, int],
-                                                      int, int]]):
+                                                      int, int]], best_lb: int):
         for link, flows, new_nb_trip, prev_nb_trip in changed:
             index_link = self.problem.transport_links_to_index[link]
             indicators = []
@@ -498,9 +541,12 @@ class CpsatBendersMultibatchingSolver(SolverDO):
                     indicators.append(ind)
                 all_equal = self.solver_master.cp_model.NewBoolVar(f"indicator_cut_{all_index_link}_{self.nb_cuts}")
                 self.solver_master.cp_model.Add(all_equal == 1).OnlyEnforceIf(*indicators)
+
                 (self.solver_master.cp_model.Add(self.solver_master.variables["nb_trips"][all_index_link] == new_nb_trip)
                  .OnlyEnforceIf(all_equal))
                 self.nb_cuts += 1
+        self.solver_master.cp_model.Add(self.solver_master.variables["total_obj"]
+                                        >= int(math.floor(best_lb)))
 
     def solve(
         self, callbacks: Optional[list[Callback]] = None,
@@ -534,6 +580,7 @@ class CpsatBendersMultibatchingSolver(SolverDO):
             print("Obj ", self.aggreg_from_sol(base_solution))
             subsolver = CpsatPackingSubproblem(problem=self.problem)
             subsolver.init_model(solution=base_solution)
+            self.solver_subproblem = subsolver
             res_sub = subsolver.solve(**params_solver_sub)
             res_merged.extend(res_sub)
             print("Status subsolver : ", subsolver.status_solver)
@@ -545,14 +592,14 @@ class CpsatBendersMultibatchingSolver(SolverDO):
                 print("stop")
                 break
             print("Nb changes :", len(changes))
-            self.update_model_master(changed=changes)
             best_lb = max(current_lbs)
+            self.update_model_master(changed=changes, best_lb=best_lb)
             bs, best_ub = res_merged.get_best_solution_fit(satisfying=self.problem)
             print("Best lb", best_lb)
             print("Best Ub", best_ub)
-            #self.solver_master.cp_model.Add(sum(self.solver_master.variables["objs"][obj]
-            #                                    for obj in self.solver_master.variables["objs"])
-            #                                >= int(math.floor(best_lb)))
+            # self.solver_master.cp_model.Add(sum(self.solver_master.variables["objs"][obj]
+            #                                     for obj in self.solver_master.variables["objs"])
+            #                                 >= int(math.floor(best_lb)))
         return res_merged
 
 
