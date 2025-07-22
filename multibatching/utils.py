@@ -518,3 +518,19 @@ def generate_multibatching_problem(
     )
 
     return problem_instance
+
+
+def basic_sanity_check(problem: MultibatchingProblem):
+    products = problem.products
+    total_flow_per_product = defaultdict(lambda: 0)
+    details = defaultdict(lambda : [])
+    for location in problem.locations:
+        for p in location.net_supply:
+            total_flow_per_product[p]+=location.net_supply[p]
+            details[p].append((location.id, location.net_supply[p]))
+
+    for p in total_flow_per_product:
+        print(p.id, total_flow_per_product[p])
+        if total_flow_per_product[p] != 0:
+            print("Problem", details[p])
+    return total_flow_per_product

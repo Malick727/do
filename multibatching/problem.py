@@ -100,6 +100,90 @@ class MultibatchingProblem(Problem):
                 'emission': emission_co2,
                 'capital': compound}
 
+    def check_feasibility_per_product(self, verbose=False) -> bool:
+        """
+        Checks if a feasible flow exists for each product independently.
+
+        For each product, this method builds a flow network and solves a
+        maximum flow problem to determine if the total supply can meet the
+        total demand through the available transport links.
+
+        Args:
+            verbose (bool): If True, prints messages for each product's
+                            feasibility check.
+
+        Returns:
+            bool: True if all products have a feasible flow, False otherwise.
+        """
+        for product in self.products:
+            if product.size <= 0:
+                continue  # or handle as an error
+
+            # 1. Build the flow network for the current product
+            G = nx.DiGraph()
+            source = 'source'
+            sink = 'sink'
+            G.add_nodes_from([source, sink])
+
+            total_supply = 0
+            total_demand = 0
+
+            # 2. Add nodes for each location and connect source/sink
+            for loc in self.locations:
+                G.add_node(loc.id)
+                supply = loc.net_supply.get(product, 0)
+                if supply > 0:
+                    # Add edge from super-source to supplier locations
+                    G.add_edge(source, loc.id, capacity=supply)
+                    total_supply += supply
+                elif supply < 0:
+                    # Add edge from demander locations to super-sink
+                    demand = -supply
+                    G.add_edge(loc.id, sink, capacity=demand)
+                    total_demand += demand
+
+            # Check for overall balance
+            if abs(total_supply - total_demand) > 1e-9:
+                if verbose:
+                    print(
+                        f"Product {product.id}: Total supply ({total_supply}) does not equal total demand ({total_demand}). Infeasible.")
+                return False
+
+            if total_supply == 0:
+                if verbose:
+                    print(f"Product {product.id}: No supply or demand. Skipping.")
+                continue
+
+            # 3. Add transport links as edges with capacities
+            for link in self.transport_links:
+                # A product can only be moved on a link if the transport type is valid for it.
+                if link.transport_type in product.valid_transports:
+                    # The capacity of the link for this product is the transport's total
+                    # capacity divided by the product's size.
+                    capacity = link.transport_type.capacity / product.size
+                    G.add_edge(link.location_l1.id, link.location_l2.id, capacity=10000000000)
+
+            # 4. Calculate maximum flow
+            try:
+                max_flow_value = nx.maximum_flow_value(G, source, sink)
+            except nx.NetworkXUnbounded:
+                # This can happen if there's a path from source to sink with infinite capacity edges.
+                # In our case, capacities are finite, but it's good practice to handle it.
+                max_flow_value = float('inf')
+
+            # 5. Check if max flow is sufficient to meet demand
+            if max_flow_value < total_demand - 1e-9:  # Use a tolerance
+                if verbose:
+                    print(
+                        f"Product {product.id}: Infeasible. Max flow ({max_flow_value}) is less than total demand ({total_demand}).")
+                return False
+            else:
+                if verbose:
+                    print(
+                        f"Product {product.id}: Feasible. Max flow ({max_flow_value}) can satisfy total demand ({total_demand}).")
+
+        return True
+
     def satisfy(self, variable: MultibatchingSolution) -> bool:
         """
         Checks if a given MultibatchingSolution is feasible.

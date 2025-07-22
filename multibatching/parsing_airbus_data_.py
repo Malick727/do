@@ -2,6 +2,9 @@ from multibatching.problem import Location, TransportType, Product, TransportLin
 import json
 import re
 import os
+
+from multibatching.utils import basic_sanity_check
+
 this_folder = os.path.abspath(os.path.dirname(__file__))
 data_folder = os.path.join(this_folder, "datalocal/")
 location_name_id_mapping = {}
@@ -36,8 +39,8 @@ def parse_transport_type() -> tuple[list[TransportType], dict[str, str]]:
     for idx, name in enumerate(name_for_cp):
         transportTypes.append(TransportType(id=name,
                                             cost=int(cost_for_cp[idx]),
-                                            speed=speed_for_cp[idx],
-                                            capacity=cap_for_cp[idx],
+                                            speed=10000,  # speed_for_cp[idx],
+                                            capacity=10000000000,  # cap_for_cp[idx],
                                             emissions=co2_for_cp[idx]))
     return transportTypes, id_to_name
 
@@ -49,7 +52,7 @@ def parse_products(transport_types: list[TransportType],
     with open(os.path.join(data_folder, "products.json"), 'r') as filehandle:
         json_data = json.load(filehandle)
         names = [reformulate(x.get('name')) for x in json_data]
-        sizes = [reformulate(x.get('length')) for x in json_data]
+        sizes = [float(x.get('length')) for x in json_data]
         for item in json_data:
             name = reformulate(item.get("name"))
             tr_list = []
@@ -71,15 +74,19 @@ def parse_locations(products: list[Product]) -> tuple[list[Location], dict[str, 
         location_dict = {}
         for line in filehandle:
             if line.startswith("demandSupply"):
-                start = line.find('demandSupply(')
-                end = line.find(',')
-                part = line[start + len('demandSupply('):end]
-                location = re.findall(',(.*),', line)[0]
-                nr = re.findall("\d+", line)[-1]
+                content_in_parentheses = line[len("demandSupply("):-2]
+                parts = content_in_parentheses.split(',')
+                part = parts[0]
+                location = parts[1]
+                nr = int(parts[2].replace(")", ""))
                 if location not in location_dict:
                     location_dict[location] = {id_product_to_product[part]: int(nr)}
                 else:
-                    location_dict[location].update({id_product_to_product[part]: int(nr)})
+                    if id_product_to_product[part] in location_dict[location]:
+                        print("already there")
+                        location_dict[location][id_product_to_product[part]] += int(nr)
+                    else:
+                        location_dict[location].update({id_product_to_product[part]: int(nr)})
     with open(os.path.join(data_folder, "locations.json"), 'r') as filehandle:
         json_data = json.load(filehandle)
         location_names = [reformulate(x.get('name')) for x in json_data]
@@ -117,28 +124,43 @@ def parse_routes(locations: list[Location],
     return transport_links_list
 
 
-def main():
+def main_parse():
     transports, id_to_name = parse_transport_type()
     products = parse_products(transport_types=transports, id_to_name=id_to_name)
     locations, location_id_to_name = parse_locations(products=products)
-    print(products)
-    print([p.id for p in products])
-    print(locations)
     transport_link = parse_routes(locations=locations,
                                   location_id_to_name=location_id_to_name,
                                   transport_type=transports,
                                   id_to_name_tr=id_to_name)
-    print(transport_link)
+    # locations = [l for l in locations if l.net_supply != {}]
+    # transport_link = [tl for tl in transport_link if tl.location_l1 in locations and tl.location_l2 in locations]
     from multibatching.problem import MultibatchingProblem
     problem = MultibatchingProblem(transport_types=transports,
                                    products=products,
                                    locations=locations,
                                    transport_links=transport_link,
                                    capital_factor=0.1)
-    print(problem)
+    for l in problem.locations:
+        print(l.id, ", :")
+        for p in l.net_supply:
+            print(p.id, ": ", l.net_supply[p])
+        print("----")
+    total_flow = basic_sanity_check(problem)
+    ps = [p for p in problem.products if total_flow[p] == 0 and p.id != "section2"]
+    locations_ = []
+    for l in locations:
+        locations_.append(Location(id=l.id,
+                                   net_supply={p: l.net_supply[p] for p in l.net_supply if p in ps}))
+    problem.products = ps
+    problem = MultibatchingProblem(transport_types=transports,
+                                   products=ps,
+                                   locations=locations_,
+                                   transport_links=transport_link)
+    problem.check_feasibility_per_product(verbose=True)
+    return problem
 
 
 if __name__ == "__main__":
-    main()
+    main_parse()
 
 
