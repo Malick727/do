@@ -2,7 +2,8 @@
 
 import logging
 from typing import Any, Dict, Optional, Hashable
-import localsolver
+import hexaly.optimizer
+
 from discrete_optimization.generic_tools.do_problem import (
     ParamsObjectiveFunction,
 )
@@ -29,9 +30,9 @@ class LSolverMonomodeRCPSP(HexalySolver, RcpspSolver):
         super().__init__(problem, params_objective_function, **kwargs)
         self.rcpsp_model = problem
         assert not problem.is_rcpsp_multimode()
-        self.ls: Optional[localsolver.LocalSolver] = None
-        self.model: Optional[localsolver.LSModel] = None
-        self.vars: Optional[Dict[str, Dict[Hashable, localsolver.LSExpression]]] = {}
+        self.ls: Optional[hexaly.optimizer.HexalyOptimizer] = None
+        self.model: Optional[hexaly.optimizer.HxModel] = None
+        self.vars: Optional[Dict[str, Dict[Hashable, hexaly.optimizer.HxExpression]]] = {}
         self.modelisation: Optional[ModelisationLSolver] = None
 
     def init_model(self, modelisation_type: ModelisationLSolver = ModelisationLSolver.INTERVAL,
@@ -44,7 +45,7 @@ class LSolverMonomodeRCPSP(HexalySolver, RcpspSolver):
             self.modelisation = modelisation_type
 
     def init_model_integer(self, **kwargs):
-        ls = localsolver.LocalSolver()
+        ls = hexaly.optimizer.HexalyOptimizer()
         #
         # Declare the optimization model
         #
@@ -93,7 +94,7 @@ class LSolverMonomodeRCPSP(HexalySolver, RcpspSolver):
                 # self.vars["end"][st].value = warm_start_solution.get_end_time(st)
 
     def init_model_interval(self, **kwargs):
-        ls = localsolver.LocalSolver()
+        ls =hexaly.optimizer.HexalyOptimizer()
         #
         # Declare the optimization model
         #
@@ -137,8 +138,8 @@ class LSolverMonomodeRCPSP(HexalySolver, RcpspSolver):
             if warm_start_solution is None:
                 warm_start_solution = self.rcpsp_model.get_dummy_solution()
             for st in self.vars["intervals"]:
-                self.vars["intervals"][st].value = localsolver.LSInterval(warm_start_solution.get_start_time(st),
-                                                                          warm_start_solution.get_end_time(st))
+                self.vars["intervals"][st].value = hexaly.optimizer.HxInterval(warm_start_solution.get_start_time(st),
+                                                                               warm_start_solution.get_end_time(st))
                 # self.vars["end"][st].value = warm_start_solution.get_end_time(st)
 
     def retrieve_solution(self) -> ResultStorage:

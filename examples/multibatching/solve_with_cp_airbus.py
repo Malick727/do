@@ -5,7 +5,7 @@ from examples.multibatching.instance import init_instance
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 import logging
 
-from multibatching.utils import plot_solution_graph, generate_multibatching_problem
+from multibatching.utils import plot_solution_graph, generate_multibatching_problem, plotly_solution_graph
 from multibatching.parsing_airbus_data_ import main_parse
 
 #logging.basicConfig(level=logging.INFO)
@@ -43,11 +43,19 @@ def run_flow():
     p = ParametersCp.default_cpsat()
     p.nb_process = 16
     res = solver.solve(parameters_cp=p,
-                       time_limit=3000,
+                       time_limit=60,
                        ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res[-1][0]
     print(problem.evaluate(sol), problem.satisfy(sol))
-    plot_solution_graph(problem=problem, solution=res[-1][0])
+    for product in problem.products:
+        fig = plotly_solution_graph(problem=problem,
+                                    solution=res[-1][0],
+                                    products_to_plot=[product],
+                                    explode_flows=True,
+                                    use_logical_layout=False,
+                                    png_path=f"flow_{product.id}.png")
+
+    #plot_solution_graph(problem=problem, solution=res[-1][0])
 
 
 def run_flow_postpro():

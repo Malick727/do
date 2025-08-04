@@ -25,11 +25,12 @@ class HexalySolver(SolverDO, BoundsProviderMixin):
     def solve(self,
               callbacks: Optional[List[Callback]] = None,
               time_limit: Optional[float] = 100.0,
+              nb_threads: int = 10,
               **kwargs: Any) -> ResultStorage:
         if self.ls is None:
             self.init_model(**kwargs)
         self.ls.param.time_limit = time_limit
-        self.ls.param.nb_threads = kwargs.get("nb_threads", 1)
+        self.ls.param.nb_threads = nb_threads
         logger.info("Solve started")
         callback = CallbackList(callbacks)
         ls_callback = LocalSearchIntermediaryCallback(do_solver=self,
@@ -44,6 +45,7 @@ class HexalySolver(SolverDO, BoundsProviderMixin):
         logger.info(f"Status of hexaly-solver : {self.ls.solution.get_status()}")
         self.status_solver = hexaly_status_to_dostatus(hexaly_status=self.ls.solution.get_status())
         logger.info(f"Status of solver : {self.status_solver}")
+        print(self.ls.get_solution)
         sol = self.retrieve_solution()
         fit = self.aggreg_from_sol(sol)
         ls_callback.res.append((sol, fit))

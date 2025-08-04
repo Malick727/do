@@ -4,7 +4,7 @@ from typing import Any, Callable, Sequence
 
 #from discrete_optimization.generic_tools.do_solver import WarmstartMixin
 from satellite_path_planning.solver.spp_solver import SppSolver
-from satellite_path_planning.spp_model import SppSolution
+from satellite_path_planning.problem import SppSolution
 
 try:
     import gurobipy

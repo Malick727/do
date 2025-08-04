@@ -57,7 +57,6 @@ def parse_products(transport_types: list[TransportType],
             name = reformulate(item.get("name"))
             tr_list = []
             for tr in item.get("transportResources"):
-                print(transport_key_to_transport)
                 tr_list.append(transport_key_to_transport[id_to_name[tr]])
             tr_dict[name] = frozenset(tr_list)
     productTypes = []
@@ -112,11 +111,12 @@ def parse_routes(locations: list[Location],
         for route in json_data:
             source = location_id_to_name[route.get("sourceId")]
             destination = location_id_to_name[route.get("destinationId")]
-            print(source, destination)
             for tr in route.get("transportResources"):
                 tr_id = tr.get("transportResourceId")
                 tr_name = id_to_name_tr[tr_id]
                 distance = int(tr.get("distance"))
+                if source=="nola":
+                    print("hey")
                 transport_links_list.append(TransportLink(location_l1=location_name_to_location[source],
                                                           location_l2=location_name_to_location[destination],
                                                           distance=distance,
@@ -146,17 +146,20 @@ def main_parse():
             print(p.id, ": ", l.net_supply[p])
         print("----")
     total_flow = basic_sanity_check(problem)
+    problem.check_feasibility_per_product(verbose=True)
     ps = [p for p in problem.products if total_flow[p] == 0 and p.id != "section2"]
     locations_ = []
     for l in locations:
         locations_.append(Location(id=l.id,
-                                   net_supply={p: l.net_supply[p] for p in l.net_supply if p in ps}))
+                                   net_supply={p: l.net_supply[p]
+                                               for p in l.net_supply
+                                               if p in ps}))
     problem.products = ps
     problem = MultibatchingProblem(transport_types=transports,
                                    products=ps,
                                    locations=locations_,
                                    transport_links=transport_link)
-    problem.check_feasibility_per_product(verbose=True)
+    # problem.check_feasibility_per_product(verbose=True)
     return problem
 
 

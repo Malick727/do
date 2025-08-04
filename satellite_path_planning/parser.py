@@ -5,8 +5,10 @@ import networkx as nx
 from networkx import DiGraph
 from datetime import datetime
 
+from satellite_path_planning.problem import SppProblem
 
-def parse_DiGraph(json_path: str) -> Tuple[DiGraph, Dict[str, Tuple[float, int]], Dict[int, float]]:
+
+def parse_spp_problem(json_path: str) -> SppProblem:
     """
     @param json_path: the file to parse
     @return: the graph who modelize the problem, solutions already compute and the number of acquisition
@@ -25,12 +27,27 @@ def parse_DiGraph(json_path: str) -> Tuple[DiGraph, Dict[str, Tuple[float, int]]
                 acquisition_requests_id = "final"
             else:
                 acquisition_requests_id = "first"
+        if node["start_datetime"] is None:
+            if acquisition_requests_id == "first":
+                start = datetime(day=1, month=1, year=1970)
+            if acquisition_requests_id == "final":
+                start = datetime(day=1, month=1, year=2070)
+        else:
+            start = datetime.strptime(node["start_datetime"], '%Y-%m-%d %H:%M:%S.%f')
+        if node["end_datetime"] is None:
+            if acquisition_requests_id == "first":
+                end = datetime(day=1, month=1, year=1970)
+            if acquisition_requests_id == "final":
+                end = datetime(day=1, month=1, year=2070)
+        else:
+            end = datetime.strptime(node["end_datetime"], '%Y-%m-%d %H:%M:%S.%f')
         graph.add_node(node["id"],
                        acquisition_request_id=acquisition_requests_id,
                        chemin=[],
+                       value=acquisition_dict.get(acquisition_requests_id, 0),
                        chemin_set=set(),
-                       start=datetime.strptime(node["start_datetime"], '%Y-%m-%d %H:%M:%S.%f'),
-                       end=datetime.strptime(node["end_datetime"], '%Y-%m-%d %H:%M:%S.%f'),
+                       start=start,
+                       end=end,
                        value_chemin=0)
 
     for node in nodes_obj:
@@ -42,14 +59,14 @@ def parse_DiGraph(json_path: str) -> Tuple[DiGraph, Dict[str, Tuple[float, int]]
         if obj["optimal_operational_solution"]["total_operational_score"]:
             solution["optimal"] = (obj["optimal_operational_solution"]["total_operational_score"],
                                    obj["optimal_number_of_acqrs_solution"]["number_of_acqrs"])
-
-    if obj["ramp_operational_solution"]["total_operational_score"]:
-        try:
-            solution["ramp"] = (obj["ramp_operational_solution"]["total_operational_score"],
-                                obj["ramp_number_of_acqrs_solution"]["number_of_acqrs"])
-        except:
-            solution["ramp"] = (obj["ramp_operational_solution"]["total_operational_score"],
-                                len(obj["ramp_operational_solution"]["acqr_id_chain"]))
+    if "ramp_operational_solution" in obj:
+        if obj["ramp_operational_solution"]["total_operational_score"]:
+            try:
+                solution["ramp"] = (obj["ramp_operational_solution"]["total_operational_score"],
+                                    obj["ramp_number_of_acqrs_solution"]["number_of_acqrs"])
+            except:
+                solution["ramp"] = (obj["ramp_operational_solution"]["total_operational_score"],
+                                    len(obj["ramp_operational_solution"]["acqr_id_chain"]))
 
     if obj["greedy_operational_solution"]["total_operational_score"]:
         try:
@@ -58,6 +75,9 @@ def parse_DiGraph(json_path: str) -> Tuple[DiGraph, Dict[str, Tuple[float, int]]
         except:
             solution["greedy"] = (obj["greedy_operational_solution"]["total_operational_score"],
                                   len(obj["greedy_operational_solution"]["acqr_id_chain"]))
-    return graph, solution, acquisition_dict
+    problem = SppProblem(graph=graph,
+                         acquisition_dict=acquisition_dict)
+    problem.solution = solution
+    return problem
 
 

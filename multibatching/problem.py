@@ -146,8 +146,9 @@ class MultibatchingProblem(Problem):
             if abs(total_supply - total_demand) > 1e-9:
                 if verbose:
                     print(
-                        f"Product {product.id}: Total supply ({total_supply}) does not equal total demand ({total_demand}). Infeasible.")
-                return False
+                        f"Product {product.id}: Total supply ({total_supply}) "
+                        f"does not equal total demand ({total_demand}). Infeasible.")
+                # return False
 
             if total_supply == 0:
                 if verbose:
@@ -176,7 +177,7 @@ class MultibatchingProblem(Problem):
                 if verbose:
                     print(
                         f"Product {product.id}: Infeasible. Max flow ({max_flow_value}) is less than total demand ({total_demand}).")
-                return False
+                # return False
             else:
                 if verbose:
                     print(
@@ -282,3 +283,90 @@ class MultibatchingProblem(Problem):
                                   for cost in ["transport",
                                                "emission",
                                                "capital"]})
+
+
+def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -> nx.DiGraph:
+    G = nx.DiGraph()
+    # source = 'source'
+    # sink = 'sink'
+    # G.add_nodes_from([source, sink])
+
+    total_supply = 0
+    total_demand = 0
+    # 2. Add nodes for each location and connect source/sink
+    demand_per_location = {}
+    for loc in problem.locations:
+        supply = loc.net_supply.get(product, 0)
+        G.add_node(loc.id, demand=0)
+        demand_per_location[loc.id] = supply
+        if supply > 0:
+            # Add edge from super-source to supplier locations
+            # G.add_edge(source, loc.id, capacity=supply)
+            total_supply += supply
+        elif supply < 0:
+            # Add edge from demander locations to super-sink
+            demand = -supply
+            # G.add_edge(loc.id, sink, capacity=demand)
+            total_demand += demand
+
+    G.add_node("source", demand=-total_supply)
+    G.add_node("sink", demand=total_demand)
+    for loc in demand_per_location:
+        if demand_per_location[loc] > 0:
+            G.add_edge("source", loc, capacity=demand_per_location[loc],
+                       weight=0)
+            print(f"adding link from source to "+loc)
+        if demand_per_location[loc] < 0:
+            G.add_edge(loc, "sink", capacity=-demand_per_location[loc],
+                       weight=0)
+            print(f"adding link from {loc} to sink")
+
+    for link in problem.transport_links:
+
+        # A product can only be moved on a link if the transport type is valid for it.
+        if link.transport_type in product.valid_transports:
+            # The capacity of the link for this product is the transport's total
+            # capacity divided by the product's size.
+            # capacity = link.transport_type.capacity / product.size
+            coefficient = (product.size/link.transport_type.capacity *
+                           (link.transport_type.cost+link.transport_type.emissions)*link.distance)
+            intermediary_node = (link.location_l1.id, link.location_l2.id,
+                                 link.transport_type.id)
+            #G.add_edge(link.location_l1.id,
+            #           link.location_l2.id,
+            #           weight=int(100*coefficient),
+            #           capacity=total_demand)
+            G.add_node(intermediary_node, demand=0)
+            G.add_edge(link.location_l1.id,
+                       intermediary_node,
+                       weight=int(100*1/2*coefficient),
+                       capacity=total_supply)
+            G.add_edge(intermediary_node,
+                       link.location_l2.id,
+                       weight=int(100*1/2*coefficient),
+                       capacity=total_supply)
+    # dict_flow = nx.max_flow_min_cost(G, s="source", t="sink",
+    #                                  capacity="capacity",
+    #                                  weight="weight")
+    print(G.nodes["nola"], list(nx.neighbors(G, "nola")))
+    print("Descendants of nola, ", print([n for n in nx.descendants(G, "nola")]))
+    # max_flow_value = nx.maximum_flow_value(G, "source", "sink")
+    max_flow_value, dict_flow = nx.maximum_flow(G, "source", "sink", capacity="capacity")
+    print(max_flow_value)
+    dict_flow = nx.max_flow_min_cost(G,
+                                     s="source",
+                                     t="sink",
+                                     capacity="capacity",
+                                     weight="weight")
+    # dict_flow = nx.min_cost_flow(G,
+    #                              demand="demand",
+    #                              capacity="capacity",
+    #                              weight="weight")
+    cost_of_flow = nx.cost_of_flow(G, flowDict=dict_flow, weight="weight")
+    print("cost of flow", cost_of_flow)
+    for n0 in dict_flow:
+        for n1 in dict_flow[n0]:
+            if dict_flow[n0][n1] > 0:
+                print("flow between ", n0, " and ", n1, " : ",dict_flow[n0][n1])
+                print("Cost : ", dict_flow[n0][n1]*G[n0][n1]["weight"])
+    print(cost_of_flow)
