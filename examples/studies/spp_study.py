@@ -26,7 +26,7 @@ def get_instances_path(folder: str = None):
 
 
 study_name = "spp-study"
-overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
+overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 instances = get_instances_path()[::-1]
 
 
@@ -78,8 +78,12 @@ basenames = [os.path.basename(p) for p in instances]
 instance_to_index = {basenames[i]: i for i in range(len(instances))}
 json.dump(instance_to_index, open('instance_to_index_spp_study.json', "w"),
           indent=4)
+index_ = 0
 for instance in instances:
     for config_name, solver_config in solver_configs.items():
+        index_ += 1
+        if index_ <= 1663:
+            continue
         logging.info(f"###### Instance {instance}, config {config_name} ######\n\n")
         file = instance
         spp_problem = parse_spp_problem(file)
@@ -111,7 +115,8 @@ for instance in instances:
                 metrics["rel_fit_ramp"] = metrics["fit"]/max(0.000001, spp_problem.solution["ramp"][0])
             if "optimal" in spp_problem.solution:
                 metrics["rel_fit_optimal"] = metrics["fit"]/max(0.000001, spp_problem.solution["optimal"][0])
-            metrics["rel_fit_greedy"] = metrics["fit"]/max(0.000001, spp_problem.solution["greedy"][0])
+            if "greedy" in spp_problem.solution:
+                metrics["rel_fit_greedy"] = metrics["fit"]/max(0.000001, spp_problem.solution["greedy"][0])
             reason = ""
         # store corresponding experiment
         with Hdf5Database(

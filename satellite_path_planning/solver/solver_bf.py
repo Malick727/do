@@ -508,6 +508,7 @@ def repeated_call_to_function(func: Callable,
         if time_limit is not None and time.perf_counter() - t > time_limit:
             break
         esd, path_d, _ = func(graph)
+        print(esd[end])
         if esd[end] > best_sol:
             best_sol = esd[end]
             esd_best = (esd, path_d)

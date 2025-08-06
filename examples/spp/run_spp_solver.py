@@ -2,7 +2,8 @@ import os
 
 from satellite_path_planning.problem import SppProblem, SppSolution
 from satellite_path_planning.parser import parse_spp_problem
-from satellite_path_planning.solver.dp import DpSppSolver, DpModeling, dp
+from satellite_path_planning.solver.dp import DpSppSolver, DpModeling
+import didppy as dp
 from satellite_path_planning.solver.solver_bf import (SppBackwardSolver, SppForwardSolver,
                                                       SppBackwardForwardSolver, SppSolverRandomPick)
 from satellite_path_planning.solver.astar_based import AStarBasedSppSolver
@@ -44,7 +45,7 @@ def run_bf():
     file = [f for f in get_instances_path()
             if "eosp_80acqr_22ramp_13greedy_aZZKEGng.json" in f][0]
     problem = parse_spp_problem(file)
-    solver = SppBackwardForwardSolver(problem)
+    solver = SppBackwardSolver(problem)
     res = solver.solve(nb_way_memory=3)
     sol: SppSolution = res[-1][0]
     print(problem.solution)
@@ -59,9 +60,9 @@ def run_random_bf():
     solver = SppSolverRandomPick(problem)
     cb = BasicStatsCallback()
     res = solver.solve(callbacks=[cb],
-                       nb_way_memory=2,
-                       random_pick=0.2,
-                       nb_iterations=10,
+                       nb_way_memory=0,
+                       random_pick=0.002,
+                       nb_iterations=1000,
                        forward=False)
     sol: SppSolution = res[-1][0]
     print(sol.solution_value)
@@ -90,4 +91,4 @@ def run_astar_based():
 
 
 if __name__ == "__main__":
-    run_bf()
+    run_random_bf()
