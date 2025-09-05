@@ -17,6 +17,7 @@ from enum import Enum
 class DpModeling(Enum):
     PICK_IGNORE = 0
     GOTO = 1
+    GOTO_WITH_DOM = 2
 
 
 class DpSppSolver(DpSolver, WarmstartMixin):
@@ -41,6 +42,9 @@ class DpSppSolver(DpSolver, WarmstartMixin):
         modeling: DpModeling = kwargs["modeling"]
         if modeling == DpModeling.GOTO:
             self.init_model_goto(**kwargs)
+            self.modeling = modeling
+        if modeling == DpModeling.GOTO_WITH_DOM:
+            self.init_model_with_domination(**kwargs)
             self.modeling = modeling
         if modeling == DpModeling.PICK_IGNORE:
             self.init_model_pick_ignore(**kwargs)
@@ -95,7 +99,235 @@ class DpSppSolver(DpSolver, WarmstartMixin):
         closed = model.add_set_var(object_type=node_object,
                                    target=set())
         cur_node = model.add_element_var(object_type=node_object,
-                                         target=0)
+                                         target=source)
+        model.add_base_case([cur_node == target_])
+        self.transitions = {}
+        for i in range(nb_nodes):
+            s_j = model.create_set_const(object_type=node_object, value={j for j in range(i+1)})
+            val = (acquisitions_done.contains(acquisition_of_node[i])).if_then_else(
+                0, values_[acquisition_of_node[i]])
+            tr = dp.Transition(name=f"goto_{i}",
+                               cost=val+dp.IntExpr.state_cost(),
+                               # values_[acquisition_of_node[i]]+dp.IntExpr.state_cost(),
+                               effects=[(cur_node, i),
+                                        (closed,
+                                         closed
+                                         - nodes_per_acquisition[acquisition_of_node[i]]
+                                         -
+                                         s_j
+                                         ),
+                                        (acquisitions_done,
+                                         acquisitions_done.add(acquisition_of_node[i]))],
+                               preconditions=[i > cur_node,
+                                              ~closed.contains(i),
+                                              neighs_table[cur_node].contains(i)])
+            model.add_transition(tr)
+            self.transitions[f"goto_{i}"] = tr
+        acq_of_node = model.add_set_table([{acq_to_index[acquisition_request_id[nodes[i]]]}
+                                           for i in range(nb_nodes)],
+                                          object_type=acq_object)
+        acq_in_the_future = [{acquisition_of_node[-1]}]
+
+        for i in range(len(acquisition_of_node)-2, -1, -1):
+            acq_in_the_future.append(acq_in_the_future[-1].union({acquisition_of_node[i]}))
+        acq_in_the_future = acq_in_the_future[::-1]
+        acq_in_future_table = model.add_set_table(acq_in_the_future, object_type=acq_object)
+        model.add_dual_bound(values_[acq_in_future_table[cur_node].difference(acquisitions_done)])
+        model.add_dual_bound(values_[acq_of_node.union(closed.complement())])
+        if "expected_values" in kwargs:
+            values = [int((kwargs["expected_values"][n]-graph.nodes[n]["value"])) for n in nodes]
+            values_table = model.add_int_table(values)
+            model.add_dual_bound(values_table[cur_node])
+        self.model = model
+        self.nodes = nodes
+
+    def init_model_with_domination(self, **kwargs: Any) -> None:
+        graph = self.problem.graph
+        self.problem.compute_transitive_closure_graph()
+        print("closure done.")
+        node_to_acquisition_descendants = self.problem.node_to_acquisition_descendants
+        nodes = sorted(list(graph.nodes))
+        nb_nodes = len(nodes)
+        index_of_node = {nodes[i]: i for i in range(nb_nodes)}
+        acquisition_request_id = nx.get_node_attributes(graph, "acquisition_request_id")
+        nodes_per_acquisition = {}
+        for n in acquisition_request_id:
+            if acquisition_request_id[n] == "first":
+                nodes_per_acquisition[-1] = {n}
+                acquisition_request_id[n] = -1
+            elif acquisition_request_id[n] == "last":
+                nodes_per_acquisition[-2] = {n}
+                acquisition_request_id[n] = -2
+            else:
+                if acquisition_request_id[n] not in nodes_per_acquisition:
+                    nodes_per_acquisition[acquisition_request_id[n]] = set()
+                nodes_per_acquisition[acquisition_request_id[n]].add(n)
+        acquisitions = list(nodes_per_acquisition.keys())
+        values = [int(self.problem.acquisition_dict.get(acq, 0)) for acq in acquisitions]
+        print("values ", values)
+        acq_to_index = {acquisitions[i]: i for i in range(len(acquisitions))}
+
+        node_to_acquisition_descendants_recomputed = []
+        for i in range(len(nodes)):
+            node = nodes[i]
+            acqs = [n for n in node_to_acquisition_descendants.get(node, [])
+                    if n not in {"first", 'last'} and n != acquisition_request_id[node]]
+            node_to_acquisition_descendants_recomputed.append(set([acq_to_index[x] for x in acqs]))
+
+        nb_acquisitions = len(acquisitions)
+        source = 0
+        target_ = len(nodes) - 1
+        neighs = {index_of_node[n]: {index_of_node[s] for s in nbrdict}
+                  for n, nbrdict in graph.adjacency()}
+        neighs_table = [neighs.get(i, set()) for i in range(nb_nodes)]
+        acquisitions_indexed = [{index_of_node[node]
+                                 for node in nodes_per_acquisition[acq]}
+                                for acq in acquisitions]
+        acquisition_of_node = [acq_to_index[acquisition_request_id[nodes[i]]]
+                               for i in range(nb_nodes)]
+        model = dp.Model(maximize=True)
+        node_object = model.add_object_type(number=nb_nodes)
+        acq_object = model.add_object_type(number=nb_acquisitions)
+        node_to_acquisition_desc = model.add_set_table(node_to_acquisition_descendants_recomputed,
+                                                       object_type=acq_object)
+        neighs_table = model.add_set_table(neighs_table, object_type=node_object)
+        nodes_per_acquisition = model.add_set_table(acquisitions_indexed,
+                                                    object_type=node_object)
+        values_ = model.add_int_table(values)
+        acquisition_object = model.add_object_type(number=nb_acquisitions)
+        acquisitions_done = model.add_set_var(object_type=acquisition_object,
+                                              target=set())
+        closed = model.add_set_var(object_type=node_object,
+                                   target=set())
+        cur_node = model.add_element_var(object_type=node_object,
+                                         target=source)
+        potential_next_acquisition_from_node = [model.add_set_state_fun(node_to_acquisition_desc[i]
+                                                                        - acquisitions_done)
+                                                for i in range(nb_nodes)]
+        potential_value_from_node = [model.add_int_state_fun(values_[potential_next_acquisition_from_node[i]])
+                                     for i in range(nb_nodes)]
+        value_of_acquisition = [model.add_int_state_fun(acquisitions_done.contains(i).if_then_else(
+                                                        0, values_[i]))
+                                for i in range(len(acquisitions))]
+
+        model.add_base_case([cur_node == target_])
+        self.transitions = {}
+        self.transitions_id = {}
+        for i in range(nb_nodes):
+            s_j = model.create_set_const(object_type=node_object, value={j for j in range(i + 1)})
+            tr = dp.Transition(name=f"goto_{i}",
+                               cost=value_of_acquisition[acquisition_of_node[i]] + dp.IntExpr.state_cost(),
+                               # values_[acquisition_of_node[i]]+dp.IntExpr.state_cost(),
+                               effects=[(cur_node, i),
+                                        (closed,
+                                         closed
+                                         | nodes_per_acquisition[acquisition_of_node[i]]
+                                         | s_j),
+                                        (acquisitions_done,
+                                         acquisitions_done.add(acquisition_of_node[i]))],
+                               preconditions=[i > cur_node,
+                                              ~closed.contains(i),
+                                              neighs_table[cur_node].contains(i)])
+            id_t = model.add_transition(tr)
+            self.transitions[f"goto_{i}"] = tr
+            self.transitions_id[i] = id_t
+        preds = self.problem.compute_predecessors_map()
+        if True:
+            for i in range(nb_nodes):
+                print(i)
+                node_i = nodes[i]
+                for j in range(nb_nodes):
+                    if i == j:
+                        continue
+                    node_j = nodes[j]
+                    if len(preds[node_i].intersection(preds[node_j])) > 0:
+                        if values[acquisition_of_node[j]] <= values[acquisition_of_node[i]]:
+                            cond1 = (potential_value_from_node[j]+values[acquisition_of_node[j]] <
+                                     potential_value_from_node[i]+values[acquisition_of_node[i]])
+                            cond2 = potential_next_acquisition_from_node[j].issubset(potential_next_acquisition_from_node[i])
+                            model.add_transition_dominance(self.transitions_id[i],
+                                                           self.transitions_id[j],
+                                                               [cond2, cond1])
+
+        acq_of_node = model.add_set_table([{acq_to_index[acquisition_request_id[nodes[i]]]}
+                                           for i in range(nb_nodes)],
+                                          object_type=acq_object)
+        acq_in_the_future = [{acquisition_of_node[-1]}]
+        for i in range(len(acquisition_of_node) - 2, -1, -1):
+            acq_in_the_future.append(acq_in_the_future[-1].union({acquisition_of_node[i]}))
+        acq_in_the_future = acq_in_the_future[::-1]
+        acq_in_future_table = model.add_set_table(acq_in_the_future, object_type=acq_object)
+        model.add_dual_bound(values_[acq_in_future_table[cur_node].difference(acquisitions_done)])
+        model.add_dual_bound(values_[node_to_acquisition_desc[cur_node].difference(acquisitions_done)])
+        model.add_dual_bound(values_[acq_of_node.union(closed.complement())])
+        if "expected_values" in kwargs:
+            values = [int((kwargs["expected_values"][n] - graph.nodes[n]["value"])) for n in nodes]
+            values_table = model.add_int_table(values)
+            model.add_dual_bound(values_table[cur_node])
+
+        self.model = model
+        self.nodes = nodes
+
+
+
+
+
+
+
+
+
+
+        # print("Transitive closure done : ")
+        nodes = sorted(list(graph.nodes))
+        nb_nodes = len(nodes)
+        index_of_node = {nodes[i]: i for i in range(nb_nodes)}
+        acquisition_request_id = nx.get_node_attributes(graph, "acquisition_request_id")
+        nodes_per_acquisition = {}
+        for n in acquisition_request_id:
+            if acquisition_request_id[n] == "first":
+                nodes_per_acquisition[-1] = {n}
+                acquisition_request_id[n] = -1
+            elif acquisition_request_id[n] == "last":
+                nodes_per_acquisition[-2] = {n}
+                acquisition_request_id[n] = -2
+            else:
+                if acquisition_request_id[n] not in nodes_per_acquisition:
+                    nodes_per_acquisition[acquisition_request_id[n]] = set()
+                nodes_per_acquisition[acquisition_request_id[n]].add(n)
+        acquisitions = list(nodes_per_acquisition.keys())
+        values = [int(self.problem.acquisition_dict.get(acq, 0)) for acq in acquisitions]
+        print("values ", values)
+        acq_to_index = {acquisitions[i]: i for i in range(len(acquisitions))}
+        nb_acquisitions = len(acquisitions)
+        source = 0
+        target_ = len(nodes) - 1
+        neighs = {index_of_node[n]: {index_of_node[s] for s in nbrdict}
+                  for n, nbrdict in graph.adjacency()}
+
+
+
+
+        neighs_table = [neighs.get(i, set()) for i in range(nb_nodes)]
+        acquisitions_indexed = [{index_of_node[node]
+                                 for node in nodes_per_acquisition[acq]}
+                                for acq in acquisitions]
+        acquisition_of_node = [acq_to_index[acquisition_request_id[nodes[i]]]
+                               for i in range(nb_nodes)]
+        model = dp.Model(maximize=True)
+
+        node_object = model.add_object_type(number=nb_nodes)
+        acq_object = model.add_object_type(number=nb_acquisitions)
+        neighs_table = model.add_set_table(neighs_table, object_type=node_object)
+        nodes_per_acquisition = model.add_set_table(acquisitions_indexed,
+                                                    object_type=node_object)
+        values_ = model.add_int_table(values)
+        acquisition_object = model.add_object_type(number=nb_acquisitions)
+        acquisitions_done = model.add_set_var(object_type=acquisition_object,
+                                              target=set())
+        closed = model.add_set_var(object_type=node_object,
+                                   target=set())
+        cur_node = model.add_element_var(object_type=node_object,
+                                         target=source)
         model.add_base_case([cur_node == target_])
         self.transitions = {}
         for i in range(nb_nodes):
@@ -470,7 +702,7 @@ class DpSppSolver(DpSolver, WarmstartMixin):
         self.potential_value = potential_value
 
     def retrieve_solution(self, sol: dp.Solution) -> Solution:
-        if self.modeling == DpModeling.GOTO:
+        if self.modeling in {DpModeling.GOTO, DpModeling.GOTO_WITH_DOM}:
             return self.retrieve_solution_goto(sol)
         if self.modeling == DpModeling.PICK_IGNORE or self.modeling is None:
             return self.retrieve_solution_pick(sol)

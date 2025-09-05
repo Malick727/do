@@ -9,25 +9,31 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class TransportType:
-    id: int = field(hash=True)
+    id: int = field(hash=True, repr=False)
     cost: int = field(hash=False)
     speed: int = field(hash=False)
     emissions: int = field(hash=False)
-    capacity: int = field(hash=False)
+    capacity: int = field(hash=False, repr=True)
+    name: str = field(hash=False, repr=True, default=None)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Product:
-    id: int
-    size: int
-    value: int
-    valid_transports: frozenset[TransportType] = field(default_factory=set, hash=False)
+    id: int = field(repr=False)
+    name: str = field(repr=True, hash=False, default="")
+    size: int = field(repr=True, default=0)
+    value: int = field(repr=False, default=0)
+    valid_transports: frozenset[TransportType] = field(default_factory=set, hash=False, repr=False)
+
+    def __hash__(self):
+        return hash(self.id)
 
 
 @dataclass(frozen=True)
 class Location:
-    id: Hashable = field(repr=True, hash=True)
-    net_supply: dict[Product, int] = field(repr=False, hash=False)
+    id: Hashable = field(repr=False, hash=True)
+    name: str = field(repr=True, hash=False, default="")
+    net_supply: dict[Product, int] = field(repr=False, hash=False, default_factory=lambda: {})
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,7 @@ class TransportLink:
     location_l2: Location
     distance: int
     transport_type: TransportType
+    max_trips: Optional[int] = field(repr=True, hash=False, default=None)
 
 
 @dataclass
@@ -218,7 +225,7 @@ class MultibatchingProblem(Problem):
 
             # Check 4: Non-negative Frequencies
             if flow_item.nb_packing < -epsilon:
-                # print(f"Validation Error: Negative nb_packing for link {link.location_l1.id}->{link.location_l2.id}: {flow_item.nb_packing}")
+                print(f"Validation Error: Negative nb_packing for link {link.location_l1.id}->{link.location_l2.id}: {flow_item.nb_packing}")
                 return False
 
             # Calculate packed volume for this specific packing
@@ -226,24 +233,25 @@ class MultibatchingProblem(Problem):
 
             # Check 7: If nb_packing > 0, packing must not be empty.
             if flow_item.nb_packing > epsilon and not flow_item.product_packing:
-                # print(f"Validation Error: Non-zero nb_packing with empty product_packing for link {link.location_l1.id}->{link.location_l2.id}")
+                print("Product packing : ", flow_item.product_packing)
+                print(f"Validation Error: Non-zero nb_packing with empty product_packing for link {link.location_l1.id}->{link.location_l2.id}")
                 return False
 
             for product, units in flow_item.product_packing.items():
                 # Check 5: Non-negative Packed Units
                 if units < -epsilon:
-                    # print(f"Validation Error: Negative packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
+                    print(f"Validation Error: Negative packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
                     return False
 
                 # Check 6: Integer Packing Units
                 # If units are not integers, the packing itself is invalid
                 if abs(units - round(units)) > epsilon:
-                    # print(f"Validation Error: Non-integer packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
+                    print(f"Validation Error: Non-integer packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
                     return False
 
                 # Check 3: Product-Transport Compatibility
                 if link.transport_type not in product.valid_transports:
-                    # print(f"Validation Error: Product P{product.id} not compatible with TR{link.transport_type.id} on link {link.location_l1.id}->{link.location_l2.id}")
+                    print(f"Validation Error: Product P{product.id} not compatible with TR{link.transport_type.id} on link {link.location_l1.id}->{link.location_l2.id}")
                     return False
 
                 current_packing_volume += product.size * units
@@ -256,7 +264,7 @@ class MultibatchingProblem(Problem):
 
             # Check 2: Packing Capacity
             if current_packing_volume > link.transport_type.capacity + epsilon:
-                # print(f"Validation Error: Packing volume {current_packing_volume} exceeds capacity {link.transport_type.capacity} for link {link.location_l1.id}->{link.location_l2.id}")
+                print(f"Validation Error: Packing volume {current_packing_volume} exceeds capacity {link.transport_type.capacity} for link {link.location_l1.id}->{link.location_l2.id}")
                 return False
 
         # --- 3. Final Flow Conservation Check ---
@@ -284,6 +292,17 @@ class MultibatchingProblem(Problem):
                                                "emission",
                                                "capital"]})
 
+    def get_supplier_location(self, product: Product):
+        """Returns the location where a given product is done (i.e net-supply>0)"""
+        return [(l, l.net_supply.get(product, 0)) for l in self.locations if l.net_supply.get(product, 0) > 0]
+
+    def get_consumer_location(self, product: Product):
+        """Returns the location where a given product is consumed (i.e net-supply<0)"""
+        return [(l, l.net_supply.get(product, 0)) for l in self.locations if l.net_supply.get(product, 0) < 0]
+
+    def get_outgoing_tl_from_location(self, location: Location):
+        """Returns all transport link that goes out of a given location"""
+        return [tl for tl in self.transport_links if tl.location_l1 == location]
 
 def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -> nx.DiGraph:
     G = nx.DiGraph()
@@ -298,7 +317,7 @@ def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -
     for loc in problem.locations:
         supply = loc.net_supply.get(product, 0)
         G.add_node(loc.id, demand=0)
-        demand_per_location[loc.id] = supply
+        demand_per_location[loc.name] = supply
         if supply > 0:
             # Add edge from super-source to supplier locations
             # G.add_edge(source, loc.id, capacity=supply)
@@ -328,28 +347,30 @@ def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -
             # The capacity of the link for this product is the transport's total
             # capacity divided by the product's size.
             # capacity = link.transport_type.capacity / product.size
+            if link.transport_type.capacity == 0:
+                continue
             coefficient = (product.size/link.transport_type.capacity *
                            (link.transport_type.cost+link.transport_type.emissions)*link.distance)
-            intermediary_node = (link.location_l1.id, link.location_l2.id,
-                                 link.transport_type.id)
+            intermediary_node = (link.location_l1.name, link.location_l2.name,
+                                 link.transport_type.name)
             #G.add_edge(link.location_l1.id,
             #           link.location_l2.id,
             #           weight=int(100*coefficient),
             #           capacity=total_demand)
             G.add_node(intermediary_node, demand=0)
-            G.add_edge(link.location_l1.id,
+            G.add_edge(link.location_l1.name,
                        intermediary_node,
                        weight=int(100*1/2*coefficient),
                        capacity=total_supply)
             G.add_edge(intermediary_node,
-                       link.location_l2.id,
+                       link.location_l2.name,
                        weight=int(100*1/2*coefficient),
                        capacity=total_supply)
     # dict_flow = nx.max_flow_min_cost(G, s="source", t="sink",
     #                                  capacity="capacity",
     #                                  weight="weight")
-    print(G.nodes["nola"], list(nx.neighbors(G, "nola")))
-    print("Descendants of nola, ", print([n for n in nx.descendants(G, "nola")]))
+    #print(G.nodes["nola"], list(nx.neighbors(G, "nola")))
+    #print("Descendants of nola, ", print([n for n in nx.descendants(G, "nola")]))
     # max_flow_value = nx.maximum_flow_value(G, "source", "sink")
     max_flow_value, dict_flow = nx.maximum_flow(G, "source", "sink", capacity="capacity")
     print(max_flow_value)
@@ -370,3 +391,4 @@ def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -
                 print("flow between ", n0, " and ", n1, " : ",dict_flow[n0][n1])
                 print("Cost : ", dict_flow[n0][n1]*G[n0][n1]["weight"])
     print(cost_of_flow)
+    return G, dict_flow

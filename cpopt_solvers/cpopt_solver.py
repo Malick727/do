@@ -4,11 +4,12 @@ from docplex.cp.solution import CpoSolveResult
 from docplex.cp.solution import (SOLVE_STATUS_UNKNOWN, SOLVE_STATUS_INFEASIBLE,
                                  SOLVE_STATUS_OPTIMAL, SOLVE_STATUS_FEASIBLE,
                                  SOLVE_STATUS_JOB_ABORTED, SOLVE_STATUS_JOB_FAILED)
-from docplex.cp.solver.cpo_callback import EVENT_SOLUTION, CpoCallback
+from docplex.cp.solver.cpo_callback import EVENT_SOLUTION, EVENT_OBJ_BOUND,  CpoCallback
 from typing import Optional, List, Any
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, StatusSolver
 from discrete_optimization.generic_tools.do_problem import Solution
+from discrete_optimization.generic_tools.do_solver import BoundsProviderMixin
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from docplex.cp.model import CpoModel
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
@@ -27,11 +28,21 @@ def cpostatus_to_dostatus(status_from_cpo: str)->StatusSolver:
         return StatusSolver.UNSATISFIABLE
 
 
-class CPOSolver(CpSolver):
+class CPOSolver(CpSolver, BoundsProviderMixin):
     """Generic ortools cpo solver."""
 
     cp_model: Optional[CpoModel] = None
     early_stopping_exception: Optional[Exception] = None
+
+    def get_current_best_internal_objective_bound(self) -> Optional[float]:
+        if self.callback.current_cpo_solve_result is not None:
+            return self.callback.current_cpo_solve_result.get_objective_bound()
+        return None
+
+    def get_current_best_internal_objective_value(self) -> Optional[float]:
+        if self.callback.current_cpo_solve_result is not None:
+            return self.callback.current_cpo_solve_result.get_objective_value()
+        return None
 
     @abstractmethod
     def retrieve_solution(self, sres: CpoSolveResult) -> Solution:
@@ -78,11 +89,13 @@ class CPOSolver(CpSolver):
             parameters_cp = ParametersCp.default_cpsat()
         callback = CpoSolutionCallback(do_solver=self,
                                        callback=callbacks_list)
+        self.callback = callback
         self.cp_model.add_solver_callback(callback)
         result: CpoSolveResult = self.cp_model.solve(
             TimeLimit=time_limit,
             execfile="/Applications/CPLEX_Studio2211/cpoptimizer/bin/arm64_osx/cpoptimizer",
             trace_log=True)
+        callback.current_cpo_solve_result = result
         if self.early_stopping_exception:
             if isinstance(self.early_stopping_exception, SolveEarlyStop):
                 logger.info(self.early_stopping_exception)
@@ -124,9 +137,13 @@ class CpoSolutionCallback(CpoCallback):
         self.callback = callback
         self.res = do_solver.create_result_storage([])
         self.nb_solutions = 0
+        self.current_cpo_solve_result: Optional[CpoSolveResult] = None
 
     def invoke(self, solver: docplex.cp.model.CpoSolver, event, sres: CpoSolveResult):
+        if event == EVENT_OBJ_BOUND:
+            self.current_cpo_solve_result = sres
         if event == EVENT_SOLUTION:
+            self.current_cpo_solve_result = sres
             sol = self.do_solver.retrieve_solution(sres)
             fit = self.do_solver.aggreg_from_sol(sol)
             self.res.append((sol, fit))

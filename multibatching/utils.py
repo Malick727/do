@@ -12,173 +12,6 @@ from typing import List, Optional
 import numpy as np
 import os
 
-def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingProblem):
-    """
-    Renders the product flows of a MultibatchingSolution on a graph.
-
-    Args:
-        solution: An instance of MultibatchingSolution containing the list of packing flows.
-        problem: An instance of MultibatchingProblem containing the problem definition
-                 (locations, transport links, products).
-    """
-
-    G = nx.DiGraph()  # Create a directed graph
-
-    # --- 1. Add Nodes (Locations) with Net Supply Information ---
-    node_labels = {}
-    for loc in problem.locations:
-        G.add_node(loc.id, type='location', obj=loc)
-
-        # Format net_supply for node labels
-        supply_details = []
-        for product in problem.products:
-            supply_qty = loc.net_supply.get(product, 0)
-            if supply_qty != 0:
-                # Use a plus sign for supply, minus for demand, for clarity
-                sign = "+" if supply_qty > 0 else ""
-                supply_details.append(f"P{product.id}: {sign}{supply_qty}")
-
-        if supply_details:
-            node_labels[loc.id] = f"{loc.id}\n({', '.join(supply_details)})"
-        else:
-            node_labels[loc.id] = f"{loc.id}"
-
-    # --- 2. Aggregate Product Flows per TransportLink ---
-    # Dictionary to store aggregated flow for each (link_id, product_id)
-    link_product_flows = {link: {prod: 0 for prod in problem.products} for link in problem.transport_links}
-
-    # Store total flow for each link to determine edge properties
-    link_total_flow = {link: 0 for link in problem.transport_links}
-
-    for flow_item in solution.list_flows:
-        link = flow_item.transport_link
-        nb_packing = flow_item.nb_packing
-
-        # Aggregate total product flow for edge width
-        for product, units in flow_item.product_packing.items():
-            if product in problem.products:
-                link_product_flows[link][product] += units * nb_packing
-                link_total_flow[link] += units * nb_packing
-    location_total_flow = defaultdict(lambda: 0)
-    for link in link_product_flows:
-        l1 = link.location_l1.id
-        l2 = link.location_l2.id
-        for product in link_product_flows[link]:
-            location_total_flow[l1, l2, product] += link_product_flows[link][product]
-
-    # --- 3. Add Edges (TransportLinks) with Flow Information ---
-    # Store flow details as a list of dictionaries for easier rendering
-    edge_label_data = {}
-    edge_widths = []
-    edge_widths_dict = {}
-    max_flow = max(link_total_flow.values()) if link_total_flow else 1  # Avoid div by zero
-
-    # Map product IDs to colors for clearer distinction in labels
-    product_colors_map = {
-        1: '#1f77b4',  # Blue
-        2: '#ff7f0e',  # Orange
-        3: '#2ca02c',  # Green
-        4: '#d62728',  # Red
-    }
-    locations = set([(x[0], x[1]) for x in location_total_flow])
-
-    for link in locations:
-        from_node = link[0]
-        to_node = link[1]
-
-        current_link_flow_total = sum(location_total_flow[x] for x in location_total_flow
-                                      if x[0] == from_node and x[1] == to_node)
-
-        if current_link_flow_total > 0:  # Only draw edges with actual flow
-            G.add_edge(from_node, to_node,
-                       total_flow=current_link_flow_total,
-                       link_obj=link)
-
-            # Prepare data for detailed edge label
-            label_parts = []
-
-            # Product flows
-            for product in problem.products:
-                # flow = link_product_flows[link][product]
-                flow = location_total_flow.get((from_node, to_node, product), 0)
-                if flow > 0:
-                    label_parts.append(
-                        {'text': f'P{product.id}: {flow}', 'color': product_colors_map.get(product.id, 'black'),
-                         'type': 'product_flow'})
-
-            edge_label_data[(from_node, to_node)] = label_parts
-
-            # Scale edge width based on total flow
-            width = 0.5 + 5 * (current_link_flow_total / max_flow)  # Base width + scaled flow
-            edge_widths.append(width)
-            edge_widths_dict[(from_node, to_node)] = 0.5 + 5 * (current_link_flow_total / max_flow)
-
-    if not G.edges():
-        print("Aucun flux de produit actif à afficher.")
-        plt.figure(figsize=(8, 6))
-        plt.title("Réseau logistique (Aucun flux à afficher)")
-        nx.draw_networkx(G, with_labels=True, node_color='lightgray', node_size=1000)
-        plt.show()
-        return
-
-    # --- 4. Plotting ---
-    plt.figure(figsize=(12, 9))  # Adjust figure size for better readability
-
-    # Use a consistent layout for better visualization
-    pos = {
-        'l1': (0.0, 1.0), 'l2': (0.0, 0.0),
-        'l3': (0.5, 1.2), 'l4': (0.5, -0.2),
-        'l5': (1.0, 1.0), 'l6': (1.0, 0.0)
-    }
-
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color='lightgray', node_size=2000, alpha=0.9, linewidths=1.5, edgecolors='gray')
-
-    # Draw node labels including net supply
-    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=9, font_weight='bold')
-
-    # Draw edges
-    nx.draw_networkx_edges(G, pos,
-                           edgelist=[e for e in G.edges()],
-                           width=[edge_widths_dict[e] for e in G.edges()],
-                           arrowstyle='->', arrowsize=20,
-                           edge_color='dimgray', alpha=0.7)
-
-    # Draw edge labels (flows only)
-    for (u, v), label_parts_list in edge_label_data.items():
-        x = (pos[u][0] + pos[v][0]) / 2
-        y = (pos[u][1] + pos[v][1]) / 2
-
-        dx = pos[v][0] - pos[u][0]
-        dy = pos[v][1] - pos[u][1]
-        norm = (dx ** 2 + dy ** 2) ** 0.5
-
-        offset_magnitude = 0.04
-        offset_x_perp = -dy / norm * offset_magnitude if norm > 0 else 0
-        offset_y_perp = dx / norm * offset_magnitude if norm > 0 else 0
-
-        line_height_factor = 0.06  # Adjust as needed based on font size
-        total_text_height = len(label_parts_list) * line_height_factor
-        current_y_offset = y + offset_y_perp + (total_text_height / 2) - (line_height_factor / 2)
-
-        for part_data in label_parts_list:
-            label_text = part_data['text']
-            color = part_data['color']
-
-            plt.text(x + offset_x_perp, current_y_offset, label_text,
-                     horizontalalignment='center', verticalalignment='center',
-                     color=color,
-                     fontweight='bold',  # Product flows are always bold
-                     bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.2'),
-                     fontsize=8)
-
-            current_y_offset -= line_height_factor
-
-    plt.title("Flux de produits dans le réseau logistique mondial", size=15)
-    plt.axis('off')  # Turn off the axis
-    plt.tight_layout()
-    plt.show()
-
 
 def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingProblem):
     """
@@ -209,9 +42,9 @@ def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingP
                 supply_details.append(f"P{product.id}: {sign}{supply_qty}")
 
         if supply_details:
-            node_labels[loc.id] = f"{loc.id}\n({', '.join(supply_details)})"
+            node_labels[loc.id] = f"{loc.name}\n({', '.join(supply_details)})"
         else:
-            node_labels[loc.id] = f"{loc.id}"
+            node_labels[loc.id] = f"{loc.name}"
 
     # --- 2. Aggregate Product Flows per (from_loc, to_loc) pair and collect packing info ---
     # Dictionary to store aggregated flow for each (from_loc, to_loc, product)
@@ -253,7 +86,7 @@ def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingP
         for product in sorted_packing_products:
             units = flow_item.product_packing[product]
             if product in problem.products:
-                packing_details_str.append(f"{units}xP{product.id}")
+                packing_details_str.append(f"{units}xP{product.name}")
 
         # Ensure that nb_packing is displayed as a float for consistency with problem definition
         nb_packing_display = f"{flow_item.nb_packing:.1f}".rstrip('0').rstrip('.')  # Remove trailing .0 if integer
@@ -261,7 +94,7 @@ def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingP
         detailed_label_line = (
             f"[{', '.join(packing_details_str)}] "
             f"@ {nb_packing_display} "
-            f"(TR: {flow_item.transport_link.transport_type.id})"
+            f"(TR: {flow_item.transport_link.transport_type.name})"
         )
         detailed_packing_labels_per_pair[current_pair].append(detailed_label_line)
 
@@ -685,7 +518,7 @@ def basic_sanity_check(problem: MultibatchingProblem):
     details = defaultdict(lambda : [])
     for location in problem.locations:
         for p in location.net_supply:
-            total_flow_per_product[p]+=location.net_supply[p]
+            total_flow_per_product[p] += location.net_supply[p]
             details[p].append((location.id, location.net_supply[p]))
 
     for p in total_flow_per_product:

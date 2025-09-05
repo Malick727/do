@@ -8,9 +8,11 @@ from satellite_path_planning.solver.solver_bf import (SppBackwardSolver, SppForw
                                                       SppBackwardForwardSolver, SppSolverRandomPick)
 from satellite_path_planning.solver.astar_based import AStarBasedSppSolver
 from discrete_optimization.generic_tools.callbacks.stats_retrievers import BasicStatsCallback
-
+import logging
+logging.basicConfig(level=logging.INFO)
 folder_data = os.environ["SPP_PATH"]
 instance_medium = os.path.join(folder_data, "eosp_376_medium_cases/")
+instance_small = os.path.join(folder_data, "eosp_2714_small_cases/")
 
 
 def get_instances_path(folder: str = None):
@@ -21,7 +23,7 @@ def get_instances_path(folder: str = None):
 
 
 def run_dp():
-    file = get_instances_path()[2]
+    file = get_instances_path()[3]
     problem = parse_spp_problem(file)
     solver = SppForwardSolver(problem)
     res = solver.solve(nb_way_memory=0)
@@ -30,11 +32,32 @@ def run_dp():
     print(problem.evaluate(sol))
     solver = DpSppSolver(problem)
     solver.init_model(modeling=DpModeling.GOTO)
-    # solver.set_warm_start(sol)
-    res = solver.solve(time_limit=20,
+    solver.set_warm_start(sol)
+    res = solver.solve(time_limit=100,
                        solver=dp.LNBS,
                        retrieve_intermediate_solutions=True,
-                       threads=10)
+                       threads=32)
+    sol = res[-1][0]
+    print(problem.solution)
+    print(problem.satisfy(sol))
+    print(problem.evaluate(sol))
+
+
+def run_dp_small():
+    file = get_instances_path(instance_small)[14]
+    problem = parse_spp_problem(file)
+    solver = SppForwardSolver(problem)
+    res = solver.solve(nb_way_memory=0)
+    sol = res[-1][0]
+    print(problem.satisfy(sol))
+    print(problem.evaluate(sol))
+    solver = DpSppSolver(problem)
+    solver.init_model(modeling=DpModeling.GOTO_WITH_DOM)
+    # solver.set_warm_start(sol)
+    res = solver.solve(time_limit=100,
+                       solver=dp.ACPS,
+                       retrieve_intermediate_solutions=True,
+                       threads=16)
     sol = res[-1][0]
     print(problem.solution)
     print(problem.satisfy(sol))
@@ -91,4 +114,4 @@ def run_astar_based():
 
 
 if __name__ == "__main__":
-    run_random_bf()
+    run_dp()

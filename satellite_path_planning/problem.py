@@ -1,3 +1,6 @@
+from collections import defaultdict
+
+import networkx as nx
 from copy import deepcopy
 from typing import Dict, Type
 
@@ -43,6 +46,25 @@ class SppProblem(Problem):
             self.ind_to_id[ind] = node
             self.id_to_ind[node] = ind
             ind += 1
+
+    def compute_predecessors_map(self):
+        pred = defaultdict(lambda: set())
+        for n0, n1 in self.graph.edges():
+            pred[n1].add(n0)
+        self.pred_maps = pred
+        return pred
+
+
+
+    def compute_transitive_closure_graph(self):
+        graph = nx.transitive_closure_dag(self.graph,
+                                          topo_order=sorted(list(self.graph.nodes)))
+        self.closure_graph: nx.DiGraph = graph
+        dict_acquisition_descendants = {node: {self.graph.nodes[s]["acquisition_request_id"]
+                                               for s in nbrdict}
+                                        for node, nbrdict in graph.adjacency()}
+        self.node_to_acquisition_descendants = dict_acquisition_descendants
+
 
     def evaluate(self, variable: SppSolution) -> Dict[str, float]:
         return {
