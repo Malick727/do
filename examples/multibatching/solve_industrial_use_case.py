@@ -2,13 +2,14 @@
 
 from multibatching.parse_config_data import parse_json_to_problem
 from multibatching.problem import compute_graph_for_product, Product
-from multibatching.solvers.cpsat import (CpsatMultibatchingSolver, CpsatBendersMultibatchingSolver,
+from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
+                                         CpsatBendersMultibatchingSolver,
                                          ModelingMultiBatch, CpsatPackingSubproblem)
 from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
 import json
 import os
 
-from multibatching.utils import basic_sanity_check, plot_solution_graph
+from multibatching.utils import basic_sanity_check, plot_solution_graph, plotly_solution_graph
 import logging
 logging.basicConfig(level=logging.INFO)
 
@@ -33,20 +34,49 @@ def run_cp():
     p = ParametersCp.default_cpsat()
     p.nb_process = 16
     result = solver.solve(callbacks=[],
-                          time_limit=30,
+                          time_limit=10,
                           parameters_cp=p,
                           ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
     subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
     subsolver.init_model(solution=result[-1][0])
     res_ = subsolver.solve(parameters_cp=p,
-                           time_limit=5,
+                           time_limit=10,
                            ortools_cpsat_solver_kwargs={"log_search_progress": False})
     sol = res_[-1][0]
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
-    plot_solution_graph(problem=problem, solution=sol)
+    # plot_solution_graph(problem=problem, solution=sol)
+    for i in range(len(problem.products)):
+        plotly_solution_graph(solution=sol,
+                              problem=problem,
+                              use_logical_layout=False,
+                              products_to_plot=[problem.products[i]],
+                              explode_flows=True)
 
+
+def run_cp_detailed_trips():
+    problem = parse_problem()
+    solver = CpsatMultibatchingSolver(problem=problem, scaling_factor=1)
+    solver.init_model(modeling=ModelingMultiBatch.UNIT_FLOW,
+                      detailed_capacity_constraint=False)
+    p = ParametersCp.default_cpsat()
+    p.nb_process = 16
+    result = solver.solve(callbacks=[],
+                          time_limit=100,
+                          parameters_cp=p,
+                          ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
+    sol = result[-1][0]
+    print(problem.evaluate(sol))
+    print(sum(problem.evaluate(sol).values()))
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    # plot_solution_graph(problem=problem, solution=sol)
+    for i in range(len(problem.products)):
+        plotly_solution_graph(solution=sol,
+                              problem=problem,
+                              use_logical_layout=False,
+                              products_to_plot=[problem.products[i]],
+                              explode_flows=True)
 
 
 def run_cp_debug():
@@ -108,28 +138,23 @@ def run_cp_debug_section_2():
 def run_cp_debug_flows():
     problem = parse_problem()
     graph, flows = compute_graph_for_product(problem=problem,
-                                             product=problem.products[3])
+                                             product=problem.products[26])
     print(graph)
-    locations = problem.get_supplier_location(problem.products[3])
+    locations = problem.get_supplier_location(problem.products[26])
 
-    available_transport_type = set(problem.products[3].valid_transports)
+    available_transport_type = set(problem.products[26].valid_transports)
     print(locations, " supply")
     for location, capa in locations:
         print(location)
         tls = set([tl.transport_type for tl in problem.transport_links if tl.location_l1 == location])
         print(tls)
         intersect = tls.intersection(available_transport_type)
-        print(intersect, " possible transport type to go out from ", problem.products[3], " from ", location)
+        print(intersect, " possible transport type to go out from ", problem.products[26], " from ", location)
         if len(intersect) == 0:
             print("Problem, you won't be able to build an outgoing flow...")
             print(problem.get_outgoing_tl_from_location(location=location),
                   " here is the outgoing link from the location")
-
-
-
-
-
-    locations = problem.get_consumer_location(problem.products[3])
+    locations = problem.get_consumer_location(problem.products[26])
     print(locations, " consume")
 
 

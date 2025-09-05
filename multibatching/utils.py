@@ -218,19 +218,17 @@ def plotly_solution_graph(
     Args:
         solution: The MultibatchingSolution to visualize.
         problem: The problem definition.
-        products_to_plot: An optional list of products to display.
-        explode_flows: If True, uses intermediate nodes to separate flows.
-        use_logical_layout: If True, arranges nodes based on their supply/demand role.
+        products_to_plot: An optional list of products to display. If None, all products are shown.
+        explode_flows: If True, uses intermediate nodes to separate overlapping flows for different products.
+        use_logical_layout: If True, arranges nodes sequentially from left to right based on flow hierarchy.
         html_path (str, optional): The file path to save an interactive HTML file.
-        png_path (str, optional): The file path to save a static PNG image.
+        png_path (str, optional): The file path to save a static PNG image. Requires 'kaleido' to be installed.
         show_figure (bool): If True, displays the figure in a browser/viewer.
     """
-    # ... (all the logic from the previous version for creating the figure remains the same)
-
     # --- 1. Filter products and aggregate flows ---
     included_products = set(products_to_plot) if products_to_plot else set(problem.products)
     title_product_part = ", ".join(
-        f"P{p.id}" for p in sorted(included_products, key=lambda x: x.id)) if products_to_plot else "All Products"
+        f"P{p.name}" for p in sorted(included_products, key=lambda x: x.id)) if products_to_plot else "All Products"
 
     aggregated_flows = defaultdict(float)
     for flow_item in solution.list_flows:
@@ -238,90 +236,113 @@ def plotly_solution_graph(
             if product in included_products:
                 total_units = units * flow_item.nb_packing
                 if total_units > 1e-6:
-                    from_loc = flow_item.transport_link.location_l1.id
-                    to_loc = flow_item.transport_link.location_l2.id
-                    aggregated_flows[(from_loc, to_loc, product)] += total_units
+                    from_loc_id = flow_item.transport_link.location_l1.id
+                    to_loc_id = flow_item.transport_link.location_l2.id
+                    aggregated_flows[(from_loc_id, to_loc_id, product, flow_item.transport_link.transport_type)] += (
+                        total_units)
 
     if not aggregated_flows:
         print(f"No active flows found for the specified products: {title_product_part}")
         return
 
-    # --- 2. Prepare node and link data ---
-    product_colors_map = ['rgba(31, 119, 180, 0.8)', 'rgba(255, 127, 14, 0.8)', 'rgba(44, 160, 44, 0.8)',
-                          'rgba(214, 39, 40, 0.8)', 'rgba(148, 103, 189, 0.8)']
+    # --- 2. Prepare node and link data structures ---
+    product_colors = ['rgba(31, 119, 180, 0.8)', 'rgba(255, 127, 14, 0.8)', 'rgba(44, 160, 44, 0.8)',
+                      'rgba(214, 39, 40, 0.8)', 'rgba(148, 103, 189, 0.8)', 'rgba(140, 86, 75, 0.8)']
 
-    node_labels = sorted([loc.id for loc in problem.locations])
+    loc_id_to_loc = {loc.id: loc for loc in problem.locations}
+    sorted_locations = sorted(problem.locations, key=lambda l: l.name)
+    node_labels = [loc.name for loc in sorted_locations]
     node_colors = ['#333333'] * len(node_labels)
-    node_to_index = {label: i for i, label in enumerate(node_labels)}
-
+    node_to_index = {loc.id: i for i, loc in enumerate(sorted_locations)}
     sources, targets, values, link_colors, link_labels = [], [], [], [], []
 
-    # --- 3. Generate Layout and Links ---
+    # --- 3. Generate Layout ---
     sankey_arrangement = 'snap'
     node_x, node_y = None, None
 
     if use_logical_layout:
         sankey_arrangement = 'freeform'
-        node_x, node_y = [0.5] * len(node_labels), [0.5] * len(node_labels)
+        node_x, node_y = [0.5] * len(node_labels), [0.95] * len(node_labels)  # Default for inactive nodes
 
-        loc_roles = {}
-        for loc in problem.locations:
-            net_supply = sum(loc.net_supply.get(p, 0) for p in included_products)
-            if net_supply > 1e-6:
-                loc_roles[loc.id] = 'source'
-            elif net_supply < -1e-6:
-                loc_roles[loc.id] = 'sink'
-            else:
-                loc_roles[loc.id] = 'transshipment'
+        flow_graph = nx.DiGraph()
+        for from_loc_id, to_loc_id, _ in aggregated_flows.keys():
+            flow_graph.add_edge(from_loc_id, to_loc_id)
 
-        layout_map = {'source': [], 'transshipment': [], 'sink': []}
-        for label in node_labels: layout_map[loc_roles[label]].append(label)
+        node_levels = {}
+        try:
+            # CORRECTED: Properly calculate the level of each node in the flow sequence.
+            sorted_nodes = list(nx.topological_sort(flow_graph))
+            for node_id in sorted_nodes:
+                max_pred_level = -1
+                for pred_id in flow_graph.predecessors(node_id):
+                    max_pred_level = max(max_pred_level, node_levels[pred_id])
+                node_levels[node_id] = max_pred_level + 1
 
-        for i, label in enumerate(layout_map['source']):
-            node_x[node_to_index[label]] = 0.01
-            node_y[node_to_index[label]] = (i + 1) / (len(layout_map['source']) + 1)
-        for i, label in enumerate(layout_map['transshipment']):
-            node_x[node_to_index[label]] = 0.5
-            node_y[node_to_index[label]] = (i + 1) / (len(layout_map['transshipment']) + 1)
-        for i, label in enumerate(layout_map['sink']):
-            node_x[node_to_index[label]] = 0.99
-            node_y[node_to_index[label]] = (i + 1) / (len(layout_map['sink']) + 1)
+        except nx.NetworkXUnfeasible:
+            print("⚠️ Warning: Flow graph contains cycles. Falling back to source-transshipment-sink layout.")
+            loc_roles = {loc.id: 'transshipment' for loc in problem.locations}
+            for loc in problem.locations:
+                net_supply = sum(loc.net_supply.get(p, 0) for p in included_products)
+                if net_supply > 1e-6:
+                    loc_roles[loc.id] = 'source'
+                elif net_supply < -1e-6:
+                    loc_roles[loc.id] = 'sink'
+            node_levels = {loc_id: 0 if role == 'source' else 1 if role == 'transshipment' else 2
+                           for loc_id, role in loc_roles.items()}
 
-    for (from_loc, to_loc, product), quantity in aggregated_flows.items():
-        color = product_colors_map[problem.product_to_index[product] % len(product_colors_map)]
-        hover_label = f"<b>{from_loc} → {to_loc}</b><br>Product {product.id}<br>Quantity: {quantity:,.2f}"
+        if node_levels:
+            level_to_nodes = defaultdict(list)
+            for node_id, level in node_levels.items():
+                level_to_nodes[level].append(node_id)
+
+            max_level = max(node_levels.values()) if node_levels else 0
+
+            for level, ids_at_level in level_to_nodes.items():
+                sorted_ids = sorted(ids_at_level, key=lambda id: loc_id_to_loc[id].name)
+                for i, node_id in enumerate(sorted_ids):
+                    if node_id in node_to_index:
+                        idx = node_to_index[node_id]
+                        node_x[idx] = 0.01 + 0.98 * (level / max_level) if max_level > 0 else 0.5
+                        node_y[idx] = (i + 0.5) / len(sorted_ids)  # Spread vertically
+
+    # --- 4. Generate Links ---
+    for (from_loc_id, to_loc_id, product, transport_type), quantity in aggregated_flows.items():
+        color = product_colors[problem.product_to_index[product] % len(product_colors)]
+        from_loc_name = loc_id_to_loc[from_loc_id].name
+        to_loc_name = loc_id_to_loc[to_loc_id].name
+        hover_label = f"<b>{from_loc_name} → {to_loc_name}</b><br>Product: {product.name}<br>Quantity: {quantity:,.2f}"
 
         if explode_flows:
-            intermediate_label = f"P{product.id}: {from_loc}→{to_loc}"
+            intermediate_label = f"P{product.name}: {from_loc_name}→{to_loc_name}, {transport_type.name}"
             if intermediate_label not in node_to_index:
                 node_labels.append(intermediate_label)
                 node_colors.append(color.replace('0.8', '0.9'))
                 node_to_index[intermediate_label] = len(node_labels) - 1
                 if use_logical_layout:
-                    from_x, from_y = node_x[node_to_index[from_loc]], node_y[node_to_index[from_loc]]
-                    to_x, to_y = node_x[node_to_index[to_loc]], node_y[node_to_index[to_loc]]
-                    node_x.append(np.mean([from_x, to_x]))
-                    node_y.append(np.mean([from_y, to_y]))
+                    from_idx = node_to_index[from_loc_id]
+                    to_idx = node_to_index[to_loc_id]
+                    node_x.append(np.mean([node_x[from_idx], node_x[to_idx]]))
+                    node_y.append(np.mean([node_y[from_idx], node_y[to_idx]]))
 
-            from_idx, intermediate_idx, to_idx = node_to_index[from_loc], node_to_index[intermediate_label], \
-            node_to_index[to_loc]
+            from_idx, intermediate_idx, to_idx = node_to_index[from_loc_id], node_to_index[intermediate_label], \
+            node_to_index[to_loc_id]
             sources.extend([from_idx, intermediate_idx])
             targets.extend([intermediate_idx, to_idx])
             values.extend([quantity, quantity])
             link_colors.extend([color, color])
             link_labels.extend([hover_label, hover_label])
         else:
-            sources.append(node_to_index[from_loc])
-            targets.append(node_to_index[to_loc])
+            sources.append(node_to_index[from_loc_id])
+            targets.append(node_to_index[to_loc_id])
             values.append(quantity)
             link_colors.append(color)
             link_labels.append(hover_label)
 
-    # --- 4. Create Figure ---
+    # --- 5. Create Figure ---
     fig = go.Figure(data=[go.Sankey(
         arrangement=sankey_arrangement,
         node=dict(
-            pad=15, thickness=15, line=dict(color="black", width=0.5),
+            pad=20, thickness=15, line=dict(color="black", width=0.5),
             label=node_labels, color=node_colors, x=node_x, y=node_y,
             hovertemplate='%{label}<extra></extra>'
         ),
@@ -338,11 +359,10 @@ def plotly_solution_graph(
         margin=dict(l=20, r=20, t=50, b=20)
     )
 
-    # --- 5. Save and/or Show the Figure ---
+    # --- 6. Save and/or Show ---
     if html_path:
         fig.write_html(html_path)
         print(f"✅ Interactive plot saved to: {os.path.abspath(html_path)}")
-
     if png_path:
         try:
             fig.write_image(png_path, width=1200, height=700, scale=2)
@@ -350,9 +370,9 @@ def plotly_solution_graph(
         except ValueError as e:
             print(f"❌ Error saving PNG: {e}")
             print("👉 Please install kaleido: pip install kaleido")
-
     if show_figure:
         fig.show()
+
 
 def generate_multibatching_problem(
         num_locations: int = 6,

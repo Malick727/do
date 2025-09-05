@@ -304,6 +304,13 @@ class MultibatchingProblem(Problem):
         """Returns all transport link that goes out of a given location"""
         return [tl for tl in self.transport_links if tl.location_l1 == location]
 
+    def get_total_supply(self, product: Product):
+        return sum([max(loc.net_supply.get(product, 0), 0) for loc in self.locations])
+
+    def get_total_demand(self, product: Product):
+        return -sum([min(loc.net_supply.get(product, 0), 0) for loc in self.locations])
+
+
 def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -> nx.DiGraph:
     G = nx.DiGraph()
     # source = 'source'

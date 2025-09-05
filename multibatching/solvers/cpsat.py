@@ -154,6 +154,14 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.modeling = modeling
 
     def init_model_flows(self, **args: Any) -> None:
+        supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
+        demand_per_product = {p: self.problem.get_total_demand(p) for p in self.problem.products}
+        total_size_per_product = {p: p.size*supply_per_product[p] for p in self.problem.products}
+        total_size_in_problem = sum(total_size_per_product.values())
+        # TODO : this is not totally correct, but fine.
+        max_nb_trip = int(total_size_in_problem/min([tt.capacity for tt in self.problem.transport_types
+                                                 if tt.capacity > 0]))
+        # Could provide non-hardcoded upper bound for our variables...
         model = cp_model.CpModel()
         transport_links = self.problem.transport_links
         flows_variables = {}
@@ -170,15 +178,17 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             if loc2.id not in keys_inflow_location_product:
                 keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
             tr: TransportType = tl.transport_type
-            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=10000000,
+            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_nb_trip,
                                                           name=f'num_trips_{index_tl}')
             list_var_weight = []
             # for index_product in range(self.problem.nb_products):
             for index_product in range(self.problem.nb_products):
                 product = self.problem.products[index_product]
+                max_flow_product = max(supply_per_product[product],
+                                       demand_per_product[product])
                 if tr in product.valid_transports:
                     flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
-                                                                               ub=10000000,
+                                                                               ub=max_flow_product,
                                                                                name=f"flow_{index_tl}_{index_product}")
                     keys_outflow_location_product[loc1.id][product.id].add((index_tl, index_product))
                     keys_inflow_location_product[loc2.id][product.id].add((index_tl, index_product))
@@ -264,6 +274,13 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.variables["nb_trips"] = nb_trips_per_link
 
     def init_model_flows_relaxed(self, **args: Any) -> None:
+        supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
+        demand_per_product = {p: self.problem.get_total_demand(p) for p in self.problem.products}
+        total_size_per_product = {p: p.size * supply_per_product[p] for p in self.problem.products}
+        total_size_in_problem = sum(total_size_per_product.values())
+        # TODO : this is not totally correct, but fine.
+        max_nb_trip = int(total_size_in_problem / min([tt.capacity for tt in self.problem.transport_types
+                                                   if tt.capacity > 0]))
         model = cp_model.CpModel()
         transport_links = self.problem.transport_links
         flows_variables = {}
@@ -280,15 +297,17 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             if loc2.id not in keys_inflow_location_product:
                 keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
             tr: TransportType = tl.transport_type
-            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=100,
+            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_nb_trip,
                                                           name=f'num_trips_{index_tl}')
             list_var_weight = []
             # for index_product in range(self.problem.nb_products):
             for index_product in range(self.problem.nb_products):
                 product = self.problem.products[index_product]
+                max_flow_product = max(supply_per_product[product],
+                                       demand_per_product[product])
                 if tr in product.valid_transports:
                     flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
-                                                                               ub=100,
+                                                                               ub=max_flow_product,
                                                                                name=f"flow_{index_tl}_{index_product}")
                     keys_outflow_location_product[loc1.id][product.id].add((index_tl, index_product))
                     keys_inflow_location_product[loc2.id][product.id].add((index_tl, index_product))
@@ -300,9 +319,9 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                                        [x[1] for x in list_var_weight])
                       <= nb_trips_per_link[index_tl]*tl.transport_type.capacity)
             used = model.NewBoolVar(f"tl_{index_tl}")
-            model.add(sum([x[0] for x in list_var_weight])>0).OnlyEnforceIf(used)
-            model.add(sum([x[0] for x in list_var_weight])==0).OnlyEnforceIf(used.Not())
-            model.add(nb_trips_per_link[index_tl]>=1).OnlyEnforceIf(used)
+            model.add(sum([x[0] for x in list_var_weight]) > 0).OnlyEnforceIf(used)
+            model.add(sum([x[0] for x in list_var_weight]) == 0).OnlyEnforceIf(used.Not())
+            model.add(nb_trips_per_link[index_tl] >= 1).OnlyEnforceIf(used)
 
         if args["detailed_capacity_constraint"]:
             nb_trips_min_for_product_flows = {}
@@ -396,7 +415,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             tr: TransportType = tl.transport_type
             max_trips_for_this_link = tl.max_trips
             if max_trips_for_this_link is None:
-                max_trips_for_this_link = 10
+                max_trips_for_this_link = max_nb_trips_per_link
             nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_trips_for_this_link,
                                                           name=f'num_trips_{index_tl}')
             list_var_weight = []
@@ -528,7 +547,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
                     is_trip_used[link][t_idx] = model.NewBoolVar(f'is_trip_used_{transport_link_to_index[link]}_{t_idx}')
                     for product in flow_per_link[link]:
                         # Upper bound for product units in a single trip
-                        ub_per_product = link.transport_type.capacity // product.size
+                        ub_per_product = int(link.transport_type.capacity // product.size)
                         packed_on_trip[link][t_idx][product] = model.NewIntVar(
                             0, ub_per_product,
                             f'packed_{transport_link_to_index[link]}_trip{t_idx}_P{product.id}'
@@ -546,10 +565,10 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
             for t_idx in packed_on_trip[link]:
                 # Total volume packed on this specific trip
                 packed_volume_on_this_trip = sum(
-                    product.size * packed_on_trip[link][t_idx][product] for product in packed_on_trip[link][t_idx]
+                    int(product.size) * packed_on_trip[link][t_idx][product] for product in packed_on_trip[link][t_idx]
                 )
                 # If trip is used, its volume must respect capacity. If not used, its volume must be 0.
-                model.Add(packed_volume_on_this_trip <= link.transport_type.capacity)
+                model.Add(packed_volume_on_this_trip <= int(link.transport_type.capacity))
                 model.Add(packed_volume_on_this_trip > 0).OnlyEnforceIf(is_trip_used[link][t_idx])
                 model.Add(packed_volume_on_this_trip == 0).OnlyEnforceIf(is_trip_used[link][t_idx].Not())
 

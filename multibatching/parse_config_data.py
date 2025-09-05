@@ -23,8 +23,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
             cost=data["cost"],
             speed=data["speed"],
             emissions=data["co2Emissions"],
-            capacity=1000
-            # capacity=data["capacity"]//10**6
+            capacity=data["capacity"]//10**6
         ) for _id, data in json_data["transportResources"].items()
     }
 
@@ -33,8 +32,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
         _id: Product(
             id=_id,
             name=data["name"],
-            # size=data["size"]//10**6,
-            size=100,
+            size=data["size"]//10**6,
             value=data["value"],
             valid_transports=frozenset(
                 transport_types_map[tr_id] for tr_id in data["validTR"]
