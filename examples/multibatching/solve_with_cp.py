@@ -47,6 +47,28 @@ def run_flow():
     plot_solution_graph(problem=problem, solution=res[-1][0])
 
 
+def run_flow_cpmpy():
+    from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
+    problem = init_instance()
+    # problem = generate_multibatching_problem(num_locations=20,
+    #                                          num_transport_types=2,
+    #                                          num_products=3,
+    #                                          min_dist=1,
+    #                                          max_dist=5,
+    #                                          seed=51)
+    solver = CpmpyMultibatchingSolver(problem, scaling_factor=1,
+                                      solver_name="exact")
+    solver.init_model(modeling=ModelingMultiBatch.FLOW,
+                      detailed_capacity_constraint=True)
+    p = ParametersCp.default_cpsat()
+    res = solver.solve(parameters_cp=p,
+                       time_limit=60,
+                       ortools_cpsat_solver_kwargs={"log_search_progress": True})
+    sol = res[-1][0]
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    plot_solution_graph(problem=problem, solution=res[-1][0])
+
+
 def run_flow_postpro():
     problem = generate_multibatching_problem(num_locations=20,
                                              num_transport_types=2,
@@ -101,8 +123,9 @@ def run_benders():
 
 
 if __name__ == "__main__":
+    run_flow_cpmpy()
     # {'transport': 4534.599999999999, 'emission': 6256.800000000001, 'capital': 37585.31823418207}
-    run()
+    # run()
     # {'transport': 1542.0, 'emission': 1650.0, 'capital': 26150.62750968731} True
     # run()
     # {'transport': 1542.0, 'emission': 1650.0, 'capital': 26150.627509687314} True
