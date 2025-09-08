@@ -49,14 +49,18 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
     }
 
     # Update locations with net supply/demand from sourcing strategies
-    for strategy in json_data["sourcingStrategies"]:
-        product = products_map[strategy["product"]]
-        for loc_id, quantity in strategy["netSupplyDemand"].items():
-            if loc_id in locations_map:
-                locations_map[loc_id].net_supply[product] = quantity
+    # THis is not the good way to parse finally.
+    # for strategy in json_data["sourcingStrategies"]:
+    #    product = products_map[strategy["product"]]
+    #    for loc_id, quantity in strategy["netSupplyDemand"].items():
+    #        if loc_id in locations_map:
+    #            locations_map[loc_id].net_supply[product] = quantity
+    for product_key in json_data["products"]:
+        product = products_map[product_key]
+        for location_key in json_data["products"][product_key]["netSupplyDemand"]:
+            locations_map[location_key].net_supply[product] = json_data["products"][product_key]["netSupplyDemand"][location_key]
 
     locations_list = list(locations_map.values())
-
     # 4. Parse Transport Links
     transport_links_list = []
     for _id, data in json_data["routes"].items():
@@ -90,6 +94,11 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
     )
 
 
+def parse_config_file_to_problem(json_path: str):
+    dict_ = json.load(open(json_path, "r"))
+    return parse_json_to_problem(dict_)
+
+
 if __name__ == "__main__":
     this_folder = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(this_folder,
@@ -98,4 +107,3 @@ if __name__ == "__main__":
     dict_ = json.load(open(config_file, "r"))
     problem = parse_json_to_problem(dict_)
     print(problem)
-    print("hey")
