@@ -1,0 +1,22 @@
+[
+{   "program_folder": "airbus",
+    "timeout": 3600,
+    "max_nr_models": 3,
+    "show_model": true,
+    "show_dataframes": true,
+    "all_results_folder": "output",
+    "timestamp_on_results_folder": false,
+    "example": false,
+    "output_hundredth_model": false,
+    "print_details": true,
+    "exit_after_optimal_found": false,
+    "draw": false,
+    "check_correctness": false,
+    "compute_costs": false,
+    "runs":
+    {  
+    },
+    "__alternatives": 
+    {  }
+}
+]
