@@ -88,6 +88,13 @@ class MultibatchingProblem(Problem):
         self.locations_to_index = {self.locations[i]: i for i in range(self.nb_locations)}
         self.transport_links_to_index = {self.transport_links[i]: i for i in range(self.nb_transport_links)}
 
+        self.transport_type_id_to_transport_type = {tt.id: tt for tt in self.transport_types}
+        self.location_id_to_location = {loc.id: loc for loc in self.locations}
+
+        self.loc_and_transport_type_to_transport_link = {(tl.location_l1.id, tl.location_l2.id,
+                                                          tl.transport_type.id): tl
+                                                         for tl in self.transport_links}
+
     def evaluate(self, variable: "MultibatchingSolution") -> dict[str, float]:
         transport_cost = sum([flow.transport_link.transport_type.cost
                               * flow.transport_link.distance*flow.nb_packing
@@ -275,6 +282,24 @@ class MultibatchingProblem(Problem):
                 return False
 
         return True  # All checks passed
+
+    def check_flows(self, solution: MultibatchingSolution):
+        current_net_flows = defaultdict(float)
+        for loc in self.locations:
+            for product in self.products:
+                current_net_flows[(loc.id, product.id)] = loc.net_supply.get(product, 0)
+
+        for flow_item in solution.list_flows:
+            link = flow_item.transport_link
+            for product, units in flow_item.product_packing.items():
+                current_net_flows[(link.location_l1.id, product.id)] -= units * flow_item.nb_packing
+                # Incoming flow to link.location_l2
+                current_net_flows[(link.location_l2.id, product.id)] += units * flow_item.nb_packing
+        epsilon = 1e-6  # Tolerance for floating-point comparisons
+        for (loc_id, prod_id), net_flow in current_net_flows.items():
+            if abs(net_flow) > epsilon:
+                print(f"Validation Error: Flow imbalance for Location {loc_id}, Product P{prod_id}: {net_flow}")
+
 
     def get_attribute_register(self) -> EncodingRegister:
         return EncodingRegister(dict_attribute_to_type={})

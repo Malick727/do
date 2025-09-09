@@ -18,7 +18,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-def parse_problem(fix_problem: bool = True):
+def parse_problem(fix_problem: bool = False):
     this_folder = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(this_folder,
                                "../../multibatching/datalocal/config-local.json")
@@ -31,15 +31,16 @@ def parse_problem(fix_problem: bool = True):
     return problem
 
 
-def run_cp():
+def run_cp_2steps():
     problem = parse_problem()
-    solver = CpsatMultibatchingSolver(problem=problem, scaling_factor=1)
+    solver = CpsatMultibatchingSolver(problem=problem,
+                                      scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
-                      detailed_capacity_constraint=False)
+                      detailed_capacity_constraint=True)
     p = ParametersCp.default_cpsat()
     p.nb_process = 16
     result = solver.solve(callbacks=[],
-                          time_limit=100,
+                          time_limit=300,
                           parameters_cp=p,
                           ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
     subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
@@ -61,25 +62,25 @@ def run_cp():
 
 
 def run_cp_benders():
-    problem = parse_problem()
+    problem = parse_problem(fix_problem=False)
     solver = CpsatBendersMultibatchingSolver(problem=problem,
                                              scaling_factor=1)
     solver.init_model(detailed_capacity_constraint=False)
     p = ParametersCp.default_cpsat()
-    p.nb_process = 16
+    p.nb_process = 32
     result = solver.solve(callbacks=[],
                           nb_iteration=12,
-                          params_solver_master={"time_limit": 100,
+                          params_solver_master={"time_limit": 150,
                                                 "parameters_cp": p,
                                                 "ortools_cpsat_solver_kwargs":
                                                 {"log_search_progress": True}},
-                          params_solver_sub={"time_limit": 100,
+                          params_solver_sub={"time_limit": 30,
                                              "parameters_cp": p,
                                              "ortools_cpsat_solver_kwargs":
                                              {"log_search_progress": True}})
-    #2674876090.0928
-    #2667868469.6941004
-    #2638523237.235999
+    # 2674876090.0928
+    # 2667868469.6941004
+    # 2638523237.235999
     sol, _ = result.get_best_solution_fit(problem)
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
@@ -248,5 +249,9 @@ def run_cp_debug_flows():
 
 if __name__ == "__main__":
     # 2637923900.2783985
+    #2686538384.2949004
+
     run_cp_benders()
+    # run_cp_2steps()
+    # run_cp_benders()
 

@@ -161,7 +161,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         total_size_in_problem = sum(total_size_per_product.values())
         # TODO : this is not totally correct, but fine.
         max_nb_trip = int(total_size_in_problem/min([tt.capacity for tt in self.problem.transport_types
-                                                 if tt.capacity > 0]))
+                                                     if tt.capacity > 0]))
         # Could provide non-hardcoded upper bound for our variables...
         model = cp_model.CpModel()
         transport_links = self.problem.transport_links
@@ -225,13 +225,20 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                 transport_type = transport_link.transport_type
                 for index_product in flows_variables[index_tl]:
                     nb_trips_min = nb_trips_min_for_product_flows[(index_product, transport_type)]
-                    binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
-                                         for k in range(len(nb_trips_min))]
-                    model.add_map_domain(flows_variables[index_tl][index_product],
-                                         binary_indicators)
-                    for j in range(1, len(binary_indicators)):
-                        (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
-                         .OnlyEnforceIf(binary_indicators[j]))
+                    #binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
+                    #                     for k in range(len(nb_trips_min))]
+                    #model.add_map_domain(flows_variables[index_tl][index_product],
+                    #                     binary_indicators)
+                    #for j in range(1, len(binary_indicators)):
+                    #    (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
+                     #    .OnlyEnforceIf(binary_indicators[j]))
+                    # For a given number of product flow NB, we force nb_trips_per_link to be >= nb_trips_min[NB]
+                    model.AddForbiddenAssignments([flows_variables[index_tl][index_product],
+                                                   nb_trips_per_link[index_tl],
+                                                   ],
+                                                  [(j, nb_min)
+                                                   for j in range(1, min(5, len(nb_trips_min)))
+                                                   for nb_min in range(nb_trips_min[j])])
 
         # Flows constraint
         for location in self.problem.locations:
@@ -532,18 +539,24 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
         transport_links = [x.transport_link for x in solution.list_flows]
         transport_link_to_index = {transport_links[i]: i for i in range(len(transport_links))}
         num_trips_dict = {x.transport_link: x.nb_packing for x in solution.list_flows}
-        flow_per_link = {x.transport_link: {p: int(x.product_packing[p]*x.nb_packing) for p in x.product_packing}
-                         for x in solution.list_flows}
+        flow_per_link: dict[TransportLink, dict[Product, int]] = {x.transport_link:
+                                                                      {p: int(x.product_packing[p]*x.nb_packing)
+                                                                       for p in x.product_packing}
+                                                                  for x in solution.list_flows}
+        sum_size_per_link = {x: sum([p.size*flow_per_link[x][p]
+                                     for p in flow_per_link[x]])
+                             for x in flow_per_link}
+        approx_num_trip_per_link = {x: math.ceil(sum_size_per_link[x]/x.transport_type.capacity)
+                                    for x in flow_per_link}
         # --- Determine Max Trips per Link for Variable Indexing ---
         # This ensures we create enough variables for the maximum number of trips any link might have.
-        max_trips_overall = 30
         packed_on_trip = defaultdict(lambda: defaultdict(dict))
         # is_trip_used[link_obj][trip_idx]: Binary variable, 1 if trip is used, 0 otherwise
         is_trip_used = defaultdict(lambda: {})
         for link in transport_links:
             # Number of trips to actually attempt packing into for this specific link
             # Use the number of trips allocated by the main model.
-            num_trips_for_this_link = num_trips_dict.get(link, 0)+30
+            num_trips_for_this_link = 2*approx_num_trip_per_link[link]
             # Only create variables if trips are allocated to avoid unnecessary complexity
             if num_trips_for_this_link > 0:
                 for t_idx in range(num_trips_for_this_link):
@@ -555,9 +568,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver):
                             lb=0, ub=ub_per_product,
                             name=f'packed_{transport_link_to_index[link]}_trip{t_idx}_P{product.id}'
                         )
-
         # --- Constraints ---
-
         for link in transport_links:
             # 1. Total Flow Fulfillment (per link, per product):
             for product in flow_per_link[link]:
@@ -724,7 +735,10 @@ class CpsatBendersMultibatchingSolver(SolverDO):
                                                    scaling_factor=self.scaling_factor)
                 subsolver.init_model(solution=base_solution)
                 self.solver_subproblem = subsolver
-                res_sub = subsolver.solve(**params_solver_sub)
+                # res_sub = subsolver.solve(**params_solver_sub)
+                from multibatching.solvers.greedy import PackingViaBinPacking
+                subsolver_pack = PackingViaBinPacking(problem=self.problem)
+                res_sub = subsolver_pack.solve(solution=base_solution, time_limit_per_link=4)
                 res_merged.extend(res_sub)
                 print("Status subsolver : ", subsolver.status_solver)
                 print("Solution post pro",

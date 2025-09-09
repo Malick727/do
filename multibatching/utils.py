@@ -354,8 +354,18 @@ def plotly_solution_graph(
     )])
 
     fig.update_layout(
-        title_text=f"Logistics Flow Network: <b>{title_product_part}</b>",
-        font_family="Arial", font_size=12,
+        title=dict(
+            text=f"Logistics Flow Network: <b>{title_product_part}</b>",
+            font=dict(
+                size=50  # <-- Increase this value for a bigger title (e.g., 20)
+            )
+        ),
+
+        # --- To change NODE and HOVER label size ---
+        font=dict(
+            family="Arial",
+            size=50  # <-- Increase this value for bigger node/hover labels (e.g., 16)
+        ),
         margin=dict(l=20, r=20, t=50, b=20)
     )
 
