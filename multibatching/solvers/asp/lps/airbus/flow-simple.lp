@@ -13,8 +13,6 @@ root(eARFullFuselage).
 
 #show transportCapacity/2.
 
-% constraints
-
 1{flow(To,To,Part,D)}1:- offer(To,Part,D), root(Part).
 
 1{flow(From,To,Part,N): numFlowPart(Part,N),N<=O, N<=D}1 :- offer(Part,From,O), demand(Part,To,D), not root(Part). 
@@ -37,6 +35,7 @@ via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3))
 }1
 :- flow(From,To,Part,N), From!=To.
 
+% comments, will be ignored by ASP
 %:- DS!=Dir+Via1+Via2, 
 %Dir=#sum{N,From,TR:routeflow(From,Loc,Part,N,TR)}, 
 %Via1=#sum{N2,From,TR1,TR2:routeflow(From,(_,Loc),Part,(N1,N2),(TR1,TR2))}, 
