@@ -1,4 +1,5 @@
 import json
+import os.path
 
 location_name_id_mapping = {}
 tr_name_id_mapping = {}
@@ -117,8 +118,11 @@ def json2asp(file_out):
             file_out.write("\n")
 
 output_file = "factsASP.lp"
-output_folder = "./lps/airbus/"
-with open(f"{output_folder}{output_file}", 'w') as file_out:
+this_folder = os.path.abspath(os.path.dirname(__file__))
+output_folder = os.path.join(this_folder, "lps/airbus/")
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+with open(os.path.join(output_folder, output_file), 'w') as file_out:
     json2asp(file_out)
     file_out.write("% ----------------------- harbors -----------------------\n")
     file_out.write("harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).")
