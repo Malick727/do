@@ -44,7 +44,7 @@ modelAtomTemplates = [
        {'name':'location','filter':lambda s: s.name=='location', 'columns':['location']},
       {'name':'part','filter':lambda s: s.name=='part', 'columns':['part']},
       {'name':'countPartsInL','filter':lambda s: s.name=='countPartsInL', 'columns':['parts','part','amount']},
-      {'name':'demandSupply','filter':lambda s: s.name=='demandSupply', 'columns':['part', 'location', 'amount']},
+      {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
        {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to', 'part', 'amount']},
        {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'amount', 'tr']},
        {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'parts', 'tr', 'freq']},
@@ -176,7 +176,6 @@ def solve_clingo(programs, max_models=1):
         f"Grounding programs: {programs} ...\n=== Grounding done ({round((time.process_time() - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
     
     start_solving = time.process_time()
-    print("start solving", start_solving)
     res = ctl.solve(on_model=on_model)
     ctl.cleanup()
     return res
