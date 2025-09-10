@@ -424,3 +424,22 @@ def compute_graph_for_product(problem: MultibatchingProblem, product: Product) -
                 print("Cost : ", dict_flow[n0][n1]*G[n0][n1]["weight"])
     print(cost_of_flow)
     return G, dict_flow
+
+
+def analyse_solution(base_solution: MultibatchingSolution,
+                     new_solution: MultibatchingSolution):
+    nb_trips_per_link_base_solution = {x.transport_link: x.nb_packing for x in base_solution.list_flows}
+    flow_per_link = {x.transport_link: {p: int(x.product_packing[p] * x.nb_packing) for p in x.product_packing}
+                     for x in base_solution.list_flows}
+    nb_trips_per_link_new = defaultdict(lambda: 0)
+    for flow in new_solution.list_flows:
+        link = flow.transport_link
+        nb_trips_per_link_new[link] += flow.nb_packing
+    changes = []
+    for link in nb_trips_per_link_new:
+        if nb_trips_per_link_base_solution[link] != nb_trips_per_link_new[link]:
+            changes.append((link,
+                            flow_per_link[link],
+                            nb_trips_per_link_new[link],
+                            nb_trips_per_link_base_solution[link]))
+    return changes

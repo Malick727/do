@@ -11,11 +11,19 @@ from discrete_optimization.generic_tools.callbacks.callback import CallbackList
 from discrete_optimization.generic_tools.ortools_cpsat_tools import OrtoolsCpSatSolver, CpSolver, CpModel
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.generic_tools.do_solver import WarmstartMixin, BoundsProviderMixin
-from multibatching.problem import (MultibatchingProblem, Location, TransportLink, TransportType, PackingTransport,
-Product, MultibatchingSolution)
+from discrete_optimization.knapsack.solvers.greedy import GreedyBestKnapsackSolver
+from multibatching.problem import (MultibatchingProblem, Location,
+                                   TransportLink, TransportType,
+                                   PackingTransport, Product,
+                                   MultibatchingSolution)
 import logging
 from enum import Enum
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import EnumHyperparameter, CategoricalHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import (EnumHyperparameter,
+                                                                                CategoricalHyperparameter,
+                                                                                SubBrickHyperparameter, SubBrick)
+from multibatching.solvers.packing_subproblem import PackingSubproblemSolver, CpsatPackingSubproblem, \
+    GreedyPackingForMultibatching, PackingViaBinPacking
+
 logger = logging.getLogger(__name__)
 
 
@@ -522,144 +530,14 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.variables["trips_variables"] = trips_variables
 
 
-class CpsatPackingSubproblem(OrtoolsCpSatSolver):
-    problem: MultibatchingProblem
-
-    def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
-
-        super().__init__(problem, **kwargs)
-        self.variables = {}
-        # self.modeling: ModelingMultiBatch = None
-        self.base_solution = None
-        self.scaling_factor = kwargs.get("scaling_factor", 10**3)
-
-    def init_model(self, solution: MultibatchingSolution, **args: Any) -> None:
-        model = cp_model.CpModel()
-        self.base_solution = solution
-        transport_links = [x.transport_link for x in solution.list_flows]
-        transport_link_to_index = {transport_links[i]: i for i in range(len(transport_links))}
-        num_trips_dict = {x.transport_link: x.nb_packing for x in solution.list_flows}
-        flow_per_link: dict[TransportLink, dict[Product, int]] = {x.transport_link:
-                                                                      {p: int(x.product_packing[p]*x.nb_packing)
-                                                                       for p in x.product_packing}
-                                                                  for x in solution.list_flows}
-        sum_size_per_link = {x: sum([p.size*flow_per_link[x][p]
-                                     for p in flow_per_link[x]])
-                             for x in flow_per_link}
-        approx_num_trip_per_link = {x: math.ceil(sum_size_per_link[x]/x.transport_type.capacity)
-                                    for x in flow_per_link}
-        # --- Determine Max Trips per Link for Variable Indexing ---
-        # This ensures we create enough variables for the maximum number of trips any link might have.
-        packed_on_trip = defaultdict(lambda: defaultdict(dict))
-        # is_trip_used[link_obj][trip_idx]: Binary variable, 1 if trip is used, 0 otherwise
-        is_trip_used = defaultdict(lambda: {})
-        for link in transport_links:
-            # Number of trips to actually attempt packing into for this specific link
-            # Use the number of trips allocated by the main model.
-            num_trips_for_this_link = 2*approx_num_trip_per_link[link]
-            # Only create variables if trips are allocated to avoid unnecessary complexity
-            if num_trips_for_this_link > 0:
-                for t_idx in range(num_trips_for_this_link):
-                    is_trip_used[link][t_idx] = model.NewBoolVar(f'is_trip_used_{transport_link_to_index[link]}_{t_idx}')
-                    for product in flow_per_link[link]:
-                        # Upper bound for product units in a single trip
-                        ub_per_product = int(link.transport_type.capacity // product.size)
-                        packed_on_trip[link][t_idx][product] = model.NewIntVar(
-                            lb=0, ub=ub_per_product,
-                            name=f'packed_{transport_link_to_index[link]}_trip{t_idx}_P{product.id}'
-                        )
-        # --- Constraints ---
-        for link in transport_links:
-            # 1. Total Flow Fulfillment (per link, per product):
-            for product in flow_per_link[link]:
-                total_product_flow_on_link = flow_per_link[link][product]
-                model.Add(sum(packed_on_trip[link][t_idx][product]
-                              for t_idx in packed_on_trip[link]) == total_product_flow_on_link)
-            # 2. Trip Capacity Constraint (per individual trip for this link):
-            for t_idx in packed_on_trip[link]:
-                # Total volume packed on this specific trip
-                packed_volume_on_this_trip = sum(
-                    int(product.size) * packed_on_trip[link][t_idx][product] for product in packed_on_trip[link][t_idx]
-                )
-                # If trip is used, its volume must respect capacity. If not used, its volume must be 0.
-                model.Add(packed_volume_on_this_trip <= int(link.transport_type.capacity))
-                model.Add(packed_volume_on_this_trip > 0).OnlyEnforceIf(is_trip_used[link][t_idx])
-                model.Add(packed_volume_on_this_trip == 0).OnlyEnforceIf(is_trip_used[link][t_idx].Not())
-        compound_cost = []
-        for link in transport_links:
-            time = link.distance / link.transport_type.speed
-            for i in packed_on_trip[link]:
-                value = sum([packed_on_trip[link][i][p] * p.value
-                             for p in packed_on_trip[link][i]])
-                compound_cost.append(value * int(self.scaling_factor*((1 + self.problem.capital_factor) ** time - 1)))
-
-        nb_trips_link = {link: sum(is_trip_used[link][i]
-                                   for i in is_trip_used[link]) for link in is_trip_used}
-        transport_cost = self.scaling_factor*sum([nb_trips_link[link] * link.distance
-                                                  * link.transport_type.cost
-                                                  for link in is_trip_used])
-        emission_cost = self.scaling_factor*sum([nb_trips_link[link] * link.distance
-                                                 * link.transport_type.emissions
-                                                 for link in is_trip_used])
-        model.Minimize(transport_cost+emission_cost+sum(compound_cost))
-        self.cp_model = model
-        self.variables["packed_on_trip"] = packed_on_trip
-        self.variables["trip_used"] = is_trip_used
-        self.variables["objs"] = {"transport": transport_cost,
-                                  "emission": emission_cost,
-                                  "capital": sum(compound_cost)}
-
-    def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> Solution:
-        logger.info(f"Obj {cpsolvercb.ObjectiveValue()}")
-        if 'objs' in self.variables:
-            for obj in self.variables["objs"]:
-                if obj == "capital":
-                    continue
-                try:
-                    logger.info(f"{obj}: {cpsolvercb.value(self.variables['objs'][obj])}")
-                except Exception as e:
-                    pass
-        list_flows = []
-        for link in self.variables["packed_on_trip"]:
-            packings = []
-            for i in sorted(self.variables["trip_used"][link]):
-                used = self.variables["trip_used"][link][i]
-                if cpsolvercb.value(used) > 0:
-                    current_packing = set()
-                    for product in self.variables["packed_on_trip"][link][i]:
-                        val = cpsolvercb.value(self.variables["packed_on_trip"][link][i][product])
-                        if val > 0:
-                            current_packing.add((product, int(val)))
-                    cpack = frozenset(current_packing)
-                    packings.append(cpack)
-            if len(packings) > 0:
-                c = Counter(packings)
-                for key, val in c.items():
-                    packing_transport = PackingTransport(transport_link=link,
-                                                         product_packing={x[0]: x[1] for x in key},
-                                                         nb_packing=val)
-                    list_flows.append(packing_transport)
-        return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-
-    def analyse_solution(self, new_solution: MultibatchingSolution):
-        nb_trips_per_link_base_solution = {x.transport_link: x.nb_packing for x in self.base_solution.list_flows}
-        flow_per_link = {x.transport_link: {p: int(x.product_packing[p] * x.nb_packing) for p in x.product_packing}
-                         for x in self.base_solution.list_flows}
-        nb_trips_per_link_new = defaultdict(lambda: 0)
-        for flow in new_solution.list_flows:
-            link = flow.transport_link
-            nb_trips_per_link_new[link] += flow.nb_packing
-        changes = []
-        for link in nb_trips_per_link_new:
-            if nb_trips_per_link_base_solution[link] != nb_trips_per_link_new[link]:
-                changes.append((link,
-                                flow_per_link[link],
-                                nb_trips_per_link_new[link],
-                                nb_trips_per_link_base_solution[link]))
-        return changes
 
 
 class CpsatBendersMultibatchingSolver(SolverDO):
+    hyperparameters = [SubBrickHyperparameter(name="packing_solver",
+                                              choices=[CpsatPackingSubproblem,
+                                                       GreedyPackingForMultibatching,
+                                                       PackingViaBinPacking],
+                                              default=SubBrick(cls=GreedyBestKnapsackSolver, kwargs=None))]
     problem: MultibatchingProblem
 
     def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
@@ -668,7 +546,7 @@ class CpsatBendersMultibatchingSolver(SolverDO):
         # self.modeling: ModelingMultiBatch = None
         self.base_solution = None
         self.solver_master: CpsatMultibatchingSolver = None
-        self.solver_subproblem: CpsatPackingSubproblem = None
+        self.solver_subproblem: PackingSubproblemSolver = None
         self.scaling_factor = kwargs.get("scaling_factor", 1)
         self.nb_cuts = 0
 
@@ -676,7 +554,6 @@ class CpsatBendersMultibatchingSolver(SolverDO):
         self.solver_master = CpsatMultibatchingSolver(problem=self.problem,
                                                       scaling_factor=self.scaling_factor)
         self.solver_master.init_model(modeling=ModelingMultiBatch.FLOW,
-
                                       **kwargs)
 
     def update_model_master(self, changed: list[tuple[TransportLink, dict[Product, int],
@@ -697,26 +574,30 @@ class CpsatBendersMultibatchingSolver(SolverDO):
                 (self.solver_master.cp_model.Add(self.solver_master.variables["nb_trips"][all_index_link] == new_nb_trip)
                  .OnlyEnforceIf(all_equal))
                 self.nb_cuts += 1
-        #self.solver_master.cp_model.Add(self.solver_master.variables["total_obj"]
-        #                                >= int(math.floor(best_lb)))
+        # self.solver_master.cp_model.Add(self.solver_master.variables["total_obj"]
+        #                                 >= int(math.floor(best_lb)))
 
     def solve(
         self, callbacks: Optional[list[Callback]] = None,
         params_solver_master: dict = None,
-        params_solver_sub: dict = None,
         nb_iteration: int = 10,
         **kwargs: Any
     ) -> ResultStorage:
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
+
         callback = CallbackList()
         callback.on_solve_start(solver=self)
         if params_solver_master is None:
             params_solver_master = dict(parameters_cp=ParametersCp.default_cpsat(),
                                         time_limit=5,
                                         ortools_cpsat_solver_kwargs={"log_search_progress": True})
+        subbrick_packing_solver: SubBrick = kwargs["packing_solver"]
+        params_solver_sub = subbrick_packing_solver.kwargs
         if params_solver_sub is None:
             params_solver_sub = dict(parameters_cp=ParametersCp.default_cpsat(),
                                      time_limit=5,
-                                     ortools_cpsat_solver_kwargs={"log_search_progress": True})
+                                     ortools_cpsat_solver_kwargs={"log_search_progress":
+                                                                  True})
         res_merged = self.create_result_storage([])
         current_lbs = []
         for i in range(nb_iteration):
@@ -731,22 +612,18 @@ class CpsatBendersMultibatchingSolver(SolverDO):
                 print("Status master : ", self.solver_master.status_solver)
                 print("Cur solution", self.problem.evaluate(base_solution), self.problem.satisfy(base_solution))
                 print("Obj ", self.aggreg_from_sol(base_solution))
-                subsolver = CpsatPackingSubproblem(problem=self.problem,
-                                                   scaling_factor=self.scaling_factor)
-                subsolver.init_model(solution=base_solution)
+                subsolver: PackingSubproblemSolver = subbrick_packing_solver.cls(problem=self.problem)
+                subsolver.init_from_solution(solution=base_solution)
                 self.solver_subproblem = subsolver
-                # res_sub = subsolver.solve(**params_solver_sub)
-                from multibatching.solvers.greedy import PackingViaBinPacking
-                subsolver_pack = PackingViaBinPacking(problem=self.problem)
-                res_sub = subsolver_pack.solve(solution=base_solution, time_limit_per_link=4)
-                res_merged.extend(res_sub)
+                res_sub_problem = subsolver.solve(**params_solver_sub)
+                res_merged.extend(res_sub_problem)
                 print("Status subsolver : ", subsolver.status_solver)
                 print("Solution post pro",
-                      self.problem.evaluate(res_sub[-1][0]),
-                      self.problem.satisfy(res_sub[-1][0]))
-                print("Obj ", self.aggreg_from_sol(res_sub[-1][0]))
-                callback.on_step_end(i, res=res_sub, solver=self)
-                changes = subsolver.analyse_solution(new_solution=res_sub[-1][0])
+                      self.problem.evaluate(res_sub_problem[-1][0]),
+                      self.problem.satisfy(res_sub_problem[-1][0]))
+                print("Obj ", self.aggreg_from_sol(res_sub_problem[-1][0]))
+                callback.on_step_end(i, res=res_sub_problem, solver=self)
+                changes = subsolver.analyse_solution(new_solution=res_sub_problem[-1][0])
                 if len(changes) == 0:
                     print("stop")
                     break

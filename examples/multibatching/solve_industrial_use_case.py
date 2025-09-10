@@ -1,5 +1,8 @@
 # Trying to solve the latest problem provided by EAD :
 import os
+
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
+
 os.environ["SDKROOT"] = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 from multibatching.parse_config_data import parse_json_to_problem
 from multibatching.problem import compute_graph_for_product, Product
@@ -7,6 +10,9 @@ from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
                                          CpsatBendersMultibatchingSolver,
                                          ModelingMultiBatch,
                                          CpsatPackingSubproblem)
+from multibatching.solvers.packing_subproblem import (CpsatPackingSubproblem,
+                                                      PackingViaBinPacking,
+                                                      GreedyPackingForMultibatching)
 from discrete_optimization.generic_tools.callbacks.loggers import ObjectiveLogger
 from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
 from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
@@ -68,26 +74,27 @@ def run_cp_benders():
     solver.init_model(detailed_capacity_constraint=False)
     p = ParametersCp.default_cpsat()
     p.nb_process = 32
+    subbrick = SubBrick(cls=CpsatPackingSubproblem,
+                        kwargs={"time_limit": 20, "parameters_cp": p,
+                                "ortools_cpsat_solver_kwargs":
+                                {"log_search_progress": True}})
+    #subbrick = SubBrick(cls=PackingViaBinPacking,
+    #                    kwargs={"time_limit_per_link": 3})
+    subbrick = SubBrick(cls=GreedyPackingForMultibatching,
+                        kwargs={})
     result = solver.solve(callbacks=[],
                           nb_iteration=12,
-                          params_solver_master={"time_limit": 150,
+                          params_solver_master={"time_limit": 50,
                                                 "parameters_cp": p,
                                                 "ortools_cpsat_solver_kwargs":
                                                 {"log_search_progress": True}},
-                          params_solver_sub={"time_limit": 30,
-                                             "parameters_cp": p,
-                                             "ortools_cpsat_solver_kwargs":
-                                             {"log_search_progress": True}})
-    # 2674876090.0928
-    # 2667868469.6941004
-    # 2638523237.235999
+                          packing_solver=subbrick)
     sol, _ = result.get_best_solution_fit(problem)
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
-    # plot_solution_graph(problem=problem, solution=sol)
     if True:
-        for i in range(len(problem.products)):
+        for i in range(min(5, len(problem.products))):
             plotly_solution_graph(solution=sol,
                                   problem=problem,
                                   use_logical_layout=False,
@@ -249,7 +256,12 @@ def run_cp_debug_flows():
 
 if __name__ == "__main__":
     # 2637923900.2783985
-    #2686538384.2949004
+    # 2686538384.2949004
+    # Greedy : 2676972529 2647669849.170104
+    # Binpacking : 2637614464.8357964 2653396240.1278048 680530479.6346035 2693366369.0273995
+    # 2695909540.234205, 2643758582.8569036
+    # GlobalPack : 2677042356.087301
+    # TotalBinpacking :
 
     run_cp_benders()
     # run_cp_2steps()

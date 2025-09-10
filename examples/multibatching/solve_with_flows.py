@@ -1,5 +1,5 @@
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
-from multibatching.solvers.greedy import GreedyPackingForMultibatching, PackingViaBinPacking
+from multibatching.solvers.packing_subproblem import GreedyPackingForMultibatching, PackingViaBinPacking
 from multibatching.solvers.netx import NetxMultibatchingSolver
 from multibatching.solvers.cpsat import CpsatPackingSubproblem
 from multibatching.parse_config_data import parse_json_to_problem, parse_config_file_to_problem
