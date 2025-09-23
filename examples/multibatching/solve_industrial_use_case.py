@@ -46,13 +46,13 @@ def run_cp_2steps():
     p = ParametersCp.default_cpsat()
     p.nb_process = 16
     result = solver.solve(callbacks=[],
-                          time_limit=300,
+                          time_limit=100,
                           parameters_cp=p,
                           ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
     subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
     subsolver.init_model(solution=result[-1][0])
     res_ = subsolver.solve(parameters_cp=p,
-                           time_limit=100,
+                           time_limit=10,
                            ortools_cpsat_solver_kwargs={"log_search_progress": False})
     sol = res_[-1][0]
     print(problem.evaluate(sol))
@@ -106,7 +106,7 @@ def run_cpmpy():
     problem = parse_problem(fix_problem=True)
     solver = CpmpyMultibatchingSolver(problem=problem,
                                       scaling_factor=1,
-                                      solver_name="exact")
+                                      solver_name="ortools")
     print("start init")
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
                       detailed_capacity_constraint=False)
@@ -117,7 +117,8 @@ def run_cpmpy():
                                                      end_verbosity_level=logging.INFO)],
                           time_limit=30,
                           parameters_cp=p,
-                          verbose=True)
+                          #verbose=True
+                          )
 
 
 def run_explanation():
@@ -255,7 +256,9 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_cp_2steps()
+    run_cpmpy()
+    #run_explanation()
+    #run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
     # Greedy : 2676972529 2647669849.170104
@@ -264,7 +267,7 @@ if __name__ == "__main__":
     # GlobalPack : 2677042356.087301
     # TotalBinpacking :
 
-    run_cp_benders()
+    #run_cp_benders()
     # run_cp_2steps()
     # run_cp_benders()
 

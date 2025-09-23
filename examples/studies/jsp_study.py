@@ -41,7 +41,7 @@ def create_configs():
                                             kwargs={"time_limit": time_limit,
                                                     "ortools_cpsat_solver_kwargs":
                                                      {"log_search_progress": False},
-                                                     "parameters_cp": p})
+                                                      "parameters_cp": p})
     solver_configs["hexaly"] = SolverConfig(HexalyJspSolver,
                                             {"time_limit": time_limit,
                                              "nb_threads": 16})

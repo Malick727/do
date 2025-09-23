@@ -221,7 +221,7 @@ class CpmpyMultibatchingSolver(CpmpySolver):
                                                           "location": location.name})
                 self.meta_constraints.append(flow_meta)
                 model += flow_meta.constraints
-        if False:
+        if True:
             transport_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl]
                                                       * int(transport_links[index_tl].distance
                                                             * transport_links[index_tl].transport_type.cost)
@@ -242,8 +242,8 @@ class CpmpyMultibatchingSolver(CpmpySolver):
             self.variables["objs"] = {"transport": transport_cost,
                                       "emission": emission_cost,
                                       "capital": sum(estimated_compound)}
-        model.minimize(12)
-
+        #model.minimize(12)
+        model.minimize(transport_cost)
         self.model = model
         self.variables["flows"] = flows_variables
         self.variables["nb_trips"] = nb_trips_per_link

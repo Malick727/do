@@ -8,7 +8,8 @@ import logging
 from multibatching.utils import plot_solution_graph, generate_multibatching_problem, plotly_solution_graph
 from multibatching.parsing_airbus_data_ import main_parse
 
-#logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+
 def run():
     problem = main_parse()
     # problem = generate_multibatching_problem(num_locations=20,

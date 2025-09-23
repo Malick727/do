@@ -1,3 +1,9 @@
+from optalcp_solvers.solvers.generic_optal import OptalBasicCallback
+
+try:
+    import config.env
+except:
+    pass
 import logging
 import os
 import pandas as pd
@@ -16,33 +22,38 @@ from discrete_optimization.generic_tools.study import (
 from discrete_optimization.fjsp.parser import get_data_available, parse_file
 from discrete_optimization.fjsp.solvers.cpsat import CpSatFjspSolver
 from hexaly_solvers.fjsp.hexaly_fjsp_solver import HexalyFJspSolver, ModelingHexalyFJsp
+from cpopt_solvers.fjsp_cpopt_solver import CPOFJspSolver
+from optalcp_solvers.solvers.fjsp_optal import OptalFJspSolver
 from discrete_optimization.generic_tools.callbacks.early_stoppers import ObjectiveGapStopper
+
 
 logging.basicConfig(level=logging.INFO)
 
-study_name = "fjsp-study-cpsat-vs-hexaly"
+study_name = "fjsp-study-cpsat-vs-hexaly-vs-optal"
 overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 instances = get_data_available()[:30]
 
 
 def create_configs():
     solver_configs = {}
-    for proc in [16]:
-        p = ParametersCp.default_cpsat()
-        p.nb_process = proc
-        solver_configs[f"cpsat-proc-{proc}"] = SolverConfig(cls=CpSatFjspSolver,
-                                                            kwargs={"time_limit": 10,
-                                                                    "ortools_cpsat_solver_kwargs":
-                                                                    {"log_search_progress": True},
-                                                                    "parameters_cp": p})
+    p = ParametersCp.default_cpsat()
+    p.nb_process = 16
+    solver_configs[f"cpsat"] = SolverConfig(cls=CpSatFjspSolver,
+                                            kwargs={"time_limit": 10,
+                                                    "ortools_cpsat_solver_kwargs": {"log_search_progress": True},
+                                                    "parameters_cp": p})
     solver_configs["hexaly-partition"] = SolverConfig(HexalyFJspSolver,
-                                            {"time_limit": 10,
-                                             "modeling": ModelingHexalyFJsp.PARTITION,
-                                             "nb_threads": 16})
-    solver_configs["hexaly-opt-interval"] = SolverConfig(HexalyFJspSolver,
-                                                     {"time_limit": 10,
-                                                      "modeling": ModelingHexalyFJsp.OPTIONAL_INTERVAL,
-                                                      "nb_threads": 16})
+                                                      {"time_limit": 10,
+                                                       "modeling": ModelingHexalyFJsp.PARTITION,
+                                                       "nb_threads": 16})
+    # solver_configs["hexaly-opt-interval"] = SolverConfig(HexalyFJspSolver,
+    #                                                      {"time_limit": 10,
+    #                                                       "modeling": ModelingHexalyFJsp.OPTIONAL_INTERVAL,
+    #                                                       "nb_threads": 16})
+    solver_configs["optal-cp"] = SolverConfig(OptalFJspSolver, {"time_limit": 10,
+                                                                "parameters_cp": p})
+    solver_configs["cpopt"] = SolverConfig(CPOFJspSolver, {"time_limit": 10,
+                                                           "parameters_cp": p})
     return solver_configs
 
 
@@ -62,11 +73,13 @@ for instance in instances:
             # init problem
             file = instance
             color_problem = parse_file(file)
-            from discrete_optimization.binpack.solvers.greedy import GreedyBinPackSolver
             stats_cb = StatsWithBoundsCallback()
             solver = solver_config.cls(color_problem, **solver_config.kwargs)
             solver.init_model(**solver_config.kwargs)
             # solve
+            if solver_config.cls == OptalFJspSolver:
+                solver: OptalFJspSolver
+                stats_cb = NbIterationTracker()
             result_store = solver.solve(
                 callbacks=[
                     stats_cb,
@@ -75,6 +88,9 @@ for instance in instances:
                 ],
                 **solver_config.kwargs,
             )
+            if solver_config.cls == OptalFJspSolver:
+                solver: OptalFJspSolver
+                stats_cb = OptalBasicCallback(stats=solver.get_output_stats())
         except Exception as e:
             # failed experiment
             metrics = pd.DataFrame([])
