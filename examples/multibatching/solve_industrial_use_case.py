@@ -78,16 +78,16 @@ def run_cp_benders():
                         kwargs={"time_limit": 20, "parameters_cp": p,
                                 "ortools_cpsat_solver_kwargs":
                                 {"log_search_progress": True}})
-    #subbrick = SubBrick(cls=PackingViaBinPacking,
-    #                    kwargs={"time_limit_per_link": 3})
+    # subbrick = SubBrick(cls=PackingViaBinPacking,
+    #                     kwargs={"time_limit_per_link": 3})
     subbrick = SubBrick(cls=GreedyPackingForMultibatching,
                         kwargs={})
     result = solver.solve(callbacks=[],
                           nb_iteration=12,
-                          params_solver_master={"time_limit": 50,
-                                                "parameters_cp": p,
-                                                "ortools_cpsat_solver_kwargs":
-                                                {"log_search_progress": True}},
+                          params_solver_master=
+                          {"time_limit": 50,
+                           "parameters_cp": p,
+                           "ortools_cpsat_solver_kwargs": {"log_search_progress": True}},
                           packing_solver=subbrick)
     sol, _ = result.get_best_solution_fit(problem)
     print(problem.evaluate(sol))
@@ -255,6 +255,7 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
+    run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
     # Greedy : 2676972529 2647669849.170104

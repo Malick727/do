@@ -4,7 +4,7 @@ from discrete_optimization.generic_tools.study import Hdf5Database
 study_name = "rcpsp-study-cpsat-vs-hexaly"
 study_name = "fjsp-study-cpsat-vs-hexaly"
 study_name = "rcpsp-study-cpsat-vs-hexaly-vs-greedy"
-
+study_name = "jsp-study-cpsat-vs-hexaly-vs-optalcp-vs-tempo-vs-cpo"
 
 # retrieve data
 with Hdf5Database(f"{study_name}.h5") as database:

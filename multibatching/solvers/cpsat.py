@@ -248,6 +248,8 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                                    for j in range(1, min(5, len(nb_trips_min)))
                                                    for nb_min in range(nb_trips_min[j])])
 
+
+
         # Flows constraint
         for location in self.problem.locations:
             loc_id = location.id
