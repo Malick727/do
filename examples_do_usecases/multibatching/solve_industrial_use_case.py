@@ -36,6 +36,15 @@ def parse_problem(fix_problem: bool = False):
 
     return problem
 
+def run_oe():
+    from multibatching.solvers.oe.solver_2 import OpenEvolveMultibatchingSolver
+    problem = parse_problem()
+    solver = OpenEvolveMultibatchingSolver(problem)
+    res = solver.solve()
+    sol = res[-1][0]
+    print(problem.evaluate(sol))
+    print(sum(problem.evaluate(sol).values()))
+    print(problem.evaluate(sol), problem.satisfy(sol))
 
 def run_cp_2steps():
     problem = parse_problem()
@@ -256,9 +265,10 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_cpmpy()
-    #run_explanation()
-    #run_cp_2steps()
+    run_oe()
+    # run_cpmpy()
+    # run_explanation()
+    # run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
     # Greedy : 2676972529 2647669849.170104

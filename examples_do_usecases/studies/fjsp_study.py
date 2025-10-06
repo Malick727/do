@@ -31,28 +31,28 @@ logging.basicConfig(level=logging.INFO)
 
 study_name = "fjsp-study-cpsat-vs-hexaly-vs-optal"
 overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-instances = get_data_available()[:30]
+instances = get_data_available()
 
-
+time_limit = 20
 def create_configs():
     solver_configs = {}
     p = ParametersCp.default_cpsat()
     p.nb_process = 16
     solver_configs[f"cpsat"] = SolverConfig(cls=CpSatFjspSolver,
-                                            kwargs={"time_limit": 10,
+                                            kwargs={"time_limit": time_limit,
                                                     "ortools_cpsat_solver_kwargs": {"log_search_progress": True},
                                                     "parameters_cp": p})
     solver_configs["hexaly-partition"] = SolverConfig(HexalyFJspSolver,
-                                                      {"time_limit": 10,
+                                                      {"time_limit": time_limit,
                                                        "modeling": ModelingHexalyFJsp.PARTITION,
                                                        "nb_threads": 16})
-    # solver_configs["hexaly-opt-interval"] = SolverConfig(HexalyFJspSolver,
-    #                                                      {"time_limit": 10,
-    #                                                       "modeling": ModelingHexalyFJsp.OPTIONAL_INTERVAL,
-    #                                                       "nb_threads": 16})
-    solver_configs["optal-cp"] = SolverConfig(OptalFJspSolver, {"time_limit": 10,
+    solver_configs["hexaly-opt-interval"] = SolverConfig(HexalyFJspSolver,
+                                                          {"time_limit": time_limit,
+                                                           "modeling": ModelingHexalyFJsp.OPTIONAL_INTERVAL,
+                                                           "nb_threads": 16})
+    solver_configs["optal-cp"] = SolverConfig(OptalFJspSolver, {"time_limit": time_limit,
                                                                 "parameters_cp": p})
-    solver_configs["cpopt"] = SolverConfig(CPOFJspSolver, {"time_limit": 10,
+    solver_configs["cpopt"] = SolverConfig(CPOFJspSolver, {"time_limit": time_limit,
                                                            "parameters_cp": p})
     return solver_configs
 
@@ -96,6 +96,7 @@ for instance in instances:
             metrics = pd.DataFrame([])
             status = StatusSolver.ERROR
             reason = f"{type(e)}: {str(e)}"
+            print("Reason : ", reason)
         else:
             # get metrics and solver status
             status = solver.status_solver

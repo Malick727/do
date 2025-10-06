@@ -20,7 +20,8 @@ from discrete_optimization.generic_tools.study import (
 from discrete_optimization.jsp.parser import get_data_available, parse_file
 from discrete_optimization.jsp.solvers.cpsat import CpSatJspSolver
 from hexaly_solvers.jsp.hexaly_jsp_solver import HexalyJspSolver
-from optalcp_solvers.solvers.jsp_optal import OptalJspSolver, OptalBasicCallback
+from optalcp_solvers.solvers.generic_optal import OptalBasicCallback
+from optalcp_solvers.solvers.jsp_optal import OptalJspSolver
 from cpopt_solvers.jsp_cpopt_solver import CPOJspSolver
 from discrete_optimization.jsp.solvers.tempo import TempoJspScheduler
 from discrete_optimization.generic_tools.hub_solver.tempo.tempo_tools import TempoLogsCallback
@@ -28,7 +29,7 @@ from discrete_optimization.generic_tools.callbacks.early_stoppers import Objecti
 
 logging.basicConfig(level=logging.INFO)
 
-study_name = "jsp-study-cpsat-vs-hexaly-vs-optalcp-vs-tempo-vs-cpo"
+study_name = "jsp-study-cpsat-vs-hexaly-vs-optalcp-vs-tempo-vs-cpo-2"
 overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 instances = get_data_available()
 
@@ -37,6 +38,19 @@ def create_configs():
     solver_configs = {}
     p =  ParametersCp.default_cpsat()
     p.nb_process = 16
+    solver_configs["optal-cp"] = SolverConfig(OptalJspSolver, {"time_limit": time_limit,
+                                                               "parameters_cp": p})
+    solver_configs["optal-cp-fdslb-w01"] = SolverConfig(OptalJspSolver, {"time_limit": time_limit,
+                                                                         "parameters_cp": p,
+                                                                         "worker0-1.searchType": "fdslb",
+                                                                         "worker0-1.noOverlapPropagationLevel": 4,
+                                                                         "worker0-1.cumulPropagationLevel": 3})
+
+    solver_configs["optal-cp-fds-w01"] = SolverConfig(OptalJspSolver, {"time_limit": time_limit,
+                                                                       "parameters_cp": p,
+                                                                       "worker0-1.searchType": "fds",
+                                                                       "worker0-1.noOverlapPropagationLevel": 4,
+                                                                       "worker0-1.cumulPropagationLevel": 3})
     solver_configs[f"cpsat"] = SolverConfig(cls=CpSatJspSolver,
                                             kwargs={"time_limit": time_limit,
                                                     "ortools_cpsat_solver_kwargs":
@@ -45,8 +59,6 @@ def create_configs():
     solver_configs["hexaly"] = SolverConfig(HexalyJspSolver,
                                             {"time_limit": time_limit,
                                              "nb_threads": 16})
-    solver_configs["optal-cp"] = SolverConfig(OptalJspSolver, {"time_limit": time_limit,
-                                                               "parameters_cp": p})
     solver_configs["tempo"] = SolverConfig(TempoJspScheduler, {"time_limit": time_limit,
                                                                "greedy_runs": 5,
                                                                "use_lns": True,
@@ -79,6 +91,9 @@ for instance in instances:
             solver.init_model(**solver_config.kwargs)
             if solver_config.cls == TempoJspScheduler:
                 stats_cb = TempoLogsCallback()
+            if solver_config.cls == OptalJspSolver:
+                solver: OptalJspSolver
+                stats_cb = NbIterationTracker()
             # solve
             result_store = solver.solve(
                 callbacks=[
@@ -97,6 +112,7 @@ for instance in instances:
             metrics = pd.DataFrame([])
             status = StatusSolver.ERROR
             reason = f"{type(e)}: {str(e)}"
+            print('Error', e)
         else:
             # get metrics and solver status
             status = solver.status_solver
