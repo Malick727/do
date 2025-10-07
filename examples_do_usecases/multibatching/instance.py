@@ -41,20 +41,20 @@ def init_instance():
 
     # --- 4. Define TransportLink Instances (based on routes_info from CP-SAT script) ---
     transport_links_list = [
-        TransportLink(location_l1=loc_map['l1'], location_l2=loc_map['l3'], distance=1, transport_type=tr1),  # r2
+        TransportLink(id=0, location_l1=loc_map['l1'], location_l2=loc_map['l3'], distance=1, transport_type=tr1),  # r2
         # TransportLink(location_l1=loc_map['l1'], location_l2=loc_map['l3'], distance=3, transport_type=tr1), # r3
-        TransportLink(location_l1=loc_map['l1'], location_l2=loc_map['l3'], distance=4, transport_type=tr2),  # r4
-        TransportLink(location_l1=loc_map['l1'], location_l2=loc_map['l4'], distance=4, transport_type=tr1),  # r5
-        TransportLink(location_l1=loc_map['l1'], location_l2=loc_map['l2'], distance=2, transport_type=tr2),  # r8
-        TransportLink(location_l1=loc_map['l2'], location_l2=loc_map['l4'], distance=2, transport_type=tr1),  # r9
-        TransportLink(location_l1=loc_map['l2'], location_l2=loc_map['l4'], distance=6, transport_type=tr2),  # r10
-        TransportLink(location_l1=loc_map['l2'], location_l2=loc_map['l6'], distance=1.5, transport_type=tr1),  # r11
-        TransportLink(location_l1=loc_map['l4'], location_l2=loc_map['l6'], distance=5, transport_type=tr2),  # r12
-        TransportLink(location_l1=loc_map['l4'], location_l2=loc_map['l6'], distance=3, transport_type=tr1),  # r13
-        TransportLink(location_l1=loc_map['l4'], location_l2=loc_map['l5'], distance=4, transport_type=tr2),  # r14
-        TransportLink(location_l1=loc_map['l4'], location_l2=loc_map['l5'], distance=2, transport_type=tr1),  # r15
-        TransportLink(location_l1=loc_map['l5'], location_l2=loc_map['l3'], distance=3, transport_type=tr2),  # r16
-        TransportLink(location_l1=loc_map['l3'], location_l2=loc_map['l5'], distance=1, transport_type=tr1),  # r17
+        TransportLink(id=1, location_l1=loc_map['l1'], location_l2=loc_map['l3'], distance=4, transport_type=tr2),  # r4
+        TransportLink(id=2, location_l1=loc_map['l1'], location_l2=loc_map['l4'], distance=4, transport_type=tr1),  # r5
+        TransportLink(id=3, location_l1=loc_map['l1'], location_l2=loc_map['l2'], distance=2, transport_type=tr2),  # r8
+        TransportLink(id=4, location_l1=loc_map['l2'], location_l2=loc_map['l4'], distance=2, transport_type=tr1),  # r9
+        TransportLink(id=5, location_l1=loc_map['l2'], location_l2=loc_map['l4'], distance=6, transport_type=tr2),  # r10
+        TransportLink(id=6, location_l1=loc_map['l2'], location_l2=loc_map['l6'], distance=1.5, transport_type=tr1),  # r11
+        TransportLink(id=7, location_l1=loc_map['l4'], location_l2=loc_map['l6'], distance=5, transport_type=tr2),  # r12
+        TransportLink(id=8, location_l1=loc_map['l4'], location_l2=loc_map['l6'], distance=3, transport_type=tr1),  # r13
+        TransportLink(id=9, location_l1=loc_map['l4'], location_l2=loc_map['l5'], distance=4, transport_type=tr2),  # r14
+        TransportLink(id=10, location_l1=loc_map['l4'], location_l2=loc_map['l5'], distance=2, transport_type=tr1),  # r15
+        TransportLink(id=11, location_l1=loc_map['l5'], location_l2=loc_map['l3'], distance=3, transport_type=tr2),  # r16
+        TransportLink(id=12, location_l1=loc_map['l3'], location_l2=loc_map['l5'], distance=1, transport_type=tr1),  # r17
     ]
 
     

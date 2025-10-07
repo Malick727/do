@@ -23,7 +23,7 @@ from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
 from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
 import json
 import os
-from examples.multibatching.instance2 import init_instance
+from examples_do_usecases.multibatching.instance import init_instance
 
 from multibatching.utils import basic_sanity_check, plot_solution_graph, plotly_solution_graph
 import logging
@@ -52,6 +52,7 @@ def run_networkx():
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
     plot_solution_graph(problem=problem, solution=sol)
+
 def run_oe():
     from multibatching.solvers.oe.solver_2 import OpenEvolveMultibatchingSolver
     problem = parse_problem()
@@ -62,9 +63,10 @@ def run_oe():
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
 
+
 def run_cp_2steps():
-    problem = parse_problem()
-    # problem = init_instance()
+    # problem = parse_problem()
+    problem = init_instance()
     solver = CpsatMultibatchingSolver(problem=problem,
                                       scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
@@ -76,10 +78,11 @@ def run_cp_2steps():
                           parameters_cp=p,
                           ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
     subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
+    subsolver.init_from_solution(solution=result[-1][0])
     subsolver.init_model(solution=result[-1][0])
     res_ = subsolver.solve(parameters_cp=p,
                            time_limit=10,
-                           ortools_cpsat_solver_kwargs={"log_search_progress": False})
+                           ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res_[-1][0]
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
@@ -282,13 +285,14 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_oe()
+    run_cp_2steps()
+    # run_oe()
     # run_cpmpy()
     # run_explanation()
     # run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
-    run_cp_2steps()
+    # run_cp_2steps()
     # 2,637,923,900.2783985
     # 2,686,538,384.2949004
     # Greedy : 2676972529 2647669849.170104

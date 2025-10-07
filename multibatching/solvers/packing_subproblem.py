@@ -60,6 +60,9 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver, PackingSubproblemSolver):
         self.scaling_factor = kwargs.get("scaling_factor", 10**3)
 
     def init_model(self, **args: Any) -> None:
+        if self.base_solution is None:
+            if 'solution' in args:
+                self.init_from_solution(solution=args["solution"])
         model = cp_model.CpModel()
         solution = self.base_solution
         transport_links = [x.transport_link for x in solution.list_flows]
