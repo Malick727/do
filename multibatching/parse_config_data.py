@@ -73,6 +73,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
 
             transport_links_list.append(
                 TransportLink(
+                    id = _id,
                     location_l1=loc1,
                     location_l2=loc2,
                     distance=distance,

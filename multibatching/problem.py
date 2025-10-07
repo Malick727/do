@@ -38,6 +38,7 @@ class Location:
 
 @dataclass(frozen=True)
 class TransportLink:
+    id : int
     location_l1: Location
     location_l2: Location
     distance: int
@@ -84,6 +85,7 @@ class MultibatchingProblem(Problem):
         self.nb_transport_links = len(self.transport_links)
 
         self.product_to_index = {self.products[i]: i for i in range(self.nb_products)}
+        self.product_dict = {p.id : p for p in self.products}
         self.transport_types_to_index = {self.transport_types[i]: i for i in range(self.nb_transport_types)}
         self.locations_to_index = {self.locations[i]: i for i in range(self.nb_locations)}
         self.transport_links_to_index = {self.transport_links[i]: i for i in range(self.nb_transport_links)}

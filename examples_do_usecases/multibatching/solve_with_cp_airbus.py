@@ -1,3 +1,9 @@
+import sys
+import os
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../"))
+
+
 from multibatching.problem import MultibatchingProblem
 from multibatching.solvers.cpsat import (CpsatMultibatchingSolver, ModelingMultiBatch,
                                          CpsatPackingSubproblem, CpsatBendersMultibatchingSolver)

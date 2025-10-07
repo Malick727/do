@@ -10,8 +10,8 @@ def init_instance():
 
     # --- 2. Define Product Instances ---
     # Valid transports are frozensets of TransportType objects
-    p1 = Product(id=1, size=4, value=1000, valid_transports=frozenset([tr1, tr2]))
-    p2 = Product(id=2, size=3, value=600, valid_transports=frozenset([tr1, tr2]))
+    p1 = Product(id=1, name="p1", size=4, value=1000, valid_transports=frozenset([tr1, tr2]))
+    p2 = Product(id=2, name="p2", size=3, value=600, valid_transports=frozenset([tr1, tr2]))
 
     products_list = [p1, p2]
 
@@ -56,6 +56,8 @@ def init_instance():
         TransportLink(location_l1=loc_map['l5'], location_l2=loc_map['l3'], distance=3, transport_type=tr2),  # r16
         TransportLink(location_l1=loc_map['l3'], location_l2=loc_map['l5'], distance=1, transport_type=tr1),  # r17
     ]
+
+    
 
     # --- 5. Create MultibatchingProblem Instance ---
     problem_instance = MultibatchingProblem(

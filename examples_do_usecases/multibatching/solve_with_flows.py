@@ -1,3 +1,9 @@
+import sys
+import os
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../"))
+
+
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from multibatching.solvers.packing_subproblem import GreedyPackingForMultibatching, PackingViaBinPacking
 from multibatching.solvers.netx import NetxMultibatchingSolver

@@ -1,5 +1,8 @@
 # Trying to solve the latest problem provided by EAD :
+import sys
 import os
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../"))
 
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 
@@ -13,11 +16,14 @@ from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
 from multibatching.solvers.packing_subproblem import (CpsatPackingSubproblem,
                                                       PackingViaBinPacking,
                                                       GreedyPackingForMultibatching)
+
+from multibatching.solvers.netx import NetxMultibatchingSolver
 from discrete_optimization.generic_tools.callbacks.loggers import ObjectiveLogger
 from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
 from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
 import json
 import os
+from examples.multibatching.instance2 import init_instance
 
 from multibatching.utils import basic_sanity_check, plot_solution_graph, plotly_solution_graph
 import logging
@@ -30,12 +36,22 @@ def parse_problem(fix_problem: bool = False):
                                "../../multibatching/datalocal/config-local.json")
     d = json.load(open(config_file, "r"))
     problem = parse_json_to_problem(d)
+
     # Temporary fix = section2 transportable by any means..
     if fix_problem:
         problem.products[3].valid_transports = set(problem.transport_types)
 
     return problem
 
+def run_networkx():
+    problem = init_instance()
+    solver = NetxMultibatchingSolver(problem)
+    res = solver.solve()
+    sol = res[-1][0]
+    print(problem.evaluate(sol))
+    print(sum(problem.evaluate(sol).values()))
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    plot_solution_graph(problem=problem, solution=sol)
 def run_oe():
     from multibatching.solvers.oe.solver_2 import OpenEvolveMultibatchingSolver
     problem = parse_problem()
@@ -48,6 +64,7 @@ def run_oe():
 
 def run_cp_2steps():
     problem = parse_problem()
+    # problem = init_instance()
     solver = CpsatMultibatchingSolver(problem=problem,
                                       scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
@@ -271,13 +288,18 @@ if __name__ == "__main__":
     # run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
+    run_cp_2steps()
+    # 2,637,923,900.2783985
+    # 2,686,538,384.2949004
     # Greedy : 2676972529 2647669849.170104
-    # Binpacking : 2637614464.8357964 2653396240.1278048 680530479.6346035 2693366369.0273995
+    # Binpacking : 2,637,614,464.8357964 2653396240.1278048 680530479.6346035 2693366369.0273995
     # 2695909540.234205, 2643758582.8569036
     # GlobalPack : 2677042356.087301
     # TotalBinpacking :
 
     #run_cp_benders()
     # run_cp_2steps()
+    # run_cp_benders()
+    # run_networkx()
     # run_cp_benders()
 
