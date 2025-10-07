@@ -51,6 +51,18 @@ def run_networkx():
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
+
+    subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
+    subsolver.init_from_solution(solution=sol)
+    subsolver.init_model(solution=sol)
+    p = ParametersCp.default_cpsat()
+    res_ = subsolver.solve(parameters_cp=p,
+                           time_limit=10,
+                           ortools_cpsat_solver_kwargs={"log_search_progress": True})
+    sol = res_[-1][0]
+    print(problem.evaluate(sol))
+    print(sum(problem.evaluate(sol).values()))
+    print(problem.evaluate(sol), problem.satisfy(sol))
     plot_solution_graph(problem=problem, solution=sol)
 
 def run_oe():
@@ -285,7 +297,8 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_cp_2steps()
+    run_networkx()
+    # run_cp_2steps()
     # run_oe()
     # run_cpmpy()
     # run_explanation()

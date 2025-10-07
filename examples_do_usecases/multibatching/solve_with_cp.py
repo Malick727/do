@@ -7,7 +7,7 @@ sys.path.append(os.path.join(this_folder, "../../"))
 from multibatching.problem import MultibatchingProblem
 from multibatching.solvers.cpsat import (CpsatMultibatchingSolver, ModelingMultiBatch,
                                          CpsatPackingSubproblem, CpsatBendersMultibatchingSolver)
-from examples.multibatching.instance import init_instance
+from examples_do_usecases.multibatching.instance import init_instance
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 import logging
 
