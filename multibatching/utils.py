@@ -11,6 +11,8 @@ from multibatching.problem import MultibatchingProblem, MultibatchingSolution, P
 from typing import List, Optional
 import numpy as np
 import os
+import json
+from geopy.geocoders import Nominatim
 
 
 
@@ -201,6 +203,17 @@ def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingP
     plt.axis('off')  # Turn off the axis
     plt.tight_layout()
     plt.show()
+
+def plot_network(solution: MultibatchingSolution, problem: MultibatchingProblem):
+    geolocator = Nominatim(user_agent="city_coordinate_finder_v1")
+    print(len(problem.products))
+
+def save_solution(solution : MultibatchingSolution, outputfolder):
+    with open(outputfolder, 'w') as f :
+        json.dump(solution.list_flows, f)
+
+def read_solution():
+    raise NotImplementedError
 
 
 def plotly_solution_graph(
