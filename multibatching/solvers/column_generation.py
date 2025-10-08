@@ -26,6 +26,8 @@ class ColumnGenerationSolver(MultibatchingSolver):
         transport_links_in = {}
         transport_links_out = {}
 
+        id_tl = []
+
 
         for l in self.problem.locations:
             self.dual_values[l] = {}
@@ -46,6 +48,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
         batches={}
         for transport_link in self.problem.transport_links:
             batches[transport_link]=[]
+
             for p1 in self.problem.products:
                 batch_init = {}
                 if transport_link.transport_type in p1.valid_transports:
@@ -55,6 +58,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
                             batch_init[p2] = 0
                     batches[transport_link].append(batch_init)
         self.batches = batches
+        
         
         
         ################################## Decision variable definition
@@ -73,7 +77,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
         for tl in self.problem.transport_links:
             x[tl] = {}
             # type_link = tl.transport_type
-            for b in range(len(batches[tl])):
+            for b in range(len(self.batches[tl])):
                 x[tl][b] = model.addVar(lb=0,name=f"x_{tl.id}_b{b}")
 
         self.variables["x"] = x
@@ -89,18 +93,21 @@ class ColumnGenerationSolver(MultibatchingSolver):
                 else:
                     model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  0, name=f"demand_{l.id}_p{p.id}")
 
+
+
         # Set objective
         obj_co2 = model.addVar(name="obj_co2")
-        model.addConstr(gp.quicksum(x[tl][b]*tl.transport_type.emissions * tl.distance for b in range(len(self.batches[tl])) for tl in self.problem.transport_links)==obj_co2, "co2_cost_constraint")
+        model.addConstr(gp.quicksum(x[tl][b]*tl.transport_type.emissions * tl.distance for tl in self.problem.transport_links for b in range(len(self.batches[tl])))==obj_co2, "co2_cost_constraint")
 
         obj_transport = model.addVar(name="obj_transport")
-        model.addConstr(gp.quicksum(x[tl][b]*tl.transport_type.cost*tl.distance for b in range(len(self.batches[tl])) for tl in self.problem.transport_links)==obj_transport, "transport_cost_constraint")
+        model.addConstr(gp.quicksum(x[tl][b]*tl.transport_type.cost*tl.distance for tl in self.problem.transport_links for b in range(len(self.batches[tl])))==obj_transport, "transport_cost_constraint")
 
         obj_capital = model.addVar(name="obj_capital")
         capital_cost = {}
 
 
         model.setObjective(obj_co2 + obj_transport)
+        model.Params.LogToConsole = 0
         self.rp_model = model
         self.products_on_links = products_on_links
 
@@ -114,6 +121,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
 
         #### Solve the problem
         model = gp.Model()
+        model.Params.LogToConsole = 0
         y={}
         for p in self.products_on_links[transport_link]:
             y[p] = model.addVar(lb=0,ub=100, vtype=GRB.INTEGER, name=f"y_{p.id}")
@@ -128,25 +136,29 @@ class ColumnGenerationSolver(MultibatchingSolver):
         reduced_cost = model.ObjVal
         return new_column, reduced_cost
 
-    def solveSubproblems(self): 
+    def solveSubproblems(self, list_links): 
         new_columns = {}
+        nb_suproblems = len(list_links)
+        i=0
 
-        for transport_link in self.problem.transport_links:
+        for transport_link in list_links:
             # Solve pricing problem
             new_column, reduced_cost = self.solvePricingProblem(transport_link)
             new_columns[transport_link] = new_column
             self.reduced_costs[transport_link] = reduced_cost
+            i+=1
+        print("------------ Nb subproblems", nb_suproblems)
 
         return new_columns
 
     def addColumns(self, new_columns):
-        for transport_link in self.problem.transport_links:
+        for transport_link in new_columns.keys():
             nb_batches = len(self.batches[transport_link])
             self.batches[transport_link].append(new_columns[transport_link])
             c = gp.Column()
             l1 = transport_link.location_l1
             l2 = transport_link.location_l2
-            for p in self.problem.products:
+            for p in self.products_on_links[transport_link]:
                 constr = self.rp_model.getConstrByName(f"demand_{l1.id}_p{p.id}")
                 coeff = new_columns[transport_link][p]
                 c.addTerms(-coeff, constr)
@@ -162,7 +174,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
     def solve(self, **kwargs):
 
         optimal = False
-        
+        list_links = self.problem.transport_links
         
         while not(optimal):
 
@@ -178,13 +190,18 @@ class ColumnGenerationSolver(MultibatchingSolver):
                     c = self.rp_model.getConstrByName(f"demand_{l.id}_p{p.id}")
                     self.dual_values[self.problem.location_id_to_location[l.id]][self.problem.product_dict[p.id]] = c.Pi
 
-            new_columns = self.solveSubproblems()
+            new_columns = self.solveSubproblems(list_links)
             
-
             optimal = True
+            min_reduced_cost = 0
+            list_links = []
             for tl in self.problem.transport_links:
-                if self.reduced_costs[tl]<0:
+                if self.reduced_costs[tl]<10^-6:
+                    if self.reduced_costs[tl] < min_reduced_cost:
+                        min_reduced_cost = self.reduced_costs[tl]
                     optimal = False
+                    list_links.append(tl)
+            print("----------- Min reduced cost :", min_reduced_cost)
             
             if not(optimal):
                 self.addColumns(new_columns)
@@ -196,7 +213,6 @@ class ColumnGenerationSolver(MultibatchingSolver):
         for tl in self.problem.transport_links:
             # type_link = tl.transport_type
             for b in range(len(self.batches[tl])):
-                print(tl, b)
                 nb_packing = self.rp_model.getVarByName(f"x_{tl.id}_b{b}").X
                 if nb_packing>0:
                     packing_solution.append(PackingTransport(transport_link=tl, product_packing=self.batches[tl][b], nb_packing=nb_packing))

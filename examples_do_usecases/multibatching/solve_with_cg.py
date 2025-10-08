@@ -5,8 +5,8 @@ import json
 this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../"))
 
-from examples_do_usecases.multibatching.instance import init_instance
-from multibatching.utils import plot_solution_graph
+from examples_do_usecases.multibatching.instance2 import init_instance
+from multibatching.utils import plot_solution_graph, plotly_solution_graph, save_solution
 from multibatching.parse_config_data import parse_json_to_problem
 
 from multibatching.solvers.milp import MilpSolver
@@ -28,24 +28,25 @@ def parse_problem(fix_problem: bool = False):
 
 
 def run():
-    problem = init_instance()
+    # problem = init_instance()
+    problem = parse_problem()
     solver = ColumnGenerationSolver(problem)
     solver.init_model()
     res = solver.solve()
     sol = solver.get_final_solution()
-    print(sol.list_flows)
-    print(problem.evaluate(sol), problem.satisfy(sol))
-    plot_solution_graph(problem=problem, solution=sol)
-    # print(problem.satisfy(sol))
-    # # print(res.list_solution_fits)
-    # # sol = res.get_best_solution_fit()
-    # # print(sol)
+    save_solution(sol, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
+    
+    # print(problem.evaluate(sol), problem.satisfy(sol))
+    # # plot_solution_graph(problem=problem, solution=sol)
+    
+    # for i in range(len(problem.products)):
+    #     plotly_solution_graph(solution=sol,
+    #                       problem=problem,
+    #                       use_logical_layout=False,
+    #                       products_to_plot=[problem.products[i]],
+    #                       explode_flows=True)
 
-    # # c = solver.explain_unsat_fine()
-    # # print(c)
     
     
-    
-
 if __name__== "__main__":
     run()
