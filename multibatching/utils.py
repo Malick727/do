@@ -13,6 +13,7 @@ import numpy as np
 import os
 
 
+
 def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingProblem):
     """
     Renders the product flows of a MultibatchingSolution on a graph.

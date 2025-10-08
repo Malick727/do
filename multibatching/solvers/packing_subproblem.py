@@ -119,6 +119,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver, PackingSubproblemSolver):
             for i in packed_on_trip[link]:
                 value = sum([packed_on_trip[link][i][p] * p.value
                              for p in packed_on_trip[link][i]])
+                # print("Factor", int(self.scaling_factor*((1 + self.problem.capital_factor) ** time - 1)))
                 compound_cost.append(value * int(self.scaling_factor*((1 + self.problem.capital_factor) ** time - 1)))
 
         nb_trips_link = {link: sum(is_trip_used[link][i]

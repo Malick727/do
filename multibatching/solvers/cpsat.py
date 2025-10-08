@@ -282,6 +282,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             value = sum(flows_variables[index_tl][index_product]*int(self.problem.products[index_product].value)
                         for index_product in flows_variables[index_tl])
             estimated_compound.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
+        estimated_compound = [0]
         self.variables["total_obj"] = transport_cost+emission_cost+sum(estimated_compound)
         model.Minimize(self.variables["total_obj"])
         self.variables["objs"] = {"transport": transport_cost,
@@ -530,8 +531,6 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.variables["nb_trips"] = nb_trips_per_link
         self.variables["used_trips"] = used_trips_variables
         self.variables["trips_variables"] = trips_variables
-
-
 
 
 class CpsatBendersMultibatchingSolver(SolverDO):

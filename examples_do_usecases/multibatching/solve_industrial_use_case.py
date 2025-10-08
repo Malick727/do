@@ -5,7 +5,8 @@ this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../"))
 
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
-
+import plotly.io as pio
+pio.renderers.default = "browser"
 os.environ["SDKROOT"] = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 from multibatching.parse_config_data import parse_json_to_problem
 from multibatching.problem import compute_graph_for_product, Product
@@ -23,7 +24,9 @@ from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
 from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
 import json
 import os
-from examples_do_usecases.multibatching.instance import init_instance
+#from examples_do_usecases.multibatching.instance import init_instance
+from examples_do_usecases.multibatching.instance2 import init_instance
+
 
 from multibatching.utils import basic_sanity_check, plot_solution_graph, plotly_solution_graph
 import logging
@@ -297,7 +300,8 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_networkx()
+    run_cp_2steps()
+    # run_networkx()
     # run_cp_2steps()
     # run_oe()
     # run_cpmpy()

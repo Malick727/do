@@ -5,7 +5,7 @@ import json
 this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../"))
 
-from examples.multibatching.instance2 import init_instance
+from examples_do_usecases.multibatching.instance import init_instance
 from multibatching.utils import plot_solution_graph
 from multibatching.parse_config_data import parse_json_to_problem
 
