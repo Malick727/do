@@ -1,3 +1,9 @@
+import os
+import sys
+
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../"))
+
 from examples_do_usecases.multibatching.instance2 import init_instance
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver
@@ -19,9 +25,18 @@ def run_two_step():
                                             kwargs={}),
                        packing_solver=SubBrick(cls=PackingViaBinPacking,
                                                kwargs={"time_limit_per_link": 1}))
-    sol = res.get_best_solution()
-    print(problem.evaluate(sol), problem.satisfy(sol))
+    
+    sol1 = res.get_best_solution()
+    
 
+    res = solver.solve(flow_solver=SubBrick(cls=ColumnGenerationSolver,
+                                            kwargs={}),
+                       packing_solver=SubBrick(cls=PackingViaBinPacking,
+                                               kwargs={"time_limit_per_link": 1}))
+    
+    sol2 = res.get_best_solution()
+    print(problem.evaluate(sol1), problem.satisfy(sol1))
+    print(problem.evaluate(sol2), problem.satisfy(sol2))
 
 if __name__ == "__main__":
     run_two_step()

@@ -259,7 +259,8 @@ class PackingViaBinPacking(PackingSubproblemSolver):
             p = ParametersCp.default_cpsat()
             p.nb_process = 32
             res = solver.solve(parameters_cp=p,
-                               time_limit=time_limit_per_link)
+                               time_limit=time_limit_per_link, ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
+            
             sol: BinPackSolution = res[-1][0]
             nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
             # print("nb bins ", nb_bins)

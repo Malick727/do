@@ -205,6 +205,12 @@ class ColumnGenerationSolver(MultibatchingSolver):
             
             if not(optimal):
                 self.addColumns(new_columns)
+        
+        sol = self.get_final_solution()
+        print("get final ----------------", sol)
+        fit = self.aggreg_from_sol(sol)
+        return self.create_result_storage([(sol,fit)])
+    
             
 
 
@@ -224,12 +230,11 @@ class ColumnGenerationSolver(MultibatchingSolver):
     def retrieve_current_solution(self, get_var_value_for_current_solution, get_obj_value_for_current_solution):
         packing_solution = []
         for tl in self.problem.transport_links:
-            packing_link = []
-            type_link = tl.transport_type
-            for b in range(len(self.batches[type_link])):
-                nb_packing = get_var_value_for_current_solution(self.variables["x"][tl][b])
+            # type_link = tl.transport_type
+            for b in range(len(self.batches[tl])):
+                nb_packing = self.rp_model.getVarByName(f"x_{tl.id}_b{b}").X
                 if nb_packing>0:
-                    packing_solution.append(PackingTransport(transport_link=tl, product_packing=self.batches[tl.transport_type][b], nb_packing=nb_packing))
+                    packing_solution.append(PackingTransport(transport_link=tl, product_packing=self.batches[tl][b], nb_packing=nb_packing))
         return MultibatchingSolution(problem=self.problem, list_flows=packing_solution)
         # raise NotImplementedError
 

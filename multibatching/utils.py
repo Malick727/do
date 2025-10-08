@@ -208,13 +208,40 @@ def plot_network(solution: MultibatchingSolution, problem: MultibatchingProblem)
     geolocator = Nominatim(user_agent="city_coordinate_finder_v1")
     print(len(problem.products))
 
-def save_solution(solution : MultibatchingSolution, outputfolder):
-    with open(outputfolder, 'w') as f :
-        json.dump(solution.list_flows, f)
+def save_solution(solution : MultibatchingSolution, outputfile):
+    list_sol = []
+    for flow in solution.list_flows:
+        dict_packing = {key.id : val for key,val in flow.product_packing.items()} 
+        list_sol.append({"transport_link":flow.transport_link.id, "product_packing": dict_packing, "nb_packing": flow.nb_packing})
 
-def read_solution():
-    raise NotImplementedError
+    with open(outputfile, 'w') as f :
+        json.dump(list_sol, f)
+    print("written")
 
+def read_solution(problem: MultibatchingProblem, inputfile):
+    with open(inputfile, "r") as f:
+        json_data = json.load(f)
+    packing_solution = []
+    for elt in json_data:
+        tl  = problem.transport_links_id_to_object[elt["transport_link"]]
+        nb_packing = elt["nb_packing"]
+        product_packing = {}
+        for p,val in elt["product_packing"].items():
+            product_packing[problem.product_dict[p]] = val
+
+        packing_solution.append(PackingTransport(tl, product_packing, nb_packing))
+    return MultibatchingSolution(problem, list_flows=packing_solution)
+        
+
+    # packing_solution = []
+    # for tl in json_data.keys():
+        
+    #         # type_link = tl.transport_type
+    #         for b in range(len(self.batches[tl])):
+    #             nb_packing = self.rp_model.getVarByName(f"x_{tl.id}_b{b}").X
+    #             if nb_packing>0:
+    #                 packing_solution.append(PackingTransport(transport_link=tl, product_packing=self.batches[tl][b], nb_packing=nb_packing))
+    # return MultibatchingSolution(problem, list_flows)
 
 def plotly_solution_graph(
         solution: MultibatchingSolution,
