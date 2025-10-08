@@ -212,7 +212,9 @@ class ColumnGenerationSolver(MultibatchingSolver):
         return self.create_result_storage([(sol,fit)])
     
             
-
+        final_sol = self.get_final_solution()
+        fit = self.aggreg_from_sol(final_sol)
+        return self.create_result_storage([(final_sol, fit)])
 
     def get_final_solution(self):
         packing_solution = []

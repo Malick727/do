@@ -253,6 +253,8 @@ class MultibatchingProblem(Problem):
 
             for product, units in flow_item.product_packing.items():
                 # Check 5: Non-negative Packed Units
+                if units == 0:
+                    continue
                 if units < -epsilon:
                     print(f"Validation Error: Negative packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
                     return False
@@ -265,6 +267,7 @@ class MultibatchingProblem(Problem):
 
                 # Check 3: Product-Transport Compatibility
                 if link.transport_type not in product.valid_transports:
+                    print(f"Units {units} of product {product}...")
                     print(f"Validation Error: Product P{product.id} not compatible with TR{link.transport_type.id} on link {link.location_l1.id}->{link.location_l2.id}")
                     return False
 

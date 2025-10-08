@@ -11,7 +11,7 @@ from multibatching.solvers.column_generation import ColumnGenerationSolver
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMultibatchingSolver,
                                              PackingViaBinPacking, GreedyPackingForMultibatching)
-
+from multibatching.problem import MultibatchingProblem, MultibatchingSolution
 
 def run_two_step():
     """
@@ -38,6 +38,34 @@ def run_two_step():
     print(problem.evaluate(sol1), problem.satisfy(sol1))
     print(problem.evaluate(sol2), problem.satisfy(sol2))
 
+def run_two_step_column_gen():
+    """
+    Just run a solver that can compute either continuous or approximated flows,
+     and then we simply postprocess it to get valid discrete transport with another "Packing" solver.
+    :return:
+    """
+    problem = parse_problem()
+    solver = TwoStepMultibatchingSolver(problem=problem)
+    res = solver.solve(flow_solver=SubBrick(cls=ColumnGenerationSolver,
+                                            kwargs={}),
+                       packing_solver=SubBrick(cls=PackingViaBinPacking,
+                                               kwargs={"time_limit_per_link": 1}))
+    sol = res.get_best_solution()
+    print(problem.evaluate(sol), problem.satisfy(sol))
+
+
+def run_debug():
+    import pickle
+    sol = pickle.load(open("sol_debug.pk", "rb"))
+    problem: MultibatchingProblem = sol.problem
+    print(problem.satisfy(sol), problem.evaluate(sol))
+    solver = PackingViaBinPacking(problem)
+    solver.init_from_solution(sol)
+    res = solver.solve(time_limit_per_link=1)
+    sol = res.get_best_solution()
+    print(problem.evaluate(sol), problem.satisfy(sol))
+
+
 if __name__ == "__main__":
-    run_two_step()
+    run_two_step_column_gen()
 

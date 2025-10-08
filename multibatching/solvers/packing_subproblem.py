@@ -14,7 +14,7 @@ from discrete_optimization.generic_tools.result_storage.result_storage import Re
 
 from multibatching.problem import (MultibatchingProblem, MultibatchingSolution, PackingTransport,
                                    TransportLink, TransportType, Product)
-from discrete_optimization.generic_tools.do_solver import ParamsObjectiveFunction
+from discrete_optimization.generic_tools.do_solver import ParamsObjectiveFunction, StatusSolver
 from discrete_optimization.binpack.problem import BinPackProblem, BinPackSolution, ItemBinPack
 from discrete_optimization.binpack.solvers.cpsat import CpSatBinPackSolver, ModelingBinPack
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
@@ -240,7 +240,10 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                     if p not in aggregated_link_flow[tl]:
                         aggregated_link_flow[tl][p] = 0
                     aggregated_link_flow[tl][p] += int(nb_packing*flow.product_packing[p])
+                    if flow.product_packing[p] > 0 and int(nb_packing*flow.product_packing[p])==0:
+                        print("Issue = ")
         all_packings = []
+
         for tl in aggregated_link_flow:
             capacity = tl.transport_type.capacity
             list_items = []
@@ -252,6 +255,10 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                                    for j in range(aggregated_link_flow[tl][p])])
                 cur_index += aggregated_link_flow[tl][p]
                 index_to_product.extend([p for _ in range(aggregated_link_flow[tl][p])])
+            if len(list_items) == 0:
+                print()
+                print(aggregated_link_flow[tl])
+                continue
             problem_bin_pack = BinPackProblem(list_items=list_items,
                                               capacity_bin=int(capacity))
             solver = CpSatBinPackSolver(problem=problem_bin_pack)
@@ -259,19 +266,22 @@ class PackingViaBinPacking(PackingSubproblemSolver):
             p = ParametersCp.default_cpsat()
             p.nb_process = 32
             res = solver.solve(parameters_cp=p,
-                               time_limit=time_limit_per_link, ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
-            
+                               time_limit=time_limit_per_link,
+                               ortools_cpsat_solver_kwargs={"log_search_progress": False})
+            if solver.status_solver == StatusSolver.UNSATISFIABLE:
+                logger.info(f"One flow post process failed.")
             sol: BinPackSolution = res[-1][0]
             nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
             # print("nb bins ", nb_bins)
-            packings = [PackingTransport(transport_link=tl, product_packing=defaultdict(lambda: 0),
-                                         nb_packing=1) for i in range(nb_bins)]
+            packings = [PackingTransport(transport_link=tl,
+                                         product_packing=
+                                         defaultdict(lambda: 0),
+                                         nb_packing=1)
+                        for i in range(nb_bins)]
             for i in range(len(sol.allocation)):
                 bin_i = sol.allocation[i]
                 packings[bin_i].product_packing[index_to_product[i]] += 1
-
             all_packings.extend(packings)
-
         sol = MultibatchingSolution(problem=self.problem,
                                     list_flows=all_packings)
         fit = self.aggreg_from_sol(sol)
