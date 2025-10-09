@@ -45,9 +45,6 @@ class TransportLink:
     transport_type: TransportType
     max_trips: Optional[int] = field(repr=True, hash=False, default=None)
 
-    def __repr__(self):
-        return f"TransportLink"
-
 
 @dataclass
 class PackingTransport:
@@ -68,6 +65,8 @@ class MultibatchingSolution(Solution):
     def copy(self) -> "Solution":
         return MultibatchingSolution(problem=self.problem,
                                      list_flows=list(self.list_flows))
+
+
 
 
 class MultibatchingProblem(Problem):
@@ -101,6 +100,7 @@ class MultibatchingProblem(Problem):
                                                          for tl in self.transport_links}
         
         self.transport_links_id_to_object = {transport_link.id : transport_link for transport_link in transport_links}
+
 
     def evaluate(self, variable: "MultibatchingSolution") -> dict[str, float]:
         transport_cost = sum([flow.transport_link.transport_type.cost

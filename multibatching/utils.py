@@ -13,7 +13,10 @@ import numpy as np
 import os
 import json
 from geopy.geocoders import Nominatim
-
+import pandas as pd
+import time
+from plotly.express.colors import qualitative
+import searoute as sr
 
 
 def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingProblem):
@@ -204,9 +207,357 @@ def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingP
     plt.tight_layout()
     plt.show()
 
-def plot_network(solution: MultibatchingSolution, problem: MultibatchingProblem):
+
+def get_coords(city_name: str) -> Optional[tuple[float, float]]:
+    """Finds latitude and longitude for a city and caches the result."""
     geolocator = Nominatim(user_agent="city_coordinate_finder_v1")
-    print(len(problem.products))
+    try:
+        if "Harbor" in city_name:
+            city_name = city_name.split(" ")[0]
+        elif "Ville de" in city_name:
+            city_name = city_name.split("Ville de")[1]
+        print(f"Geocoding {city_name}...")
+        location = geolocator.geocode(city_name)
+        time.sleep(1) # Be respectful of Nominatim's usage policy
+        if location:
+            print(location)
+            coords = (location.latitude, location.longitude)
+            return coords
+    except Exception as e:
+        print(f"Error geocoding {city_name}: {e}")
+    return None
+
+
+def plot_solution_on_map(solution: MultibatchingSolution):
+    """
+    Creates an interactive Plotly map of a MultibatchingSolution.
+    """
+    # 1. Extract data from the solution object
+    
+    locations_data = {}
+    
+
+    # coordinates = {}
+    # for l in solution.problem.locations:
+    #     coordinates[l.name] = get_coords(l.name)
+    
+
+    # with open("multibatching/datalocal/coordinates.json", "w") as f :
+    #     json.dump(coordinates,f)
+
+    with open("multibatching/datalocal/coordinates.json", "r") as f :
+        coordinates = json.load(f)
+
+    for current_transport_type in solution.problem.transport_types:
+        name_transport_type = current_transport_type.name
+        
+        flows = []
+        for flow in solution.list_flows:
+            if flow.transport_link.transport_type == current_transport_type:
+                l1 = flow.transport_link.location_l1
+                l2 = flow.transport_link.location_l2
+
+                # Store unique locations
+                if l1.id not in locations_data:
+                    locations_data[l1.id] = l1
+                if l2.id not in locations_data:
+                    locations_data[l2.id] = l2
+
+                # Format hover text for the flow line
+                products_str = "".join([f"- {p.name}: {qty}" for p, qty in flow.product_packing.items()])
+                hover_text = (f"Flow: {l1.name} to {l2.name}"
+                            f"Total Items: {flow.nb_packing}"
+                            f"{products_str}")
+
+                flows.append({
+                    'start_lat': coordinates[l1.name][0], 'start_lon': coordinates[l1.name][1],
+                    'end_lat': coordinates[l2.name][0], 'end_lon': coordinates[l2.name][1],
+                    'quantity': flow.nb_packing,
+                    'hover_text': hover_text
+                })
+
+        locations_df = pd.DataFrame([{
+            'id': loc.id, 'name': loc.name, 'lat': coordinates[loc.name][0], 'lon': coordinates[loc.name][1],
+            'supply': sum(loc.net_supply.values())
+        } for loc in locations_data.values()])
+
+        flows_df = pd.DataFrame(flows)
+
+        # 2. Create the Plotly Figure
+        fig = go.Figure()
+
+        # 3. Add flow lines to the map
+        for i, row in flows_df.iterrows():
+            fig.add_trace(go.Scattergeo(
+                mode="lines",
+                lon=[row['start_lon'], row['end_lon']],
+                lat=[row['start_lat'], row['end_lat']],
+                line=dict(width=2 + row['quantity'] / 100, color='cornflowerblue'), # Width scales with quantity
+                hoverinfo='text',
+                hovertext=row['hover_text'],
+                name=f"Flow {i+1}"
+            ))
+
+        # 4. Add location markers to the map
+        fig.add_trace(go.Scattergeo(
+            mode="markers",
+            lon=locations_df['lon'],
+            lat=locations_df['lat'],
+            marker=dict(
+                size=15,
+                color=locations_df['supply'].apply(lambda x: 'green' if x >= 0 else 'red'),
+                sizemin=4
+            ),
+            text=locations_df['name'],
+            hoverinfo='text',
+            hovertext=locations_df.apply(lambda r: f"{r['name']}Net Supply: {r['supply']}", axis=1)
+        ))
+
+        # 5. Configure the map layout
+        fig.update_layout(
+            title=name_transport_type,
+            showlegend=True,
+                width=900,  # Set the width in pixels
+                height=600, # Set the height in pixels
+            mapbox=dict(
+                center=dict(lat=50, lon=10), # Center on Europe
+            ),
+            margin={"r":0,"t":40,"l":0,"b":0},
+        )
+
+        fig.show()
+
+def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
+    """
+    Creates an interactive Plotly map of a MultibatchingSolution,
+    grouping flows by route and transport type, with unique colors for each type.
+    """
+    # 1. Extract data, now including the transport type for each flow
+    locations_data = {}
+    with open("multibatching/datalocal/coordinates.json", "r") as f:
+        coordinates = json.load(f)
+
+    flows = []
+    transport_types_in_solution = set() # To keep track of unique transport types
+
+    for flow in solution.list_flows:
+        
+        l1 = flow.transport_link.location_l1
+        l2 = flow.transport_link.location_l2
+
+        transport_type_name = flow.transport_link.transport_type.name
+        route = {}
+        
+
+        if "Ship" in transport_type_name:
+            route_json = sr.searoute([coordinates[l1.name][1],coordinates[l1.name][0]],[coordinates[l2.name][1], coordinates[l2.name][0]])
+            route["lat"] = [lat for [lon,lat] in route_json["geometry"]["coordinates"]]
+            route["lon"] = [lon for [lon,lat] in route_json["geometry"]["coordinates"]]
+        else:
+            route["lat"] = [coordinates[l1.name][0], coordinates[l2.name][0]]
+            route["lon"] = [coordinates[l1.name][1], coordinates[l2.name][1]]
+        
+        transport_types_in_solution.add(transport_type_name)
+
+        if l1.id not in locations_data:
+            locations_data[l1.id] = l1
+        if l2.id not in locations_data:
+            locations_data[l2.id] = l2
+
+        products_str = "".join([f"\n  - {p.name}: {qty}" for p, qty in flow.product_packing.items()])
+        flow_details = f"\n- Flow with {flow.nb_packing} items:{products_str}"
+
+        flows.append({
+            'start_name': l1.name, 'end_name': l2.name,
+            'start_lat': coordinates[l1.name][0], 'start_lon': coordinates[l1.name][1],
+            'end_lat': coordinates[l2.name][0], 'end_lon': coordinates[l2.name][1],
+            'quantity': flow.nb_packing,
+            'flow_details_text': flow_details,
+            'transport_type': transport_type_name,
+            'route':route # <-- ADDED THIS
+        })
+
+    locations_df = pd.DataFrame([{
+        'id': loc.id, 'name': loc.name, 'lat': coordinates[loc.name][0], 'lon': coordinates[loc.name][1],
+        'supply': sum(loc.net_supply.values())
+    } for loc in locations_data.values()])
+
+    if not flows:
+        print("No flows to display.")
+        return
+
+    flows_df = pd.DataFrame(flows)
+
+    # 2. Create the Plotly Figure and color scheme
+    fig = go.Figure()
+    
+    # Create a dynamic color map for the transport types
+    color_palette = qualitative.Plotly # A good default color sequence
+    transport_color_map = {ttype: color_palette[i % len(color_palette)] 
+                           for i, ttype in enumerate(sorted(list(transport_types_in_solution)))}
+
+    # 3. Add grouped flow lines to the map
+    # Group by route AND transport type
+    grouped_flows = flows_df.groupby(['start_name', 'end_name', 'transport_type'])
+
+
+    for (start_name, end_name, transport_type), group in grouped_flows:
+        total_quantity = group['quantity'].sum()
+        
+        # Update hover text to include transport type
+        combined_hover_text = (f"<b>{start_name} → {end_name}</b><br>"
+                               f"Transport: {transport_type}<br>"
+                               f"Total Items: {total_quantity}<br>"
+                               "--- Details ---<br>" + 
+                               "<br>".join(group['flow_details_text']))
+        
+        route_coords = group.iloc[0]
+        print(route_coords)
+        route_color = transport_color_map[transport_type] # Get the color for this type
+
+
+
+        fig.add_trace(go.Scattergeo(
+            mode="lines",
+            lon=route_coords['route']['lon'],
+            lat=route_coords['route']['lat'],
+            line=dict(width=2 + total_quantity / 150, color=route_color), # <-- Use dynamic color
+            hoverinfo='text',
+            hovertext=combined_hover_text,
+            name=f"{start_name} → {end_name} ({transport_type})", # <-- Updated legend name
+            legendgroup=transport_type # This groups legend items by transport type
+        ))
+
+    # 4. Add location markers to the map
+    fig.add_trace(go.Scattergeo(
+        mode="markers",
+        lon=locations_df['lon'],
+        lat=locations_df['lat'],
+        marker=dict(size=15, color=locations_df['supply'].apply(lambda x: 'green' if x >= 0 else 'red')),
+        hoverinfo='text',
+        hovertext=locations_df.apply(lambda r: f"<b>{r['name']}</b><br>Net Supply: {r['supply']}", axis=1),
+        name="Locations"
+    ))
+
+    # 5. Configure the map layout
+    fig.update_layout(
+        title_text="Solution Flows by Route and Transport Type",
+        showlegend=True,
+        width=1300, height=600,
+        geo=dict(projection_type='mercator',
+            center=dict(lat=48, lon=10)
+        ),
+        margin={"r":0,"t":40,"l":0,"b":0},
+    )
+
+    fig.show()
+
+    
+def plot_solution_on_map_grouped(solution: MultibatchingSolution):
+    """
+    Creates an interactive Plotly map of a MultibatchingSolution,
+    grouping flows by route for a cleaner and more interactive legend.
+    """
+    # 1. Extract data from the solution object (similar to your original code)
+    locations_data = {}
+    with open("multibatching/datalocal/coordinates.json", "r") as f:
+        coordinates = json.load(f)
+
+    flows = []
+    for flow in solution.list_flows:
+        l1 = flow.transport_link.location_l1
+        l2 = flow.transport_link.location_l2
+
+        if l1.id not in locations_data:
+            locations_data[l1.id] = l1
+        if l2.id not in locations_data:
+            locations_data[l2.id] = l2
+
+        # Detailed info for this specific flow
+        products_str = "".join([f"\n  - {p.name}: {qty}" for p, qty in flow.product_packing.items()])
+        flow_details = f"\n- Flow with {flow.nb_packing} items:{products_str}"
+
+        flows.append({
+            'start_name': l1.name, 'end_name': l2.name,
+            'start_lat': coordinates[l1.name][0], 'start_lon': coordinates[l1.name][1],
+            'end_lat': coordinates[l2.name][0], 'end_lon': coordinates[l2.name][1],
+            'quantity': flow.nb_packing,
+            'flow_details_text': flow_details # Store individual flow details
+        })
+
+    locations_df = pd.DataFrame([{
+        'id': loc.id, 'name': loc.name, 'lat': coordinates[loc.name][0], 'lon': coordinates[loc.name][1],
+        'supply': sum(loc.net_supply.values())
+    } for loc in locations_data.values()])
+
+    if not flows:
+        print("No flows to display.")
+        return
+
+    flows_df = pd.DataFrame(flows)
+
+    # 2. Create the Plotly Figure
+    fig = go.Figure()
+
+    # 3. Add grouped flow lines to the map
+    # Group by the route (start and end location names)
+    grouped_flows = flows_df.groupby(['start_name', 'end_name'])
+
+    for (start_name, end_name), group in grouped_flows:
+        # Aggregate the information for this route
+        total_quantity = group['quantity'].sum()
+        combined_hover_text = (f"<b>Route: {start_name} to {end_name}</b><br>"
+                               f"Total Items: {total_quantity}<br>"
+                               "--- Details ---<br>" + 
+                               "<br>".join(group['flow_details_text']))
+        
+        # Get coordinates from the first row of the group (they are all the same)
+        route_coords = group.iloc[0]
+
+        fig.add_trace(go.Scattergeo(
+            mode="lines",
+            lon=[route_coords['start_lon'], route_coords['end_lon']],
+            lat=[route_coords['start_lat'], route_coords['end_lat']],
+            line=dict(width=2 + total_quantity / 100, color='cornflowerblue'),
+            hoverinfo='text',
+            hovertext=combined_hover_text,
+            name=f"{start_name} → {end_name}" # This creates a meaningful legend entry
+        ))
+
+    # 4. Add location markers to the map (same as your original code)
+    fig.add_trace(go.Scattergeo(
+        mode="markers",
+        lon=locations_df['lon'],
+        lat=locations_df['lat'],
+        marker=dict(
+            size=15,
+            color=locations_df['supply'].apply(lambda x: 'green' if x >= 0 else 'red'),
+            sizemin=4
+        ),
+        text=locations_df['name'],
+        hoverinfo='text',
+        hovertext=locations_df.apply(lambda r: f"<b>{r['name']}</b><br>Net Supply: {r['supply']}", axis=1),
+        name="Locations" # Give the markers a name in the legend
+    ))
+
+    # 5. Configure the map layout (same as your original code)
+    fig.update_layout(
+        title_text="Solution Flows by Route",
+        showlegend=True,
+        width=900,
+        height=600,
+        geo=dict(
+            scope='europe',
+            projection_type='azimuthal equal area',
+            center=dict(lat=48, lon=10),
+            landcolor='rgb(243, 243, 243)',
+            countrycolor='rgb(204, 204, 204)',
+        ),
+        margin={"r":0,"t":40,"l":0,"b":0},
+    )
+
+    fig.show()
+
 
 def save_solution(solution : MultibatchingSolution, outputfile):
     list_sol = []
@@ -227,7 +578,9 @@ def read_solution(problem: MultibatchingProblem, inputfile):
         nb_packing = elt["nb_packing"]
         product_packing = {}
         for p,val in elt["product_packing"].items():
-            product_packing[problem.product_dict[p]] = val
+            if np.abs(int(val))>0:
+                print(p,val)
+                product_packing[problem.product_dict[p]] = val
 
         packing_solution.append(PackingTransport(tl, product_packing, nb_packing))
     return MultibatchingSolution(problem, list_flows=packing_solution)
