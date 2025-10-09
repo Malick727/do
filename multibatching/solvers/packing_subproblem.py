@@ -1,4 +1,3 @@
-# Some greedy stuff
 import math
 from abc import abstractmethod
 from collections import defaultdict, Counter
@@ -19,6 +18,7 @@ from discrete_optimization.binpack.problem import BinPackProblem, BinPackSolutio
 from discrete_optimization.binpack.solvers.cpsat import CpSatBinPackSolver, ModelingBinPack
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from multibatching.solvers import MultibatchingSolver
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -222,6 +222,7 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
 
 
 class PackingViaBinPacking(PackingSubproblemSolver):
+
     def solve(self, callbacks: Optional[list[Callback]] = None,
               time_limit_per_link=2,
               **kwargs: Any) -> ResultStorage:
@@ -239,11 +240,14 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                 if flow.product_packing[p] > 0:
                     if p not in aggregated_link_flow[tl]:
                         aggregated_link_flow[tl][p] = 0
-                    aggregated_link_flow[tl][p] += int(nb_packing*flow.product_packing[p])
-                    if flow.product_packing[p] > 0 and int(nb_packing*flow.product_packing[p])==0:
-                        print("Issue = ")
+                    aggregated_link_flow[tl][p] += nb_packing*flow.product_packing[p]
+                    if flow.product_packing[p] > 0 and int(nb_packing*flow.product_packing[p]) == 0:
+                        print("Issue = ...")
+        for tl in aggregated_link_flow:
+            for p in aggregated_link_flow[tl]:
+                print(aggregated_link_flow[tl][p], int(round(aggregated_link_flow[tl][p])))
+                aggregated_link_flow[tl][p] = int(aggregated_link_flow[tl][p]) #int(round(aggregated_link_flow[tl][p]))
         all_packings = []
-
         for tl in aggregated_link_flow:
             capacity = tl.transport_type.capacity
             list_items = []

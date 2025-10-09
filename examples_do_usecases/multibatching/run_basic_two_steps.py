@@ -1,12 +1,15 @@
 import os
 import sys
 
+from discrete_optimization.generic_tools.cp_tools import ParametersCp
+from multibatching.solvers.packing_subproblem import CpsatPackingSubproblem
+
 this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../"))
 
 from examples_do_usecases.multibatching.instance2 import init_instance
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
-from multibatching.solvers.cpsat import CpsatMultibatchingSolver
+from multibatching.solvers.cpsat import CpsatMultibatchingSolver, ModelingMultiBatch
 from multibatching.solvers.column_generation import ColumnGenerationSolver
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMultibatchingSolver,
@@ -52,6 +55,7 @@ def run_two_step_column_gen():
                                                kwargs={"time_limit_per_link": 1}))
     sol = res.get_best_solution()
     print(problem.evaluate(sol), problem.satisfy(sol))
+    print(sum(problem.evaluate(sol).values()))
 
 
 def run_debug():
@@ -66,6 +70,38 @@ def run_debug():
     print(problem.evaluate(sol), problem.satisfy(sol))
 
 
+def run_cp_after_milp():
+    import pickle
+    # This was the final solution of column gen.
+    sol = pickle.load(open("sol_debug.pk", "rb"))
+    problem: MultibatchingProblem = sol.problem
+    print(problem.satisfy(sol), problem.evaluate(sol))
+    # Rebuild discrete flow, possibly breaking flow and demand constraint slightly.
+    solver = PackingViaBinPacking(problem)
+    solver.init_from_solution(sol)
+    res = solver.solve(time_limit_per_link=1)
+
+    # CP solver reasoning on total flows.
+    solver = CpsatMultibatchingSolver(problem=problem)
+    solver.init_model(modeling=ModelingMultiBatch.FLOW)
+    # Warm start with prev solution.
+    solver.set_warm_start_flow(solution=res[-1][0])
+    p = ParametersCp.default_cpsat()
+    p.nb_process = 32
+    res = solver.solve(parameters_cp=p,
+                       time_limit=100,
+                       ortools_cpsat_solver_kwargs={"log_search_progress": True})
+    print(problem.evaluate(res[-1][0]), problem.satisfy(res[-1][0]))
+
+    # Post pro the cp-flow solution.
+    solver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
+    solver.init_from_solution(res[-1][0])
+    res = solver.solve(time_limit=30)
+    sol = res[-1][0]
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    print(sum(problem.evaluate(sol).values()))
+
+
 if __name__ == "__main__":
-    run_two_step_column_gen()
+    run_cp_after_milp()
 

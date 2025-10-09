@@ -81,7 +81,8 @@ def run_oe():
 
 def run_cp_2steps():
     # problem = parse_problem()
-    problem = init_instance()
+    # problem = init_instance()
+    problem = parse_problem()
     solver = CpsatMultibatchingSolver(problem=problem,
                                       scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
