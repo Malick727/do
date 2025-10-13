@@ -404,7 +404,7 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
                   start_lon=coordinates[l1.name][1],
                   end_lat=coordinates[l2.name][0],
                   end_lon=coordinates[l2.name][1],
-                  num_points=20 
+                  num_points=50 
               )
             route["lat"] = lats
             route["lon"] = lons
@@ -493,13 +493,26 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
 
     # 5. Configure the map layout
     fig.update_layout(
+        autosize=True,
         title_text="Solution Flows by Route and Transport Type",
+        title_x=0.5,
         showlegend=True,
-        width=1300, height=600,
+        width=2050, height=900,
         geo=dict(projection_type='mercator',
-            center=dict(lat=48, lon=10)
+            center=dict(lat=48, lon=10),
+            domain=dict(x=[0, 0.8], y=[0, 1])
         ),
         margin={"r":0,"t":40,"l":0,"b":0},
+
+       legend=dict(
+            x=0.65,         
+            y=0.99,         
+            xanchor='left', 
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.7)',
+            bordercolor='Black',
+            borderwidth=1
+        )
     )
 
     fig.show()
