@@ -13,6 +13,7 @@ import numpy as np
 import os
 import json
 from geopy.geocoders import Nominatim
+from pyproj import Geod
 import pandas as pd
 import time
 from plotly.express.colors import qualitative
@@ -227,7 +228,6 @@ def get_coords(city_name: str) -> Optional[tuple[float, float]]:
         print(f"Error geocoding {city_name}: {e}")
     return None
 
-
 def plot_solution_on_map(solution: MultibatchingSolution):
     """
     Creates an interactive Plotly map of a MultibatchingSolution.
@@ -327,6 +327,31 @@ def plot_solution_on_map(solution: MultibatchingSolution):
 
         fig.show()
 
+def interpolate_geodesic(start_lat, start_lon, end_lat, end_lon, num_points=20):
+    """
+    Generates intermediate points along the geodesic curve 
+    between two coordinates.
+    """
+    # Define the WGS84 ellipsoid, which is the standard for GPS.
+    geod = Geod(ellps='WGS84')
+    
+    # geod.npts returns a single list of (lon, lat) tuples.
+    points = geod.npts(
+        lon1=start_lon, lat1=start_lat,
+        lon2=end_lon, lat2=end_lat,
+        npts=num_points
+    )
+    
+    # Handle the edge case of an empty list.
+    if not points: 
+        return [], []
+        
+    # Unpack the list of tuples into two separate lists using the zip(*...) idiom.
+    lons, lats = zip(*points)
+    
+    # Return as lists
+    return list(lats), list(lons)
+
 def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
     """
     Creates an interactive Plotly map of a MultibatchingSolution,
@@ -354,8 +379,15 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
             route["lat"] = [lat for [lon,lat] in route_json["geometry"]["coordinates"]]
             route["lon"] = [lon for [lon,lat] in route_json["geometry"]["coordinates"]]
         else:
-            route["lat"] = [coordinates[l1.name][0], coordinates[l2.name][0]]
-            route["lon"] = [coordinates[l1.name][1], coordinates[l2.name][1]]
+            lats, lons = interpolate_geodesic(
+                  start_lat=coordinates[l1.name][0],
+                  start_lon=coordinates[l1.name][1],
+                  end_lat=coordinates[l2.name][0],
+                  end_lon=coordinates[l2.name][1],
+                  num_points=20 
+              )
+            route["lat"] = lats
+            route["lon"] = lons
         
         transport_types_in_solution.add(transport_type_name)
 
