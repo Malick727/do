@@ -332,25 +332,32 @@ def interpolate_geodesic(start_lat, start_lon, end_lat, end_lon, num_points=20):
     Generates intermediate points along the geodesic curve 
     between two coordinates.
     """
-    # Define the WGS84 ellipsoid, which is the standard for GPS.
     geod = Geod(ellps='WGS84')
     
-    # geod.npts returns a single list of (lon, lat) tuples.
     points = geod.npts(
         lon1=start_lon, lat1=start_lat,
         lon2=end_lon, lat2=end_lat,
         npts=num_points
     )
     
-    # Handle the edge case of an empty list.
-    if not points: 
-        return [], []
+    if not points or num_points < 2: 
+        return [start_lat, end_lat], [start_lon, end_lon]
         
-    # Unpack the list of tuples into two separate lists using the zip(*...) idiom.
-    lons, lats = zip(*points)
+    lons_interp, lats_interp = zip(*points)
     
-    # Return as lists
-    return list(lats), list(lons)
+    # Convert tuples to lists to make them mutable
+    lats = list(lats_interp)
+    lons = list(lons_interp)
+    
+    # Manually overwrite the first and last points with the exact
+    # start and end coordinates. This corrects any minor floating-point
+    # discrepancies from the npts calculation and ensures a perfect connection.
+    lats[0] = start_lat
+    lons[0] = start_lon
+    lats[-1] = end_lat
+    lons[-1] = end_lon
+    
+    return lats, lons
 
 def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
     """
@@ -375,9 +382,22 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
         
 
         if "Ship" in transport_type_name:
-            route_json = sr.searoute([coordinates[l1.name][1],coordinates[l1.name][0]],[coordinates[l2.name][1], coordinates[l2.name][0]])
-            route["lat"] = [lat for [lon,lat] in route_json["geometry"]["coordinates"]]
-            route["lon"] = [lon for [lon,lat] in route_json["geometry"]["coordinates"]]
+            route_json = sr.searoute(
+                [coordinates[l1.name][1], coordinates[l1.name][0]],
+                [coordinates[l2.name][1], coordinates[l2.name][0]]
+            )
+            
+            route_lats = [lat for lon, lat in route_json["geometry"]["coordinates"]]
+            route_lons = [lon for lon, lat in route_json["geometry"]["coordinates"]]
+
+            if route_lats:
+                route_lats[0] = coordinates[l1.name][0]
+                route_lons[0] = coordinates[l1.name][1]
+                route_lats[-1] = coordinates[l2.name][0]
+                route_lons[-1] = coordinates[l2.name][1]
+            
+            route["lat"] = route_lats
+            route["lon"] = route_lons
         else:
             lats, lons = interpolate_geodesic(
                   start_lat=coordinates[l1.name][0],
