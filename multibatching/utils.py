@@ -13,6 +13,7 @@ import numpy as np
 import os
 import json
 from geopy.geocoders import Nominatim
+from pyproj import Geod
 import pandas as pd
 import time
 from plotly.express.colors import qualitative
@@ -227,7 +228,6 @@ def get_coords(city_name: str) -> Optional[tuple[float, float]]:
         print(f"Error geocoding {city_name}: {e}")
     return None
 
-
 def plot_solution_on_map(solution: MultibatchingSolution):
     """
     Creates an interactive Plotly map of a MultibatchingSolution.
@@ -327,6 +327,38 @@ def plot_solution_on_map(solution: MultibatchingSolution):
 
         fig.show()
 
+def interpolate_geodesic(start_lat, start_lon, end_lat, end_lon, num_points=20):
+    """
+    Generates intermediate points along the geodesic curve 
+    between two coordinates.
+    """
+    geod = Geod(ellps='WGS84')
+    
+    points = geod.npts(
+        lon1=start_lon, lat1=start_lat,
+        lon2=end_lon, lat2=end_lat,
+        npts=num_points
+    )
+    
+    if not points or num_points < 2: 
+        return [start_lat, end_lat], [start_lon, end_lon]
+        
+    lons_interp, lats_interp = zip(*points)
+    
+    # Convert tuples to lists to make them mutable
+    lats = list(lats_interp)
+    lons = list(lons_interp)
+    
+    # Manually overwrite the first and last points with the exact
+    # start and end coordinates. This corrects any minor floating-point
+    # discrepancies from the npts calculation and ensures a perfect connection.
+    lats[0] = start_lat
+    lons[0] = start_lon
+    lats[-1] = end_lat
+    lons[-1] = end_lon
+    
+    return lats, lons
+
 def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
     """
     Creates an interactive Plotly map of a MultibatchingSolution,
@@ -350,12 +382,32 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
         
 
         if "Ship" in transport_type_name:
-            route_json = sr.searoute([coordinates[l1.name][1],coordinates[l1.name][0]],[coordinates[l2.name][1], coordinates[l2.name][0]])
-            route["lat"] = [lat for [lon,lat] in route_json["geometry"]["coordinates"]]
-            route["lon"] = [lon for [lon,lat] in route_json["geometry"]["coordinates"]]
+            route_json = sr.searoute(
+                [coordinates[l1.name][1], coordinates[l1.name][0]],
+                [coordinates[l2.name][1], coordinates[l2.name][0]]
+            )
+            
+            route_lats = [lat for lon, lat in route_json["geometry"]["coordinates"]]
+            route_lons = [lon for lon, lat in route_json["geometry"]["coordinates"]]
+
+            if route_lats:
+                route_lats[0] = coordinates[l1.name][0]
+                route_lons[0] = coordinates[l1.name][1]
+                route_lats[-1] = coordinates[l2.name][0]
+                route_lons[-1] = coordinates[l2.name][1]
+            
+            route["lat"] = route_lats
+            route["lon"] = route_lons
         else:
-            route["lat"] = [coordinates[l1.name][0], coordinates[l2.name][0]]
-            route["lon"] = [coordinates[l1.name][1], coordinates[l2.name][1]]
+            lats, lons = interpolate_geodesic(
+                  start_lat=coordinates[l1.name][0],
+                  start_lon=coordinates[l1.name][1],
+                  end_lat=coordinates[l2.name][0],
+                  end_lon=coordinates[l2.name][1],
+                  num_points=50 
+              )
+            route["lat"] = lats
+            route["lon"] = lons
         
         transport_types_in_solution.add(transport_type_name)
 
@@ -441,13 +493,26 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
 
     # 5. Configure the map layout
     fig.update_layout(
+        autosize=True,
         title_text="Solution Flows by Route and Transport Type",
+        title_x=0.5,
         showlegend=True,
-        width=1300, height=600,
+        width=2050, height=900,
         geo=dict(projection_type='mercator',
-            center=dict(lat=48, lon=10)
+            center=dict(lat=48, lon=10),
+            domain=dict(x=[0, 0.8], y=[0, 1])
         ),
         margin={"r":0,"t":40,"l":0,"b":0},
+
+       legend=dict(
+            x=0.65,         
+            y=0.99,         
+            xanchor='left', 
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.7)',
+            bordercolor='Black',
+            borderwidth=1
+        )
     )
 
     fig.show()
