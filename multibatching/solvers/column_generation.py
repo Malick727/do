@@ -102,14 +102,17 @@ class ColumnGenerationSolver(MultibatchingSolver):
         obj_transport = model.addVar(name="obj_transport")
         model.addConstr(gp.quicksum(x[tl][b]*tl.transport_type.cost*tl.distance for tl in self.problem.transport_links for b in range(len(self.batches[tl])))==obj_transport, "transport_cost_constraint")
 
-        obj_capital = model.addVar(name="obj_capital")
-        capital_cost = {}
+        # obj_capital = model.addVar(name="obj_capital")
+        # capital_cost = {}
 
 
         model.setObjective(obj_co2 + obj_transport)
         model.Params.LogToConsole = 0
+        model.update()
         self.rp_model = model
         self.products_on_links = products_on_links
+
+        print("Model created")
 
     
     def solveRP(self):
@@ -169,12 +172,16 @@ class ColumnGenerationSolver(MultibatchingSolver):
 
             cost = (transport_link.transport_type.emissions + transport_link.transport_type.cost) * transport_link.distance 
             self.rp_model.addVar(obj=cost, lb=0, name=f"x_{transport_link.id}_b{nb_batches}", column=c)
+            self.rp_model.update()
 
     
     def solve(self, **kwargs):
 
         optimal = False
         list_links = self.problem.transport_links
+
+        # Add branching strategy
+        print("nb variables",len(self.rp_model.getVars()))
         
         while not(optimal):
 
@@ -196,7 +203,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
             min_reduced_cost = 0
             list_links = []
             for tl in self.problem.transport_links:
-                if self.reduced_costs[tl]<10^-6:
+                if self.reduced_costs[tl]<-1e-6:
                     if self.reduced_costs[tl] < min_reduced_cost:
                         min_reduced_cost = self.reduced_costs[tl]
                     optimal = False
@@ -205,16 +212,12 @@ class ColumnGenerationSolver(MultibatchingSolver):
             
             if not(optimal):
                 self.addColumns(new_columns)
-        
+
         sol = self.get_final_solution()
-        print("get final ----------------", sol)
+        print("nb variables",len(self.rp_model.getVars()))
         fit = self.aggreg_from_sol(sol)
         return self.create_result_storage([(sol,fit)])
     
-            
-        final_sol = self.get_final_solution()
-        fit = self.aggreg_from_sol(final_sol)
-        return self.create_result_storage([(final_sol, fit)])
 
     def get_final_solution(self):
         packing_solution = []

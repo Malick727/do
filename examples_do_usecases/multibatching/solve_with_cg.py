@@ -6,10 +6,10 @@ this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../"))
 
 from examples_do_usecases.multibatching.instance2 import init_instance
-from multibatching.utils import plot_solution_graph, plotly_solution_graph, save_solution, read_solution, plot_solution_on_map, plot_solution_on_map_grouped, plot_solution_on_map_by_transport
+from multibatching.utils import plot_solution_graph, plotly_solution_graph, save_solution, read_solution, plot_solution_on_map, plot_solution_on_map_grouped, plot_solution_on_map_by_transport, getFALsLocation, formatCoordinates
 from multibatching.parse_config_data import parse_json_to_problem
 
-from multibatching.solvers.milp import MilpSolver
+from multibatching.solvers.branch_and_price_copy import BranchAndPriceSolver
 from multibatching.solvers.column_generation import ColumnGenerationSolver
 
 
@@ -28,24 +28,42 @@ def parse_problem(fix_problem: bool = False):
 
 
 def run():
+
+
     # problem = init_instance()
     problem = parse_problem()
+
+
+    ##### Branch-and-price solver
+    # solver = BranchAndPriceSolver(problem)
+    # solver.init_model()
+    # solver.solve()
+
+
+    ##### Column generation solver
+    # df.to_csv("multibatching/datalocal/locations.csv", index=True)
+    # print("Products :", len(problem.products))
+    # print("Locations :", len(problem.locations))
+    # print("Transport links", len(problem.transport_links))
+    # print("Transport types :", len(problem.transport_types))
+
     
+
+
     # solver = ColumnGenerationSolver(problem)
     # solver.init_model()
     # res = solver.solve()
     # sol = solver.get_final_solution()
+    
+
+
+    # plot_solution_graph(sol, problem)
     # save_solution(sol, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
     sol = read_solution(problem, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
+    print(problem.satisfy(sol))
+    print(problem.evaluate(sol))
     plot_solution_on_map_by_transport(sol)
-    # # plot_solution_graph(problem=problem, solution=sol)
-    
-    # for i in range(len(problem.products)):
-    #     plotly_solution_graph(solution=sol,
-    #                       problem=problem,
-    #                       use_logical_layout=False,
-    #                       products_to_plot=[problem.products[i]],
-    #                       explode_flows=True)
+
 
     
 if __name__== "__main__":

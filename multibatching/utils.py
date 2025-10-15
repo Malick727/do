@@ -228,6 +228,31 @@ def get_coords(city_name: str) -> Optional[tuple[float, float]]:
         print(f"Error geocoding {city_name}: {e}")
     return None
 
+
+def getFALsLocation(problem):
+    df = pd.DataFrame(columns=["lat","lon"])
+
+    for city in ["Mobile","Toulouse","Hambourg","Tianjin"]:
+        (lat,lon) = get_coords(city)
+        df.loc[city] = [lat, lon]
+    return df
+
+def formatCoordinates():
+    with open("multibatching/datalocal/coordinates.json", "r") as f :
+        coordinates = json.load(f)
+    df = pd.DataFrame(columns=["lat","lon", "type"])
+    fals = ["Mobile","Toulouse","Hamburg","Tianjin"]
+    for city, val in coordinates.items():
+        if city in fals:
+            type_factory = "FAL"
+        else:
+            type_factory = "MCA"
+        df.loc[city] = [val[0], val[1], type_factory]
+    return df
+
+
+
+
 def plot_solution_on_map(solution: MultibatchingSolution):
     """
     Creates an interactive Plotly map of a MultibatchingSolution.
