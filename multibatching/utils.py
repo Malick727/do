@@ -429,10 +429,43 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
             'route':route # <-- ADDED THIS
         })
 
-    locations_df = pd.DataFrame([{
-        'id': loc.id, 'name': loc.name, 'lat': coordinates[loc.name][0], 'lon': coordinates[loc.name][1],
-        'supply': sum(loc.net_supply.values())
-    } for loc in locations_data.values()])
+    locations_for_df = []
+    for loc in locations_data.values():
+        total_supply = sum(loc.net_supply.values())
+        
+        # 1. Filter to get outgoing (positive quantity) products
+        outgoing_products = {p: q for p, q in loc.net_supply.items() if q > 0}
+        
+        # 2. Filter to get required (negative quantity) products
+        required_products = {p: q for p, q in loc.net_supply.items() if q < 0}
+        
+        # 3. Build the base HTML hover text string
+        hover_text = f"<b>{loc.name}</b><br>Net Supply: {total_supply}"
+        
+        # 4. Add the "Outgoing Products" section if it exists
+        if outgoing_products:
+            hover_text += "<br>--- Outgoing Products ---"
+            for product, quantity in outgoing_products.items():
+                hover_text += f"<br>- {product.name}: {quantity}"
+                
+        # 5. Add the "Required Products" section if it exists
+        if required_products:
+            hover_text += "<br>--- Required Products ---"
+            for product, quantity in required_products.items():
+                # Use abs() to display a readable, positive quantity
+                hover_text += f"<br>- {product.name}: {abs(quantity)}"
+
+        # 6. Append the complete dictionary to the list for the DataFrame
+        locations_for_df.append({
+            'id': loc.id,
+            'name': loc.name,
+            'lat': coordinates[loc.name][0],
+            'lon': coordinates[loc.name][1],
+            'supply': total_supply,
+            'hovertext': hover_text
+        })
+
+    locations_df = pd.DataFrame(locations_for_df)
 
     if not flows:
         print("No flows to display.")
@@ -487,7 +520,7 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
         lat=locations_df['lat'],
         marker=dict(size=15, color=locations_df['supply'].apply(lambda x: 'green' if x >= 0 else 'red')),
         hoverinfo='text',
-        hovertext=locations_df.apply(lambda r: f"<b>{r['name']}</b><br>Net Supply: {r['supply']}", axis=1),
+        hovertext=locations_df['hovertext'],
         name="Locations"
     ))
 
