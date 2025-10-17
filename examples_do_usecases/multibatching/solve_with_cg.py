@@ -11,6 +11,7 @@ from multibatching.parse_config_data import parse_json_to_problem
 
 from multibatching.solvers.branch_and_price_copy import BranchAndPriceSolver
 from multibatching.solvers.column_generation import ColumnGenerationSolver
+import time
 
 
 def parse_problem(fix_problem: bool = False):
@@ -49,20 +50,23 @@ def run():
 
     
 
-
-    # solver = ColumnGenerationSolver(problem)
-    # solver.init_model()
-    # res = solver.solve()
-    # sol = solver.get_final_solution()
+    
+    solver = ColumnGenerationSolver(problem)
+    solver.init_model()
+    start = time.time()
+    res = solver.solve()
+    end = time.time()
+    print("computation time", end-start)
+    sol = solver.get_final_solution()
     
 
 
     # plot_solution_graph(sol, problem)
     # save_solution(sol, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
-    sol = read_solution(problem, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
-    print(problem.satisfy(sol))
-    print(problem.evaluate(sol))
-    plot_solution_on_map_by_transport(sol)
+    # sol = read_solution(problem, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
+    # print(problem.satisfy(sol))
+    # print(problem.evaluate(sol))
+    # plot_solution_on_map_by_transport(sol)
 
 
     
