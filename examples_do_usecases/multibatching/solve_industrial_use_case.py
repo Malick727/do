@@ -535,7 +535,8 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_cp_2steps_and_complete()
+    run_milp_2step()
+    # run_cp_2steps_and_complete()
     # run_milp_2step()
     # run_milp_lazy()
     # run_milp_2step()
