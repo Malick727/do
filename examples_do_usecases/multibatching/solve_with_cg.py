@@ -9,7 +9,7 @@ from examples_do_usecases.multibatching.instance2 import init_instance
 from multibatching.utils import plot_solution_graph, plotly_solution_graph, save_solution, read_solution, plot_solution_on_map, plot_solution_on_map_grouped, plot_solution_on_map_by_transport, getFALsLocation, formatCoordinates
 from multibatching.parse_config_data import parse_json_to_problem
 
-from multibatching.solvers.branch_and_price_copy import BranchAndPriceSolver
+# from multibatching.solvers.branch_and_price_copy import BranchAndPriceSolver
 from multibatching.solvers.column_generation import ColumnGenerationSolver
 import time
 
@@ -33,24 +33,16 @@ def run():
 
     # problem = init_instance()
     problem = parse_problem()
-
-
     ##### Branch-and-price solver
     # solver = BranchAndPriceSolver(problem)
     # solver.init_model()
     # solver.solve()
-
-
     ##### Column generation solver
     # df.to_csv("multibatching/datalocal/locations.csv", index=True)
     # print("Products :", len(problem.products))
     # print("Locations :", len(problem.locations))
     # print("Transport links", len(problem.transport_links))
     # print("Transport types :", len(problem.transport_types))
-
-    
-
-    
     solver = ColumnGenerationSolver(problem)
     solver.init_model()
     start = time.time()
@@ -58,15 +50,7 @@ def run():
     end = time.time()
     print("computation time", end-start)
     sol = solver.get_final_solution()
-    
 
-
-    # plot_solution_graph(sol, problem)
-    # save_solution(sol, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
-    # sol = read_solution(problem, "examples_do_usecases/multibatching/outputs/airbus_pb.json")
-    # print(problem.satisfy(sol))
-    # print(problem.evaluate(sol))
-    # plot_solution_on_map_by_transport(sol)
 
 
     

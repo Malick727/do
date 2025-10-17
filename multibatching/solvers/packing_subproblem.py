@@ -31,10 +31,23 @@ class PackingSubproblemSolver(MultibatchingSolver):
     def init_from_solution(self, solution: MultibatchingSolution):
         self.base_solution = solution
 
+    def helper_analyse_function(self):
+        nb_trips = {}
+        flow_per_link = {}
+        for x in self.base_solution.list_flows:
+            if x.transport_link not in nb_trips:
+                nb_trips[x.transport_link] = 0
+                flow_per_link[x.transport_link] = defaultdict(lambda: 0)
+            nb_trips[x.transport_link] += x.nb_packing
+            for p in x.product_packing:
+                flow_per_link[x.transport_link][p] += x.product_packing[p]*x.nb_packing
+        for x in flow_per_link:
+            for p in flow_per_link[x]:
+                flow_per_link[x][p] = round(flow_per_link[x][p])
+        return nb_trips, flow_per_link
+
     def analyse_solution(self, new_solution: MultibatchingSolution):
-        nb_trips_per_link_base_solution = {x.transport_link: x.nb_packing for x in self.base_solution.list_flows}
-        flow_per_link = {x.transport_link: {p: int(x.product_packing[p] * x.nb_packing) for p in x.product_packing}
-                         for x in self.base_solution.list_flows}
+        nb_trips_per_link_base_solution, flow_per_link = self.helper_analyse_function()
         nb_trips_per_link_new = defaultdict(lambda: 0)
         for flow in new_solution.list_flows:
             link = flow.transport_link
@@ -42,6 +55,9 @@ class PackingSubproblemSolver(MultibatchingSolver):
         changes = []
         for link in nb_trips_per_link_new:
             if nb_trips_per_link_base_solution[link] != nb_trips_per_link_new[link]:
+                print("Nb trip new",
+                      nb_trips_per_link_new[link],
+                      nb_trips_per_link_base_solution[link])
                 changes.append((link,
                                 flow_per_link[link],
                                 nb_trips_per_link_new[link],
@@ -173,6 +189,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver, PackingSubproblemSolver):
 
 class GreedyPackingForMultibatching(PackingSubproblemSolver):
     def solve(self, callbacks: Optional[list[Callback]] = None,
+              single_batching: bool = False,
               **kwargs: Any) -> ResultStorage:
         solution = self.base_solution
         transport_link_flows: dict[TransportLink, list[dict[Product, int]]] = defaultdict(lambda: [])
@@ -199,9 +216,13 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
             current_packing.current_size = 0
             packings_for_tl.append(current_packing)
             for p in aggregated_link_flow[tl]:
-                for _ in range(int(aggregated_link_flow[tl][p])):
+                for _ in range(round(aggregated_link_flow[tl][p])):
                     success = False
                     for j in range(len(packings_for_tl)):
+                        if single_batching:
+                            if (len(packings_for_tl[j].product_packing) > 0
+                                    and p not in packings_for_tl[j].product_packing):
+                                continue
                         if packings_for_tl[j].current_size + p.size <= capacity:
                             packings_for_tl[j].product_packing[p] += 1
                             packings_for_tl[j].current_size += p.size
@@ -214,6 +235,7 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
                         current_packing.product_packing[p] += 1
                         current_packing.current_size = p.size
                         packings_for_tl.append(current_packing)
+
             packings.extend(packings_for_tl)
         sol = MultibatchingSolution(problem=self.problem,
                                     list_flows=packings)
@@ -222,10 +244,13 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
 
 
 class PackingViaBinPacking(PackingSubproblemSolver):
+    hyperparameters = [CategoricalHyperparameter("round_flow", choices=["int", "round"],
+                                                 default="round")]
 
     def solve(self, callbacks: Optional[list[Callback]] = None,
               time_limit_per_link=2,
               **kwargs: Any) -> ResultStorage:
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
         solution = self.base_solution
         transport_link_flows: dict[TransportLink, list[dict[Product, int]]] = defaultdict(lambda: [])
         aggregated_link_flow: dict[TransportLink, dict[Product, int]] = defaultdict(lambda: dict())
@@ -242,11 +267,14 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                         aggregated_link_flow[tl][p] = 0
                     aggregated_link_flow[tl][p] += nb_packing*flow.product_packing[p]
                     if flow.product_packing[p] > 0 and int(nb_packing*flow.product_packing[p]) == 0:
-                        print("Issue = ...")
+                        logger.info(f"Potential issue on flow of product {p.name}")
         for tl in aggregated_link_flow:
             for p in aggregated_link_flow[tl]:
-                print(aggregated_link_flow[tl][p], int(round(aggregated_link_flow[tl][p])))
-                aggregated_link_flow[tl][p] = int(aggregated_link_flow[tl][p]) #int(round(aggregated_link_flow[tl][p]))
+                # print(aggregated_link_flow[tl][p], int(round(aggregated_link_flow[tl][p])))
+                if kwargs["round_flow"] == "int":
+                    aggregated_link_flow[tl][p] = int(aggregated_link_flow[tl][p])
+                if kwargs["round_flow"] == "round":
+                    aggregated_link_flow[tl][p] = int(round(aggregated_link_flow[tl][p]))
         all_packings = []
         for tl in aggregated_link_flow:
             capacity = tl.transport_type.capacity
@@ -274,6 +302,7 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                                ortools_cpsat_solver_kwargs={"log_search_progress": False})
             if solver.status_solver == StatusSolver.UNSATISFIABLE:
                 logger.info(f"One flow post process failed.")
+                print(list_items, int(capacity))
             sol: BinPackSolution = res[-1][0]
             nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
             # print("nb bins ", nb_bins)

@@ -1,5 +1,6 @@
 import math
 from collections import defaultdict, Counter
+from copy import copy
 from typing import Any, Optional
 from ortools.sat.python import cp_model
 from ortools.sat.python.cp_model import CpSolverSolutionCallback
@@ -47,6 +48,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         super().__init__(problem, **kwargs)
         self.variables = {}
         self.modeling: ModelingMultiBatch = None
+        self.single_batching: bool = None
         self.verbose_logs = kwargs.get("verbose", 0)
         self.scaling_factor = kwargs.get("scaling_factor", 10**3)
 
@@ -62,6 +64,56 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
     def set_warm_start(self, solution: MultibatchingSolution) -> None:
         if self.modeling == ModelingMultiBatch.FLOW:
             self.set_warm_start_flow(solution=solution)
+        if self.modeling == ModelingMultiBatch.UNIT_FLOW:
+            self.set_warm_start_unit_flow(solution=solution)
+
+    def set_warm_start_unit_flow(self, solution: MultibatchingSolution) -> None:
+        """
+        Provides a warm start for the UNIT_FLOW modeling by hinting individual trip contents.
+        """
+        self.cp_model.ClearHints()
+
+        # Group all trips by transport link
+        trips_per_link = defaultdict(list)
+        for flow in solution.list_flows:
+            # "Unroll" the aggregated solution: if nb_packing is 5, add the packing 5 times
+            for _ in range(flow.nb_packing):
+                trips_per_link[flow.transport_link].append(flow.product_packing)
+
+        # Hint all trip variables to 0 first to clear previous states
+        #for tl_idx in self.variables["used_trips"]:
+        #    for trip_idx in self.variables["used_trips"][tl_idx]:
+        ##        self.cp_model.AddHint(self.variables["used_trips"][tl_idx][trip_idx], 0)
+        #        for p_idx in self.variables["trips_variables"][tl_idx][trip_idx]:
+        #            self.cp_model.AddHint(self.variables["trips_variables"][tl_idx][trip_idx][p_idx], 0)
+
+        # Now, assign the actual trips from the solution to the model variables
+        for link, trips in trips_per_link.items():
+            link_idx = self.problem.transport_links_to_index[link]
+            max_trips_for_link = len(self.variables["used_trips"][link_idx])
+
+            # Iterate through the unrolled trips and assign them one by one
+            for trip_idx, packing_content in enumerate(trips):
+                if trip_idx >= max_trips_for_link:
+                    logger.warning(f"Solution has more trips ({len(trips)}) on link {link.id} "
+                                   f"than available in the model ({max_trips_for_link}). "
+                                   f"Hint will be truncated.")
+                    break
+
+                # Hint that this trip is used
+                self.cp_model.AddHint(self.variables["used_trips"][link_idx][trip_idx], 1)
+
+                # Hint the content of this specific trip
+                for product, units in packing_content.items():
+                    product_idx = self.problem.product_to_index[product]
+                    if product_idx in self.variables["trips_variables"][link_idx][trip_idx]:
+                        content_var = self.variables["trips_variables"][link_idx][trip_idx][product_idx]
+                        self.cp_model.AddHint(content_var, int(units))
+            for k in range(len(trips), max_trips_for_link):
+                self.cp_model.AddHint(self.variables["used_trips"][link_idx][k], 0)
+                for product_idx in self.variables["trips_variables"][link_idx][k]:
+                    self.cp_model.AddHint(self.variables["trips_variables"][link_idx][k][product_idx], 0)
+        logger.info('Warm start hints added for UNIT_FLOW model.')
 
     def set_warm_start_flow(self, solution: MultibatchingSolution) -> None:
         aggreg_flows_solution = {}
@@ -143,24 +195,66 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                             packing_solution.append(packing_transport)
                 else:
                     cur_packing = {}
-                    for index_product in self.variables["flows"][index_tl]:
-                        val = cpsolvercb.value(self.variables['flows'][index_tl][index_product])
-                        if val > 0:
-                            cur_packing[products[index_product]] = val/nb
-                    if len(cur_packing) > 0:
-                        packing_solution.append(PackingTransport(transport_link=self.problem.transport_links[index_tl],
-                                                                 product_packing=cur_packing,
-                                                                 nb_packing=nb))
+                    if not self.single_batching:
+                        for index_product in self.variables["flows"][index_tl]:
+                            val = cpsolvercb.value(self.variables['flows'][index_tl][index_product])
+                            if val > 0:
+                                cur_packing[products[index_product]] = val/nb
+                        if len(cur_packing) > 0:
+                            packing_solution.append(PackingTransport(transport_link=
+                                                                     self.problem.transport_links[index_tl],
+                                                                     product_packing=cur_packing,
+                                                                     nb_packing=nb))
+                    else:
+                        for index_product in self.variables["flows"][index_tl]:
+                            val = cpsolvercb.value(self.variables['flows'][index_tl][index_product])
+                            if val > 0:
+                                p = self.problem.products[index_product]
+                                tl = self.problem.transport_links[index_tl]
+                                tr = tl.transport_type
+                                nb_trips_per_link_per_product = cpsolvercb.value(
+                                    self.variables["nb_trips_per_link_per_product"][(index_tl, index_product)])
+                                nb_product_per_transport = tr.capacity // self.problem.products[index_product].size
+                                nb_trips_per_link_per_product = math.ceil(val/nb_product_per_transport)
+                                if nb_trips_per_link_per_product > 1:
+                                    if val % nb_product_per_transport == 0:
+                                        packings = [PackingTransport(transport_link=tl,
+                                                                     product_packing={p: nb_product_per_transport},
+                                                                     nb_packing=nb_trips_per_link_per_product)]
+                                    else:
+                                        packings = [PackingTransport(transport_link=tl,
+                                                                     product_packing={p: nb_product_per_transport},
+                                                                     nb_packing=nb_trips_per_link_per_product-1)] + \
+                                                    [PackingTransport(transport_link=tl,
+                                                                      product_packing={p:
+                                                                                       val % nb_product_per_transport},
+                                                                      nb_packing=1)]
+                                else:
+                                    packings = [PackingTransport(tl,
+                                                                 product_packing={p: val},
+                                                                 nb_packing=1)]
+                                if sum([pack.product_packing[p]*pack.nb_packing for pack in packings]) != val:
+                                    print(val, sum([pack.product_packing[p]*pack.nb_packing for pack in packings]))
+                                    print("Nb product per trasnport", nb_product_per_transport, val,
+                                          nb_trips_per_link_per_product)
+                                    print(packings)
+                                    print("Problemmmm")
+                                packing_solution.extend(packings)
+
         return MultibatchingSolution(problem=self.problem, list_flows=packing_solution)
 
-    def init_model(self, **args: Any) -> None:
+    def init_model(self, single_batching: bool = False, **args: Any) -> None:
         args = self.complete_with_default_hyperparameters(args)
         modeling = args["modeling"]
         if modeling == ModelingMultiBatch.FLOW:
-            self.init_model_flows(**args)
+            if single_batching:
+                self.init_model_flows_single_batching(**args)
+            else:
+                self.init_model_flows(**args)
         if modeling == ModelingMultiBatch.UNIT_FLOW:
             self.init_model_detailed_trips(**args)
         self.modeling = modeling
+        self.single_batching = single_batching
 
     def init_model_flows(self, **args: Any) -> None:
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
@@ -233,13 +327,13 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                 transport_type = transport_link.transport_type
                 for index_product in flows_variables[index_tl]:
                     nb_trips_min = nb_trips_min_for_product_flows[(index_product, transport_type)]
-                    #binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
-                    #                     for k in range(len(nb_trips_min))]
-                    #model.add_map_domain(flows_variables[index_tl][index_product],
+                    # binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
+                    #                      for k in range(len(nb_trips_min))]
+                    # model.add_map_domain(flows_variables[index_tl][index_product],
                     #                     binary_indicators)
-                    #for j in range(1, len(binary_indicators)):
-                    #    (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
-                     #    .OnlyEnforceIf(binary_indicators[j]))
+                    # for j in range(1, len(binary_indicators)):
+                    #     (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
+                    #     .OnlyEnforceIf(binary_indicators[j]))
                     # For a given number of product flow NB, we force nb_trips_per_link to be >= nb_trips_min[NB]
                     model.AddForbiddenAssignments([flows_variables[index_tl][index_product],
                                                    nb_trips_per_link[index_tl],
@@ -282,7 +376,6 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             value = sum(flows_variables[index_tl][index_product]*int(self.problem.products[index_product].value)
                         for index_product in flows_variables[index_tl])
             estimated_compound.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
-        estimated_compound = [0]
         self.variables["total_obj"] = transport_cost+emission_cost+sum(estimated_compound)
         model.Minimize(self.variables["total_obj"])
         self.variables["objs"] = {"transport": transport_cost,
@@ -291,6 +384,146 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.cp_model = model
         self.variables["flows"] = flows_variables
         self.variables["nb_trips"] = nb_trips_per_link
+
+    def init_model_flows_single_batching(self, **args: Any) -> None:
+        supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
+        demand_per_product = {p: self.problem.get_total_demand(p) for p in self.problem.products}
+        total_size_per_product = {p: p.size*supply_per_product[p] for p in self.problem.products}
+        total_size_in_problem = sum(total_size_per_product.values())
+        max_nb_trip = int(total_size_in_problem/min([tt.capacity for tt in self.problem.transport_types
+                                                     if tt.capacity > 0]))
+        model = cp_model.CpModel()
+        self.cp_model = model
+        transport_links = self.problem.transport_links
+        flows_variables = {}
+        # flows_nz_variables = {}
+        nb_trips_per_link = {}
+        nb_trips_per_link_per_product = {}
+        keys_inflow_location_product = dict()
+        keys_outflow_location_product = dict()
+
+        for index_tl in range(self.problem.nb_transport_links):
+            flows_variables[index_tl] = {}
+            # flows_nz_variables[index_tl] = {}
+            tl = transport_links[index_tl]
+            loc1 = tl.location_l1
+            loc2 = tl.location_l2
+            if loc1.id not in keys_outflow_location_product:
+                keys_outflow_location_product[loc1.id] = defaultdict(lambda: set())
+            if loc2.id not in keys_inflow_location_product:
+                keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
+            tr: TransportType = tl.transport_type
+            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_nb_trip,
+                                                          name=f'num_trips_{index_tl}')
+            list_var_weight = []
+            keys_nb_trips_per_link_per_product = []
+            # for index_product in range(self.problem.nb_products):
+            for index_product in range(self.problem.nb_products):
+                product = self.problem.products[index_product]
+                max_flow_product = max(supply_per_product[product],
+                                       demand_per_product[product])
+                if tr in product.valid_transports:
+                    if tr.capacity > product.size:
+                        flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
+                                                                                   ub=max_flow_product,
+                                                                                   name=f"flow_{index_tl}_"
+                                                                                        f"{index_product}")
+                        # flows_nz_variables[index_tl][index_product] = model.NewBoolVar(name=f"nz_flow_{index_tl}_"
+                        #                                                                     f"{index_product}")
+                        nb_product_per_transport = int(tr.capacity // product.size)
+                        capa_used_per_transport = nb_product_per_transport*product.size
+                        nb_trips_max = int(math.ceil(max_flow_product/nb_product_per_transport))
+
+                        nb_trips_per_link_per_product[(index_tl, index_product)] = model.NewIntVar(lb=0,
+                                                                                                   ub=nb_trips_max,
+                                                                                                   name=f"trips_"
+                                                                                                        f"{index_tl}_"
+                                                                                                        f"{index_product}")
+                        keys_nb_trips_per_link_per_product.append((index_tl, index_product))
+                        self.cp_model.add(
+                            nb_trips_per_link_per_product[(index_tl, index_product)]*nb_product_per_transport >=
+                            flows_variables[index_tl][index_product]
+                        )
+
+                        keys_outflow_location_product[loc1.id][product.id].add((index_tl, index_product))
+                        keys_inflow_location_product[loc2.id][product.id].add((index_tl, index_product))
+                        list_var_weight.append((flows_variables[index_tl][index_product],
+                                                int(product.size)))
+            model.Add(sum([nb_trips_per_link_per_product[x] for x in keys_nb_trips_per_link_per_product])
+                      == nb_trips_per_link[index_tl])
+            # Global capacity constraint
+            model.Add(cp_model.LinearExpr.weighted_sum([x[0] for x in list_var_weight],
+                                                       [x[1] for x in list_var_weight])
+                      <= nb_trips_per_link[index_tl]*tl.transport_type.capacity)
+
+        # Flows constraint
+        for location in self.problem.locations:
+            loc_id = location.id
+            debug_mode = args.get("debug_mode", False)
+            index_products = args.get("debug_settings", {}).get("index_products", range(len(self.problem.products)))
+            for index_product in index_products:
+                product = self.problem.products[index_product]
+                net_supply = location.net_supply.get(product, 0)
+                flow_in = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
+                                                   for x in
+                                                   keys_inflow_location_product.get(loc_id, {}).get(product.id,
+                                                                                                    set())])
+                flow_out = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
+                                                    for x in
+                                                    keys_outflow_location_product.get(loc_id, {}).get(product.id,
+                                                                                                      set())])
+                model.Add(flow_in+net_supply-flow_out == 0)
+        transport_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl]
+                                                  * int(transport_links[index_tl].distance
+                                                        * transport_links[index_tl].transport_type.cost)
+                                                  for index_tl in range(self.problem.nb_transport_links)])
+        emission_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl]
+                                                 * int(transport_links[index_tl].distance
+                                                       * transport_links[index_tl].transport_type.emissions)
+                                                 for index_tl in range(self.problem.nb_transport_links)])
+        estimated_compound = []
+        for index_tl in range(self.problem.nb_transport_links):
+            tl = self.problem.transport_links[index_tl]
+            time = tl.distance/tl.transport_type.speed
+            value = sum(flows_variables[index_tl][index_product]*int(self.problem.products[index_product].value)
+                        for index_product in flows_variables[index_tl])
+            estimated_compound.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
+        self.variables["total_obj"] = transport_cost+emission_cost+sum(estimated_compound)
+        model.Minimize(self.variables["total_obj"])
+        self.variables["objs"] = {"transport": transport_cost,
+                                  "emission": emission_cost,
+                                  "capital": sum(estimated_compound)}
+        self.variables["flows"] = flows_variables
+        self.variables["nb_trips"] = nb_trips_per_link
+        self.variables["nb_trips_per_link_per_product"] = nb_trips_per_link_per_product
+
+
+    def compute_nb_trips_min(self,
+                             product: Product,
+                             demand_of_product: int):
+        nb_trips_min_for_product_flows = {}
+        size_product = product.size
+        for tl in range(self.problem.nb_transport_types):
+            tt: TransportType = self.problem.transport_types[tl]
+            capa_transport = tt.capacity
+            nb_trips_min_for_product_flows[tt] = [0]
+            current_greedy_bins = defaultdict(lambda: 0)
+            current_bin = 0
+            current_greedy_bins[0] = 0
+            for i in range(demand_of_product):
+                if current_greedy_bins[current_bin] + size_product <= capa_transport:
+                    current_greedy_bins[current_bin] += size_product
+                else:
+                    current_bin += 1
+                    current_greedy_bins[current_bin] = size_product
+                nb_trips_min_for_product_flows[tt].append(current_bin + 1)
+
+            nb_product_per_bin = capa_transport//size_product
+            capa_used_per_bin = nb_product_per_bin*size_product
+
+
+
+        return nb_trips_min_for_product_flows
 
     def init_model_flows_relaxed(self, **args: Any) -> None:
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
@@ -425,7 +658,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         nb_trips_per_link = {}
         keys_inflow_location_product = dict()
         keys_outflow_location_product = dict()
-        max_nb_trips_per_link = args.get("max_trips", 100)
+        max_nb_trips_per_link = args.get("max_trips", 50)
         for index_tl in range(self.problem.nb_transport_links):
             flows_variables[index_tl] = {}
             trips_variables[index_tl] = {}
@@ -580,10 +813,13 @@ class CpsatBendersMultibatchingSolver(SolverDO):
 
     def solve(
         self, callbacks: Optional[list[Callback]] = None,
+        time_limit_first_iter: int = 100,
         params_solver_master: dict = None,
         nb_iteration: int = 10,
         **kwargs: Any
     ) -> ResultStorage:
+        if self.solver_master is None:
+            self.init_model(**kwargs)
         kwargs = self.complete_with_default_hyperparameters(kwargs)
 
         callback = CallbackList()
@@ -605,8 +841,14 @@ class CpsatBendersMultibatchingSolver(SolverDO):
             if i >= 1:
                 bs, _ = res_merged.get_best_solution_fit(satisfying=self.problem)
                 self.solver_master.set_warm_start(bs)
-            res = self.solver_master.solve(callbacks=callbacks,
-                                           **params_solver_master)
+            if i == 0:
+                kwargs = copy(params_solver_master)
+                kwargs["time_limit"] = time_limit_first_iter
+                res = self.solver_master.solve(callbacks=callbacks,
+                                               **kwargs)
+            else:
+                res = self.solver_master.solve(callbacks=callbacks,
+                                               **params_solver_master)
             if len(res) > 0:
                 current_lbs.append(self.solver_master.get_current_best_internal_objective_bound())
                 base_solution = res[-1][0]

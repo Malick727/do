@@ -37,10 +37,10 @@ class HexalyAllocSchedulingSolver(HexalySolver):
                                                  default=False),
                        CategoricalHyperparameter(name="run_multistep",
                                                  choices=[True, False],
-                                                 default=True),
+                                                 default=False),
                        CategoricalHyperparameter(name="use_min_workload_to_guide_solver",
                                                  choices=[True, False],
-                                                 default=True)]
+                                                 default=False)]
 
     def __init__(self, problem: AllocSchedulingProblem,
                  params_objective_function: Optional[ParamsObjectiveFunction] = None, **kwargs):

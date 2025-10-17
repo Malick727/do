@@ -219,7 +219,7 @@ class AStarBasedSppSolver(SppSolver):
     problem: SppProblem
 
     def solve(self,
-              callbacks: list[Callback] | None = None,
+              callbacks: list[Callback] = None,
               time_limit: int = 20,
               **kwargs) -> ResultStorage:
         callback = CallbackList(callbacks)

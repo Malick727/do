@@ -116,6 +116,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
 
     
     def solveRP(self):
+        self.rp_model.setParam(gp.GRB.Param.NoRelHeurWork, 20)
         self.rp_model.optimize() 
         return self.rp_model.Status
 

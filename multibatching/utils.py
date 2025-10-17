@@ -12,12 +12,15 @@ from typing import List, Optional
 import numpy as np
 import os
 import json
-from geopy.geocoders import Nominatim
-from pyproj import Geod
 import pandas as pd
 import time
 from plotly.express.colors import qualitative
-import searoute as sr
+try:
+    from geopy.geocoders import Nominatim
+    from pyproj import Geod
+    import searoute as sr
+except:
+    pass
 
 
 def plot_solution_graph(solution: MultibatchingSolution, problem: MultibatchingProblem):
@@ -1073,3 +1076,6 @@ def basic_sanity_check(problem: MultibatchingProblem):
         if total_flow_per_product[p] != 0:
             print("Problem", details[p])
     return total_flow_per_product
+
+
+

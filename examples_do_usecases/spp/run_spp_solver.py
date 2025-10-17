@@ -114,4 +114,4 @@ def run_astar_based():
 
 
 if __name__ == "__main__":
-    run_dp()
+    run_dp_small()

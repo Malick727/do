@@ -2,7 +2,10 @@ from typing import Any, Optional
 
 from docplex.cp.model import (CpoModel, CpoSolveResult, alternative,
                               synchronize,
-                              end_before_start, end_of, interval_var,
+                              end_before_start,
+                              end_of, length_of,
+                              size_of,
+                              interval_var,
                               presence_of, minimize, pulse)
 from docplex.cp.solution import CpoIntervalVarSolution
 
@@ -83,25 +86,11 @@ class CPOptMultiSkillRCPSPSolver(CPOSolver, SolverDO):
 
     def init_model(self, **args: Any) -> None:
         self.cp_model = CpoModel(name="MultiSkillRCPSP")
-
-        # --- Create interval variables for each task mode ---
-        task_modes_intervals = {
-            t: {
-                m: interval_var(
-                    size=self.problem.mode_details[t][m]["duration"],
-                    name=f"interval_{t}_{m}",
-                    optional=True,
-                )
-                for m in self.problem.mode_details[t]
-            }
-            for t in self.problem.tasks_list
-        }
-
         # --- Create main task interval variables using 'alternative' ---
         # This ensures exactly one mode is chosen for each task.
         tasks_intervals = {
             t: interval_var(start=(0, self.problem.horizon),
-                            end=(0, self.problem.horizon),  # TODO Puut better bounds
+                            end=(0, self.problem.horizon),  # TODO Put better bounds
                             name=f"interval_{t}",
                             optional=False)
             for t in self.problem.tasks_list
@@ -113,10 +102,13 @@ class CPOptMultiSkillRCPSPSolver(CPOSolver, SolverDO):
             nb_mode = len(modes)
             if nb_mode == 1:
                 task_modes_intervals[t][modes[0]] = tasks_intervals[t]
+                duration = self.problem.mode_details[t][modes[0]]["duration"]
+                self.cp_model.add(length_of(tasks_intervals[t])==duration)
             else:
                 for m in modes:
                     task_modes_intervals[t][m] = interval_var(start=(0, self.problem.horizon),
-                                                              end=(0, self.problem.horizon),  # TODO Puut better bounds
+                                                              end=(0, self.problem.horizon),
+                                                              size=self.problem.mode_details[t][m]["duration"],
                                                               name=f"interval_{t}_{m}",
                                                               optional=True)
                 self.cp_model.add(alternative(interval=tasks_intervals[t],
@@ -127,6 +119,7 @@ class CPOptMultiSkillRCPSPSolver(CPOSolver, SolverDO):
         for s in self.problem.successors:
             for succ in self.problem.successors[s]:
                 self.cp_model.add(end_before_start(tasks_intervals[s], tasks_intervals[succ]))
+            self.cp_model.add(end_before_start(tasks_intervals[s], tasks_intervals[self.problem.sink_task]))
 
         # --- Renewable resource constraints ---
         for r in self.problem.resources_list:
