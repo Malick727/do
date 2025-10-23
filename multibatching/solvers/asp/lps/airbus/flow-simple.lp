@@ -11,7 +11,6 @@ demand(Part,Location,PosVal):- demandOffer(Part,Location,Val), Val<0, PosVal=Val
 
 root(eARFullFuselage). 
 
-#show transportCapacity/2.
 
 1{flow(To,To,Part,D)}1:- offer(To,Part,D), root(Part).
 
@@ -25,51 +24,40 @@ via1(From,(Via1,To),Part,(TR1,TR2)) :-  route(From,Via1,TR1,_,_), route(Via1,To,
 via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3)) :-  route(From,Via1,TR1,_,_), route(Via1,Via2,TR2,_,_), harbor(Via1), harbor(Via2), route(Via2,To,TR3,_,_),  
 offer(Part,From,_), demand(Part,To,_),partTR(Part,TR1),partTR(Part,TR2),partTR(Part,TR3).
 
-
 1{routeflow(From,To,Part,N,TR):
 direct(From,To,Part,TR);
 routeflow(From,(Via1,To),Part,(N,N),(TR1,TR2)): 
-via1(From,(Via1,To),Part,(TR1,TR2)), numFlowPart(Part,N2);
+via1(From,(Via1,To),Part,(TR1,TR2)); 
 routeflow(From,(Via1,Via2,To),Part,(N,N,N),(TR1,TR2,TR3)):
 via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3))
 }1
 :- flow(From,To,Part,N), From!=To.
 
-% comments, will be ignored by ASP
-%:- DS!=Dir+Via1+Via2, 
-%Dir=#sum{N,From,TR:routeflow(From,Loc,Part,N,TR)}, 
-%Via1=#sum{N2,From,TR1,TR2:routeflow(From,(_,Loc),Part,(N1,N2),(TR1,TR2))}, 
-%Via2=#sum{N3,From,TR1,TR2,TR3:routeflow(From,(_,_,Loc),Part,(N1,N2,N3),(TR1,TR2,TR3))}, 
-%demand(Part,Loc,DS).
+bin(1..20).  
 
-%:- routeflow(From,To,Part,N1,TR), routeflow(From,To,Part,N2,TR), N1!=N2.
-%:- routeflow(From,_,Part,_,_), demand(Part,From,D).
-%:- routeflow(_,To,Part,_,_), offer(Part,To,D).
-%:- routeflow(_,(_,To),Part,_,_), offer(Part,To,D).
-%:- routeflow(_,(_,_,To),Part,_,_), offer(Part,To,D).
+%:- packaging(B,TR,Part,A), transportCapacity(TR,C), binN(B,T), C<T.
 
-%#show routeflow/5.
-%bin(1..20).  
-%num(1..100).
-
-%:- packaging(B,From,To,TR,Part,A), transportCapacity(TR,C), binN(B,T), C<T.
-%binPartN(B,Part,N) :- packaging(B,_,_,TR,Part,A), partSize(Part,S), N=A*S.
-%binN(B,T):- bin(B), T=#sum{N,Part:binPartN(B,Part,N)}.
+1{binPartN(B,Part,N):transportCapacity(TR,C),numFlowPart(Part,N)} :- bin(B). %routeflow(From,To,Part,N,TR).
+%binPartN(B,Part,N) :- packaging(B,TR,Part,A), partSize(Part,S), N=A*S.
+binPartT(B,Part,T) :- T=N*S, binPartN(B,Part,N), partSize(Part,S).
+binN(B,N):- bin(B), N=#sum{T,Part:binPartT(B,Part,T)}.
+%:- binN(B,T), transportCapacity(TR,C), C<T.
+#show binPartN/3.
+#show binPartT/3. 
+#show binT/2.
 
 %:- packaging(B,F,T,TR,_,_),  transportCapacity(TR,C), C<#sum{A*S, Part: packaging(B,F,T,TR,Part,A), partSize(S)}.
 
-%#show binPartN/3.
-
-%1{packaging(B,From,To,TR,Part,A):bin(B),num(A),A<=N,partSize(Part,S), transportCapacity(TR,C), C>=A*S}1
+%1{packaging(B,TR,Part,A):binPartN(B,Part,A)}1
 %:- routeflow(From,To,Part,N,TR), transportResource(TR).
 
-%1{packaging(B,From,(Via,To),TR,Part,A):bin(B),num(A),A<=N,partSize(Part,S), transportCapacity(TR,C), C>=A*S}1
-%:- routeflow(From,(Via,To),Part,(N,_), (TR,_)), transportResource(TR).
+%1{packaging(B,From,Via,TR,Part,A):bin(B),numFlowPart(Part,A),A<=N,partSize(Part,S), transportCapacity(TR,C), C>=A*S}1
+%:- routeflow(From,(Via,_),Part,(N,N), (TR,_)), transportResource(TR).
 
-%1{packaging(B,From,Via1,TR,Part,A):bin(B),num(A),A<=N,partSize(Part,S), transportCapacity(TR,C), C>=A*S}1
+%1{packaging(B,From,Via1,TR,Part,A):bin(B),numFlowPart(Part,A),A<=N,partSize(Part,S), transportCapacity(TR,C), C>=A*S}1
 %:- routeflow(From,(Via1,_,_),Part,(N,_,_), (TR,_,_)), transportResource(TR).
 
-%#show packaging/6.
+#show packaging/4.
 %1{assign(B,TR,Part,N):num(N)}1:- routeflow(From,To,Part,B,TR).
 %:- routePackaging(_,_,TR,_,B,_), transportCapacity(TR,C), C<#sum{N*Size,Part:routePackaging(_,_,_,Part,B,N),partSize(Part,Size)}, C>0.
 
@@ -127,9 +115,6 @@ via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3))
 %Via1C=#sum{N,Via1,To:flow(Loc,(Via1,To),Part,N)}, 
 % offer(Part,Loc,DS).
 %:- In!=Out,Out=#sum{N,To:flow(Loc,To,Part,N)},In=#sum{N,From:flow(From,Loc,Part,N)}, harbor(Loc).
-
-
-%%%%%%%%%%%%%%%%%%%%% assertions %%%%%%%%%%%%%%%%%%%%%
 
 %route(From,To,Part) :- flow(From,To,Part,_), direct(From,To,Part,_).
 %route(From,To,Part) :- flow(From,To,Part,_), via1(From,(_,To),Part,_).
