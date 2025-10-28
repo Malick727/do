@@ -1,3 +1,4 @@
+import random
 from typing import Optional, Any
 
 from discrete_optimization.generic_tools.ortools_cpsat_tools import OrtoolsCpSatSolver
@@ -8,10 +9,12 @@ from vrp_tw_alternative_delivery.problem import (VrpTwAlternativeDeliveryProblem
                                                  RequirementRelation,
                                                  ProductInstance,
                                                  ProductType, Vehicle)
-from ortools.sat.python.cp_model import CpModel, CpSolverSolutionCallback, IntVar
-
+from ortools.sat.python.cp_model import CpModel, CpSolverSolutionCallback, IntVar, LinearExpr
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
 
 class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
+    hyperparameters = [CategoricalHyperparameter(name="symmetry_breaking_vehicle", choices=[True, False],
+                                                 default=False)]
     problem: VrpTwAlternativeDeliveryProblem
 
     def __init__(self, problem: VrpTwAlternativeDeliveryProblem,
@@ -23,8 +26,19 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
         self.id_to_index = {self.id_nodes_list[i]: i for i in range(len(self.id_nodes_list))}
 
     def init_model(self, **kwargs: Any) -> None:
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
         self.init_model_default(**kwargs)
         pass
+
+    def compute_equivalent_vehicle_classes(self):
+        dict_vehicle_per_feature = {}
+        for i in range(self.problem.number_vehicles):
+            vehicle = self.problem.vehicles[i]
+            features = (tuple(vehicle.load_per_type), vehicle.min_speed, vehicle.max_speed)
+            if features not in dict_vehicle_per_feature:
+                dict_vehicle_per_feature[features] = []
+            dict_vehicle_per_feature[features].append(i)
+        return dict_vehicle_per_feature
 
     def init_model_default(self, **kwargs: Any) -> None:
         self.cp_model = CpModel()
@@ -34,7 +48,27 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
             arcs_dict_k, used_vehicle_k = self.create_flow_variables_per_vehicle(index_vehicle=k)
             arcs_dict.update(arcs_dict_k)
             used_vehicle_dict[k] = used_vehicle_k
+        if kwargs["symmetry_breaking_vehicle"]:
+            dict_vehicle_per_feature = self.compute_equivalent_vehicle_classes()
+            not_used_per_class_key = {}
+            for class_key in dict_vehicle_per_feature:
+                list_ = dict_vehicle_per_feature[class_key]
+
+                for i in range(len(list_)-1):
+                    self.cp_model.AddImplication(used_vehicle_dict[list_[i]].Not(),
+                                                 used_vehicle_dict[list_[i+1]].Not())
+                    self.cp_model.add(used_vehicle_dict[list_[i+1]] <= used_vehicle_dict[list_[i]])
+                not_used_per_class_key[class_key] = sum([used_vehicle_dict[x].Not()
+                                                         for x in list_])
+            not_used_per_total = sum([not_used_per_class_key[x] for x in not_used_per_class_key])
+            keys = list(not_used_per_class_key.keys())
+            self.cp_model.add(not_used_per_class_key[keys[0]]-not_used_per_class_key[keys[1]] <= 2)
+            self.cp_model.add(not_used_per_class_key[keys[1]]-not_used_per_class_key[keys[0]] <= 2)
+
         self.create_many_constraints(arcs_dict=arcs_dict)
+        self.variables["used"] = used_vehicle_dict
+        self.variables["arcs_dict"] = arcs_dict
+        self.create_objectives()
 
     def create_flow_variables_per_vehicle(self, index_vehicle: int = 0):
         arcs_vehicle = []
@@ -61,20 +95,18 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
         used_vehicle = self.cp_model.NewBoolVar(name=f"used_{index_vehicle}")
         self.cp_model.Add(used_vehicle == dummy_literal.Not())
         # self.cp_model.AddCircuit(arcs=arcs_vehicle)
-        for i in range(self.problem.number_vehicles):
-            in_ = {x for x in arcs_dict if x[1] == i}
-            out_ = {x for x in arcs_dict if x[0] == i}
-            if i == index_start_node:
-                self.cp_model.add(sum(arcs_dict[x] for x in out_) == 1)
-            elif i == index_end_node:
-                self.cp_model.add(sum(arcs_dict[x] for x in in_) == 1)
-            else:
-                sum_in = sum(arcs_dict[x] for x in in_)
-                sum_out = sum(arcs_dict[x] for x in in_)
-                self.cp_model.add(sum_in == sum_out)
-
-
-
+        if True:
+            for i in range(self.problem.number_nodes):
+                in_ = {x for x in arcs_dict if x[1] == i}
+                out_ = {x for x in arcs_dict if x[0] == i}
+                if i == index_start_node:
+                    self.cp_model.add(sum(arcs_dict[x] for x in out_)+dummy_literal == 1)
+                elif i == index_end_node:
+                    self.cp_model.add(sum(arcs_dict[x] for x in in_)+dummy_literal == 1)
+                else:
+                    sum_in = sum(arcs_dict[x] for x in in_)
+                    sum_out = sum(arcs_dict[x] for x in in_)
+                    self.cp_model.add(sum_in == sum_out)
         return arcs_dict, used_vehicle
 
     def create_many_constraints(self, arcs_dict: dict[tuple[int, int, int], IntVar]):
@@ -184,6 +216,25 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
         self.variables["visited_node_per_vehicle"] = visited_node_per_vehicle
         self.variables["time_per_index"] = time_per_index
 
+    def create_objectives(self):
+        random_values_per_index_and_tp = {}
+        coefs = []
+        expr = []
+        for index, vehic, type_prod in self.variables["delivered_to_node_per_vehicle"]:
+            if (index, type_prod) not in random_values_per_index_and_tp:
+                random_values_per_index_and_tp[(index, type_prod)] = 10*random.random()
+            coefs.append(random_values_per_index_and_tp[(index, type_prod)])
+            expr.append(self.variables["delivered_to_node_per_vehicle"][(index, vehic, type_prod)])
+        coefs = []
+        expr = []
+        for i, j, index_vehicle in self.variables["arcs_dict"]:
+            coefs.append(self.problem.travel_costs[i, j])
+            expr.append(self.variables["arcs_dict"][i, j, index_vehicle])
+        obj = LinearExpr.weighted_sum(expr, coefs)
+        self.cp_model.Minimize(obj)
+        # self.cp_model.Minimize(obj+1000*sum([self.variables["used"][x] for x in self.variables["used"]]))
+
+
     def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> VrpTwAltSolution:
         # Initialize one empty list for each vehicle's trajectory
         trajectories: list[list[tuple[int, int, set[ProductInstance]]]] = [[] for _ in
@@ -192,6 +243,13 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
         delivered_vars = self.variables["delivered_to_node_per_vehicle"]
         visited_node_per_vehicle = self.variables["visited_node_per_vehicle"]
         time_vars = self.variables["time_per_index"]
+        print([cpsolvercb.Value(self.variables["used"][x])
+               for x in self.variables["used"]])
+        print('arcs')
+        for (i, j, index_vehicle) in self.variables["arcs_dict"]:
+            if cpsolvercb.Value(self.variables["arcs_dict"][(i,j,index_vehicle)]):
+                pass
+                #print(i, j, index_vehicle)
 
         # Keep track of non-renewable instances used by each vehicle
         product_instances_used_count: dict[tuple[int, ProductType], int] = {}
@@ -203,8 +261,8 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
 
         for (node_index, vehicle_index, product_type), var in delivered_vars.items():
             if cpsolvercb.Value(var):
-                print("Visited node per vehicle ?",
-                      cpsolvercb.Value(visited_node_per_vehicle[node_index][vehicle_index]))
+                # print("Visited node per vehicle ?",
+                #       cpsolvercb.Value(visited_node_per_vehicle[node_index][vehicle_index]))
                 key = (node_index, vehicle_index)
 
                 # Get arrival time (once per (node, vehicle) visit)

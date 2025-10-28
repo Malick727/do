@@ -611,10 +611,12 @@ class SppForwardSolver(SppSolver, Hyperparametrizable):
                 self.problem.graph, nb_way_memory=kwargs["nb_way_memory"],
                 list_nodes=self.problem.graph.nodes())
             chemin = all_chemin[len(self.problem.graph.nodes())][0]
+            self.value = value_chemin
         else:
             value_chemin, all_chemin, all_acquisition_set = long_path_DAG(
                 self.problem.graph, self.problem.graph.nodes())
             chemin = all_chemin[len(self.problem.graph.nodes())]
+            self.value = value_chemin
 
         sol = SppSolution(problem=self.problem, solution_path=chemin)
         fit = self.aggreg_from_sol(sol)

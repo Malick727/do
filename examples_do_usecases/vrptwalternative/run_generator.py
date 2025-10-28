@@ -8,7 +8,7 @@ from discrete_optimization.generic_tools.callbacks.loggers import ObjectiveLogge
 logging.basicConfig(level=logging.INFO)
 
 def run_generator():
-    problem = parse_solomon("C1_2_3.TXT")
+    problem = parse_solomon("homberger_200_customer_instances/R2_2_2.TXT")
     problem = generate_from_vrptw(vrptw_problem=problem,
                                   nb_nodes_target=50,
                                   nb_vehicles_target=20)
@@ -20,10 +20,12 @@ def run_cp():
     problem = run_generator()
     solver = CpSatVrpTwAlternative(problem=problem)
     solver.init_model()
+    params = ParametersCp.default_cpsat()
+    params.nb_process = 16
     res = solver.solve(callbacks=[ObjectiveLogger(step_verbosity_level=logging.INFO,
                                                   end_verbosity_level=logging.INFO)],
                        time_limit=100,
-                       parameters_cp=ParametersCp.default_cpsat(),
+                       parameters_cp=params,
                        ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res[-1][0]
     print(problem.satisfy(sol))

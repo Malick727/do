@@ -55,7 +55,8 @@ class OvenSchedulingSolution(Solution):
         self.timed_schedule = {}
 
     def get_job_completion_times(self):
-        if not self.timed_schedule: self.problem.compute_and_get_details(self, use_cache=True)
+        if not self.timed_schedule:
+            self.problem.compute_and_get_details(self, use_cache=True)
         job_times = {}
         for (m, b), details in self.timed_schedule.items():
             if m < len(self.batches_per_machine) and b < len(self.batches_per_machine[m]):
@@ -148,38 +149,40 @@ class OvenSchedulingProblem(Problem):
                 if not batch:
                     continue
                 if not set(batch).isdisjoint(scheduled_jobs):
-                    #print("scheduled several time")
+                    print("scheduled several time")
                     return False
                 scheduled_jobs.update(batch)
 
                 first_attr = self.job_attributes[batch[0]]
                 if sum(self.job_sizes[j] for j in batch) > self.machine_capacities[m_idx]:
-                    #print("Capacities broken")
+                    print("Capacities broken")
                     return False
                 for job_idx in batch:
                     if self.job_attributes[job_idx] != first_attr:
-                        #print("Several attr")
+                        print("Several attr")
                         return False
                     if m_idx not in self.eligible_machines[job_idx]:
-                        #print("incompatible machine")
+                        print("incompatible machine")
                         return False
                 if max(self.min_times[j] for j in batch) > min(self.max_times[j] for j in batch):
-                    #print("Duration incompatible")
+                    print("Duration incompatible")
                     return False
         if scheduled_jobs != all_jobs:
-            #print("Not all jobs scheduled")
+            print("Not all jobs scheduled")
             return False
 
         # 2. Check temporal constraints
         if variable.timed_schedule:
             # If timings are already cached, validate them directly.
+            print("time_schedule")
             return self._validate_timed_schedule(variable)
         else:
             # Otherwise, try to compute the timings.
             try:
                 self.compute_and_get_details(variable, use_cache=False)
                 return True
-            except RuntimeError:
+            except RuntimeError as e:
+                print(e)
                 return False
 
     def _validate_timed_schedule(self, variable: OvenSchedulingSolution) -> bool:
@@ -193,10 +196,13 @@ class OvenSchedulingProblem(Problem):
 
             for b_idx, batch in enumerate(machine_batches):
                 if not batch:
+                    print("not batch")
                     continue
 
                 details = variable.timed_schedule.get((m_idx, b_idx))
-                if not details: return False  # Malformed cache
+                if not details:
+                    print("malformed")
+                    return False  # Malformed cache
 
                 start_time = details['start_time']
                 completion_time = details['completion_time']
@@ -204,7 +210,7 @@ class OvenSchedulingProblem(Problem):
                 # Check 1: Batch must start after its jobs are released.
                 release_date = max(self.earliest_starts[j] for j in batch)
                 if start_time < release_date:
-                    # print("too early")
+                    print("too early")
                     return False
 
                 # Check 2: Batch must respect setup time from the previous batch.

@@ -4,9 +4,10 @@ from typing import Optional
 from discrete_optimization.generic_tools.do_solver import SolverDO
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 
-from examples.oven.run_sa import SimulatedAnnealingSolver
+from examples_do_usecases.oven.run_sa import SimulatedAnnealingSolver
 from oven_scheduling_problem.problem import parse_dat_file
-from oven_scheduling_problem.solvers.cpsat import CpsatOvenSolver, OvenSchedulingSolution, OvenObjectivesEnum
+from oven_scheduling_problem.solvers.cpsat import (CpsatOvenSolver, CpsatOvenSolverEvolved,
+                                                   OvenSchedulingSolution, OvenObjectivesEnum)
 from oven_scheduling_problem.solvers.constructive_greedy import OvenGreedySolver
 from discrete_optimization.generic_tools.ortools_cpsat_tools import ParametersCp
 import os
@@ -89,21 +90,23 @@ def run():
 def run_ws():
     folder = "/Users/poveda_g/Documents/git_repos/osp-ls/instances/use-case-3/"
     dat_file = os.path.join(folder, "100RandomOvenSchedulingInstance-n250-k5-a5--2212-22.59.37.dat")
+    dat_file = os.path.join(folder, "102RandomOvenSchedulingInstance-n500-k2-a2--2312-08.39.52.dat")
+    dat_file = os.path.join(folder, "103RandomOvenSchedulingInstance-n500-k2-a2--2312-08.42.31.dat")
     problem = parse_dat_file(dat_file)
     additional_data = problem.additional_data
     sa_solver = SimulatedAnnealingSolver(problem=problem,
                                          initial_temperature=20000,
                                          final_temperature=0.1,
                                          cooling_rate=0.995,
-                                         iterations_per_temp=1000,
+                                         iterations_per_temp=100,
                                          max_stagnation_iterations=200,
-                                         time_limit_seconds=10,  # Stop after 30 seconds
-                                         max_total_iterations=100000)  # Or 2000 iterations
+                                         time_limit_seconds=5,  # Stop after 30 seconds
+                                         max_total_iterations=10000)  # Or 2000 iterations
     best_solution_found, best_fitness_found = sa_solver.solve()
     best_solution_found: OvenSchedulingSolution
-    solver = CpsatOvenSolver(problem, known_ub=additional_data["ub"],
-                             max_nb_batch=max([len(m)+15
-                                               for m in best_solution_found.batches_per_machine]))
+    solver = CpsatOvenSolverEvolved(problem, known_ub=additional_data["ub"],
+                                    max_nb_batch=max([len(m)+2
+                                                      for m in best_solution_found.batches_per_machine]))
     solver.init_model(objectives=[OvenObjectivesEnum.PROCESSING_TIME,
                                   OvenObjectivesEnum.TARDINESS,
                                   OvenObjectivesEnum.SETUP_COST],

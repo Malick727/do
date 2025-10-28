@@ -32,7 +32,7 @@ def build_heuristic(esd_best,
     graph_of_interest = graph
     st_ = start
     end_ = end
-    if max_esf >= max_esd:
+    if max_esf >= max_esd or True:
         heuristic_to_end_1 = {n: esf_cor[n] for n in esd}
         for n in graph.nodes:
             graph.nodes[n]["heuristic"] = -heuristic_to_end_1[n]
