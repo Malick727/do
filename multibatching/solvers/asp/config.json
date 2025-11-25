@@ -4,7 +4,7 @@
     "max_nr_models": 1,
     "show_model": true,
     "show_dataframes": true,
-    "all_results_folder": "output",
+    "all_results_folder": "output-ab",
     "timestamp_on_results_folder": false,
     "example": false,
     "output_hundredth_model": false,

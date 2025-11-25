@@ -6,23 +6,30 @@ tr_name_id_mapping = {}
 part_name_id_mapping = {}
 tr_id_cost_mapping = {}
 
-alternative_names = True
+alternative_names = False
 folder = '../../../multibatching/datalocal'
 file_name = 'config-local' # 'oneheart-kerosene-aircraft' #'config-local.json' # 
 input_file = f'{file_name}.json'
 
-output_file = "factsASPalt.lp"
+output_file = "factsASP.lp"
 
 cap_size_divde = 1000000000
 
 # only used for text and not 
 def reformulate(text):
-
     temp_text = str(text)
     temp_text = temp_text.replace(".","")
     temp_text = temp_text.replace("-","")
     temp_text = temp_text.replace(" ","")
     return temp_text[0].lower() + temp_text[1:]
+
+def reformulateNr(text):
+    temp_text = str(text)
+    temp_text = temp_text.split(".")[0]
+    temp_text = temp_text.replace("-","")
+    temp_text = temp_text.replace(" ","")
+    return int(temp_text[0].lower() + temp_text[1:])
+
 
 def json2asp(file_out):
 
@@ -44,17 +51,17 @@ def json2asp(file_out):
         
         transportation_data = json_data["transportResources"]
         tr_names = list(map(lambda x: f"transportResource({reformulate(transportation_data.get(x)['name'])}).\n", transportation_data))
-        tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,int(reformulate(int(transportation_data.get(x)['co2Emissions'])))])}).\n",transportation_data))
-        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,int(reformulate(int(transportation_data.get(x)['cost'])))])}).\n", transportation_data))
-        tr_capacities = list(map(lambda x: f"transportCapacity({reformulate(transportation_data.get(x)['name'])},{max([1,int(int(reformulate(int(transportation_data.get(x)['capacity'])))/cap_size_divde)])}).\n", transportation_data))
-        tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,int(reformulate(int(transportation_data.get(x)['speed'])))])}).\n", transportation_data))
+        tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['co2Emissions'])])}).\n",transportation_data))
+        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data))
+        tr_capacities = list(map(lambda x: f"transportCapacity({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(int(transportation_data.get(x)['capacity'])/cap_size_divde)])}).\n", transportation_data))
+        tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['speed'])])}).\n", transportation_data))
 
         alt_tr_names_mapping = zip([reformulate(transportation_data.get(x)['name']) for x in transportation_data], [f"tr{n}" for n in range(0, len(transportation_data))]) 
 
         tr_names_for_mapping = list(map(lambda x: reformulate(transportation_data.get(x)['name']), transportation_data))        
         tr_ids_for_mapping = list(map(lambda x: x, transportation_data))
         tr_name_id_mapping = dict(zip(tr_ids_for_mapping,tr_names_for_mapping))
-        tr_costs_for_mapping = list(map(lambda x: max([1,int(reformulate(int(transportation_data.get(x)['cost'])))]), transportation_data))
+        tr_costs_for_mapping = list(map(lambda x: max([1,reformulateNr(transportation_data.get(x)['cost'])]), transportation_data))
         tr_id_cost_mapping = dict(zip(tr_ids_for_mapping,tr_costs_for_mapping))
 
         routes_data = json_data["routes"]
@@ -75,7 +82,7 @@ def json2asp(file_out):
 
         parts_data = json_data["products"]
         part_names = list(map(lambda x: f"part({reformulate(parts_data.get(x).get('name'))}).\n", parts_data))
-        part_sizes = list(map(lambda x: f"partSize({reformulate(parts_data.get(x).get('name'))},{int(int(reformulate(parts_data.get(x).get('size')))/cap_size_divde)}).\n", parts_data))
+        part_sizes = list(map(lambda x: f"partSize({reformulate(parts_data.get(x).get('name'))},{reformulateNr(parts_data.get(x).get('size')/cap_size_divde)}).\n", parts_data))
         
         alt_part_names_mapping = zip([reformulate(parts_data.get(x)['name']) for x in parts_data], [f"part{n}" for n in range(0, len(parts_data))]) 
 

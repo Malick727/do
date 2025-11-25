@@ -6,6 +6,9 @@ location(l4).
 location(l5).
 location(l6).
 
+% so via2 rule is applicable
+harbor(l1;l2;l3;l4;l5;l6).
+
 % transportResource: name, capacity, co2emissions, cost, speed
 transportResource(tr1).
 transportResource(tr2).

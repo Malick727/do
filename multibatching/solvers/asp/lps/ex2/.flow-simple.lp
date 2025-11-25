@@ -4,6 +4,8 @@ numFlow(1..maxNrParts).
 
 % constraints
 
+offer(Part,Location,Val):- demandOffer(Part,Location,Val), Val>0.
+demand(Part,Location,PosVal):- demandOffer(Part,Location,Val), Val<0, PosVal=Val*-1.
 
 1{flow(From,To,Part,N): numFlow(N),N<=O, N<=D}1 :- offer(Part,From,O), demand(Part,To,D). 
 
@@ -29,11 +31,10 @@ num(1..20).
 
 binTR(B,TR) :- bin(B), partTR(_,TR).
 #show binTR/2.
-%:- routePackaging(_,_,TR1,_,B,_), routePackaging(_,_,TR2,_,B,_), TR1!=TR2.
+:- routePackaging(_,_,TR1,_,B,_), routePackaging(_,_,TR2,_,B,_), TR1!=TR2.
+:- routePackaging(_,_,TR,_,B,_), transportCapacity(TR,C), C<#sum{N*Size,Part:routePackaging(_,_,_,Part,B,N),partSize(Part,Size)}, C>0.
 
-%:- routePackaging(_,_,TR,_,B,_), transportCapacity(TR,C), C<#sum{N*Size,Part:routePackaging(_,_,_,Part,B,N),partSize(Part,Size)}, C>0.
-
-1{routePackaging(From,To,TR,Part,B,M):bin(B),num(M)}1 :- routeflow(From,To,Part,N,TR). 
+%1{routePackaging(From,To,TR,Part,B,M):bin(B),num(M)}1 :- routeflow(From,To,Part,N,TR). 
 
 #show routePackaging/6.
 

@@ -1,0 +1,6 @@
+clingo==5.8.0
+matplotlib==3.10.7
+pandas==2.3.3
+networkx==3.6
+plotly==6.5.0
+ngo==1.0.2

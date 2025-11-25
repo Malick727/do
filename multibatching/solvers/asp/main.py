@@ -12,9 +12,13 @@ from datetime import datetime
 import threading
 import sys
 import plotly.express as px
+from clingo.ast import parse_files, ProgramBuilder
+from ngo import optimize, auto_detect_input, auto_detect_output
 
 import helper_functions as hf
 
+import subprocess
+import shlex
 import os
 import plotly.graph_objects as go
 import time 
@@ -46,12 +50,13 @@ modelAtomTemplates = [
       {'name':'countPartsInL','filter':lambda s: s.name=='countPartsInL', 'columns':['parts','part','amount']},
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
        {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to', 'part', 'amount']},
-       {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'amount', 'tr']},
-       {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'parts', 'tr', 'freq']},
+       {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr', 'packing']},
+       {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'binNr']},
        {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['tr' ,'cost']},
        {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['tr' ,'cost']},
        {'name':'transportSpeed','filter':lambda s: s.name=='transportSpeed', 'columns':['tr' ,'cost']},
-       {'name':'packaging','filter':lambda s: s.name=='packaging', 'columns':['binNr','from','to','tr', 'part','freq']}
+      # {'name':'packaging','filter':lambda s: s.name=='packaging', 'columns':['binNr','from','to','tr', 'part','freq']},
+       {'name':'packing','filter':lambda s: s.name=='packing', 'columns':['binNr','tr', 'part','amount']}
 ]
 
 def cprint(Text):
@@ -156,7 +161,7 @@ def get_programs_by_categories(categories: list[str]):
             print(f"Folder or file \'{category}\' does not exist.")
     return programs
 
-def solve_clingo(programs, max_models=1):
+def solve_clingo(programs, max_models=1, ngo=False):
     global start_solving, produced_at_atoms, ctl
     print('Configuring Clingo ...')
     print(f'--models={max_models}')
@@ -166,14 +171,52 @@ def solve_clingo(programs, max_models=1):
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     ctl.register_observer(myobs)
     myobs.start()#
+    
+    print("programs", programs)
+    if ngo==True:
+        print(f"=== NGO: Encoding Optimization ===")
+        all_programs = " ".join(programs)
+        command1 = f"cat {all_programs} > encoding.lp" 
+        command2 = " cat encoding.lp | ngo > new_encoding.lp"
+        
+        programs = ['new_encoding.lp']
+        # 5. Execute the combined pipeline
+        try:
+        
+            result1 = subprocess.run(
+                command1,
+                shell=True,
+                check=True,  # Raise CalledProcessError on non-zero exit code
+                capture_output=True,
+                text=True
+            )
+            
+            print("\n✅ Merge completed successfully!")
 
-    for program in programs:
-        ctl.load(program)
+            result2 = subprocess.run(
+                command2,
+                shell=True,
+                check=True,  # Raise CalledProcessError on non-zero exit code
+                capture_output=True,
+                text=True
+            )
+            print(f"The optimized logic program is in: **new_encoding.lp**")
+
+        except subprocess.CalledProcessError as e:
+            print(f"\n❌ Error during command execution (Exit Code {e.returncode}):")
+            print(f"Stderr from ngo: {e.stderr}")
+        except FileNotFoundError:
+            print("\n❌ Error: The 'cat' or 'ngo' command was not found.")
+
+    print(f"=== Loading programs: {programs} ===")
+    for p in programs:
+        ctl.load(p)
     start_time_grounding = time.process_time()
+
+    print(f"=== Grounding programs: {programs} ... ===")
     ctl.ground([("base", [])])
     end_time_grounding = time.process_time()
-    print(
-        f"Grounding programs: {programs} ...\n=== Grounding done ({round((time.process_time() - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
+    print(f"=== Grounding done ({round((time.process_time() - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
     
     start_solving = time.process_time()
     res = ctl.solve(on_model=on_model)
@@ -233,7 +276,7 @@ def on_model(m: clingo.Model):
 
         if m.optimality_proven:
             print(
-                f"=== Optimal model [{foundModelIndex}] found after {str(round((time.process_time() - start_time_solving) / 60, 2))} minutes of solving (Optimality proven: {m.optimality_proven}) === ")
+                f"=== Optimal model [{foundModelIndex}] found after {str(round((time.process_time() - start_solving) / 60, 2))} minutes of solving (Optimality proven: {m.optimality_proven}) === ")
             
             if exit_after_optimal_found:
                 print(str(m))
@@ -335,7 +378,7 @@ def run_asp():
     else:  
         print(f"{YELLOW}============================== {categories} =============================={RESET}") 
         outputfolder = f'{all_results_folder}'
-        solve_clingo(get_programs_by_categories(categories), max_nr_models)
+        solve_clingo(get_programs_by_categories(categories), max_nr_models, True)
         gc.collect()  
 
 if __name__ == "__main__":
