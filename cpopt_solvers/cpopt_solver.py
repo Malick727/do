@@ -13,6 +13,7 @@ from discrete_optimization.generic_tools.do_solver import BoundsProviderMixin
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from docplex.cp.model import CpoModel
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
+import os
 import logging
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,8 @@ class CPOSolver(CpSolver, BoundsProviderMixin):
         self.cp_model.add_solver_callback(callback)
         result: CpoSolveResult = self.cp_model.solve(
             TimeLimit=time_limit,
-            execfile="/Applications/CPLEX_Studio2211/cpoptimizer/bin/arm64_osx/cpoptimizer",
+            Workers=parameters_cp.nb_process,
+            execfile=os.environ["CPOPT_PATH"],
             trace_log=True)
         callback.current_cpo_solve_result = result
         if self.early_stopping_exception:

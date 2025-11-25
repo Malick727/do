@@ -45,7 +45,6 @@ class HexalySolver(SolverDO, BoundsProviderMixin):
         logger.info(f"Status of hexaly-solver : {self.ls.solution.get_status()}")
         self.status_solver = hexaly_status_to_dostatus(hexaly_status=self.ls.solution.get_status())
         logger.info(f"Status of solver : {self.status_solver}")
-        print(self.ls.get_solution)
         sol = self.retrieve_solution()
         fit = self.aggreg_from_sol(sol)
         ls_callback.res.append((sol, fit))

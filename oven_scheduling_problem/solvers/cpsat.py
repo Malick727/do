@@ -36,6 +36,7 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
         if self.max_nb_batch is None:
             self.max_nb_batch = int(4 * self.problem.n_jobs / self.problem.n_machines)
         self.known_ub = known_ub
+
     def implements_lexico_api(self) -> bool:
         return True
 
@@ -58,6 +59,7 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
             return eval_["setup_cost"]
         if obj == OvenObjectivesEnum.PROCESSING_TIME:
             return eval_["processing_time"]
+
     def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> Solution:
         sol = OvenSchedulingSolution(problem=self.problem, batches_per_machine=[])
         starts_per_machines = self.variables["starts_per_machines"]
@@ -121,6 +123,7 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
         print([(str(obj), cpsolvercb.value(self.variables["objectives"][obj]))
                for obj in self.variables["objectives"]])
         print("Gap to known up ", self.aggreg_from_sol(sol)/self.known_ub)
+        print(self.problem.satisfy(sol))
         return sol
 
     def init_model(self, objectives: list[OvenObjectivesEnum],
@@ -209,9 +212,10 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
             details = sol.timed_schedule[(m, b)]
 
             # Hint job timings and assignments
-            self.cp_model.AddHint(self.variables["starts_job"][job_id], details['start_time'])
-            self.cp_model.AddHint(self.variables["ends_job"][job_id], details['completion_time'])
-            self.cp_model.AddHint(self.variables["durations_job"][job_id], details['processing_time'])
+            if "starts_job" in self.variables:
+                self.cp_model.AddHint(self.variables["starts_job"][job_id], details['start_time'])
+                self.cp_model.AddHint(self.variables["ends_job"][job_id], details['completion_time'])
+                self.cp_model.AddHint(self.variables["durations_job"][job_id], details['processing_time'])
             self.cp_model.AddHint(self.variables["present_job_per_machine"][job_id][m], 1)
             self.cp_model.AddHint(self.variables["present_job_per_machine_and_batch"][job_id][m][b], 1)
             #self.cp_model.AddHint(self.variables["starts_job_per_machine"][job_id][m], details['start_time'])
@@ -251,6 +255,7 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
         #missing = [v for v in vars if v not in vars_in_hint]
         #print(self.cp_model.proto.variables[327])
         #print(missing)
+
     def define_objectives(self, objectives: list[OvenObjectivesEnum],
                           weight: list[float] = None):
         if weight is None:
@@ -579,6 +584,382 @@ class CpsatOvenSolver(OrtoolsCpSatSolver, WarmstartMixin):
                 self.cp_model.add(setup_cost[machine][i] == 0).only_enforce_if(
                     present_per_machines[machine][i].Not())
 
+        self.variables["setup_time_per_machine"] = setup_time
+        self.variables["setup_cost_per_machine"] = setup_cost
+
+    def get_assignments_from_solution(self, sol: OvenSchedulingSolution) -> dict:
+        """
+        Translates a solution object into a comprehensive dictionary mapping all
+        relevant variable names to their assigned values.
+        """
+        # 1. Ensure the solution's timing details are computed.
+        if not sol.timed_schedule:
+            self.problem.compute_and_get_details(sol, use_cache=True)
+
+        # 2. Initialize the assignments dictionary to hold all variable values.
+        assignments = defaultdict(lambda: defaultdict(dict))
+
+        # 3. Build a reverse map for easy lookup of a job's assignment.
+        job_to_assignment = {
+            job_id: (m, b)
+            for m, machine_batches in enumerate(sol.batches_per_machine)
+            for b, batch_content in enumerate(machine_batches)
+            for job_id in batch_content
+        }
+
+        # 4. Determine batch-related assignments for each machine.
+        for m in range(self.problem.n_machines):
+            last_attribute = self.problem.initial_states[m]
+            num_batches_in_sol = len(sol.batches_per_machine[m])
+
+            # Assign values for batches that ARE PRESENT in the solution
+            for b in range(num_batches_in_sol):
+                batch_content = sol.batches_per_machine[m][b]
+                details = sol.timed_schedule[(m, b)]
+                batch_attribute = self.problem.job_attributes[batch_content[0]]
+
+                assignments["present_per_machines"][m][b] = 1
+                assignments["starts_per_machines"][m][b] = details['start_time']
+                assignments["ends_per_machines"][m][b] = details['completion_time']
+                assignments["durations_per_machines"][m][b] = details['processing_time']
+
+                # Assign attribute presence
+                for attr in self.variables["present_per_machines_per_attr"][m]:
+                    assignments["present_per_machines_per_attr"][m][attr, b] = 1 if attr == batch_attribute else 0
+
+                # Assign setup costs and times
+                assignments["setup_cost_per_machine"][m][b] = self.problem.setup_costs[last_attribute][batch_attribute]
+                assignments["setup_time_per_machine"][m][b] = self.problem.setup_times[last_attribute][batch_attribute]
+
+                last_attribute = batch_attribute
+
+            # Assign default values for batches that ARE NOT PRESENT
+            last_time = sol.timed_schedule[(m, num_batches_in_sol - 1)][
+                "completion_time"] if num_batches_in_sol > 0 else 0
+            for b in range(num_batches_in_sol, self.max_nb_batch):
+                assignments["present_per_machines"][m][b] = 0
+                assignments["starts_per_machines"][m][b] = last_time
+                assignments["ends_per_machines"][m][b] = last_time
+                assignments["durations_per_machines"][m][b] = 0
+                for attr in self.variables["present_per_machines_per_attr"][m]:
+                    assignments["present_per_machines_per_attr"][m][attr, b] = 0
+                assignments["setup_cost_per_machine"][m][b] = 0
+                assignments["setup_time_per_machine"][m][b] = 0
+
+        # 5. Determine all job-specific assignments.
+        for job_id in range(self.problem.n_jobs):
+            if job_id in job_to_assignment:
+                m, b = job_to_assignment[job_id]
+                details = sol.timed_schedule[(m, b)]
+
+                # Job timings
+                assignments["starts_job"][job_id] = details['start_time']
+                assignments["ends_job"][job_id] = details['completion_time']
+                assignments["durations_job"][job_id] = details['processing_time']
+
+                # Job assignments
+                for m_other in self.problem.eligible_machines[job_id]:
+                    assignments["present_job_per_machine"][job_id][m_other] = 1 if m_other == m else 0
+                    for b_other in range(self.max_nb_batch):
+                        is_assigned = 1 if m_other == m and b_other == b else 0
+                        assignments["present_job_per_machine_and_batch"][job_id][m_other, b_other] = is_assigned
+
+                # Job tardiness
+                assignments["late_jobs"][job_id] = 1 if details['completion_time'] > self.problem.latest_ends[
+                    job_id] else 0
+            else:  # Should not happen in a valid solution
+                # Assign default values for unassigned jobs
+                assignments["late_jobs"][job_id] = 1
+
+        # 6. Determine makespan.
+        solution_makespan = 0
+        if sol.timed_schedule:
+            solution_makespan = max(d['completion_time'] for d in sol.timed_schedule.values() if d)
+        assignments["makespan"] = solution_makespan
+
+        return assignments
+
+
+class CpsatOvenSolverEvolved(CpsatOvenSolver):
+    problem: OvenSchedulingProblem
+    hyperparameters = []
+
+    def init_model(self, objectives: list[OvenObjectivesEnum],
+                   weights: list[float] = None, **args: Any) -> None:
+        self.cp_model = CpModel()
+        self.define_machines_intervals()
+        self.define_jobs_intervals()
+        self.constraint_convention_machines()
+        self.constraint_convention_jobs()
+        self.linking_jobs_and_machines()
+        self.constraint_batch_size()
+        self.constraint_setup_time()
+        self.define_objectives(objectives=objectives,
+                               weight=weights)
+
+    def define_machines_intervals(self):
+        starts_per_machines = {i: [] for i in range(self.problem.n_machines)}
+        ends_per_machines = {i: [] for i in range(self.problem.n_machines)}
+        durations_per_machines = {i: [] for i in range(self.problem.n_machines)}
+        present_per_machines = {i: [] for i in range(self.problem.n_machines)}
+        intervals_per_machines = {i: [] for i in range(self.problem.n_machines)}
+
+        present_per_machines_per_attr = {i: {} for i in range(self.problem.n_machines)}
+        max_nb_batch = self.max_nb_batch
+        for i in range(len(starts_per_machines)):
+            jobs = self.jobs_index_for_machine_i[i]
+            types = set([self.problem.job_attributes[x] for x in jobs])
+            possible_durations = ([self.problem.min_times[x] for x in jobs] +
+                                  [self.problem.max_times[x] for x in jobs])
+            possible_durations = sorted(set(possible_durations))
+            possible_durations = [0] + possible_durations
+            calendar = self.problem.availability_intervals[i]
+
+            starts_per_machines[i] = [self.cp_model.NewIntVarFromDomain(domain=Domain.FromIntervals(calendar),
+                                                                        name=f"start_machine_{i}_batch_{b}")
+                                      for b in range(max_nb_batch)]
+            ends_per_machines[i] = [self.cp_model.NewIntVarFromDomain(domain=Domain.FromIntervals(calendar),
+                                                                      name=f"end_machine_{i}_batch_{b}")
+                                    for b in range(max_nb_batch)]
+            durations_per_machines[i] = [self.cp_model.NewIntVarFromDomain(domain=Domain.FromValues(possible_durations),
+                                                                           name=f"duration_machine_{i}_batch_{b}")
+                                         for b in range(max_nb_batch)]
+            present_per_machines[i] = [self.cp_model.NewBoolVar(name=f"present_machine_{i}_batch_{b}")
+                                       for b in range(max_nb_batch)]
+            intervals_per_machines[i] = [self.cp_model.NewOptionalIntervalVar(start=starts_per_machines[i][b],
+                                                                              size=durations_per_machines[i][b],
+                                                                              end=ends_per_machines[i][b],
+                                                                              is_present=present_per_machines[i][b],
+                                                                              name=f"interval_machine_{i}_{b}")
+                                         for b in range(max_nb_batch)]
+            # create binary presence for each type
+            for t in types:
+                present_per_machines_per_attr[i][t] = [self.cp_model.NewBoolVar(f"present_machine_{i}_{b}_type_{t}")
+                                                       for b in range(max_nb_batch)]
+
+        self.variables["starts_per_machines"] = starts_per_machines
+        self.variables["ends_per_machines"] = ends_per_machines
+        self.variables["durations_per_machines"] = durations_per_machines
+        self.variables["present_per_machines"] = present_per_machines
+        self.variables["intervals_per_machines"] = intervals_per_machines
+        self.variables["present_per_machines_per_attr"] = present_per_machines_per_attr
+
+    def constraint_convention_machines(self):
+        present_per_machines: dict[int, list[BoolVarT]] = self.variables["present_per_machines"]
+        present_per_machines_per_attr: dict[int, dict[int, list[BoolVarT]]] = self.variables[
+            "present_per_machines_per_attr"]
+        starts_per_machines: dict[int, list[IntVar]] = self.variables["starts_per_machines"]
+        ends_per_machines: dict[int, list[IntVar]] = self.variables["ends_per_machines"]
+        for machine_index in present_per_machines:
+            for i in range(self.max_nb_batch - 1):
+                # self.cp_model.AddImplication(present_per_machines[machine_index][i].Not(),
+                #                              present_per_machines[machine_index][i+1].Not())
+                # When no batch at some point, the next ones are also absent.
+                # Redundant, in case.
+                self.cp_model.add(present_per_machines[machine_index][i] >= present_per_machines[machine_index][i + 1])
+
+                # Order of interval (increasing time!)
+                (self.cp_model.add(starts_per_machines[machine_index][i + 1] >= ends_per_machines[machine_index][i])
+                 .only_enforce_if(present_per_machines[machine_index][i + 1]))
+
+            for i in range(self.max_nb_batch):
+                # At most one type for each batch.
+                self.cp_model.add_at_most_one([present_per_machines_per_attr[machine_index][t][i]
+                                               for t in present_per_machines_per_attr[machine_index]])
+                # Exactly one, when the batch is present !!
+                (self.cp_model.add(sum([present_per_machines_per_attr[machine_index][t][i]
+                                        for t in present_per_machines_per_attr[machine_index]]) == 1)
+                 .only_enforce_if(present_per_machines[machine_index][i]))
+
+    def define_jobs_intervals(self):
+        horizon = max([self.problem.availability_intervals[i][-1][1]
+                       for i in range(self.problem.n_machines)])
+        present_job_per_machine = {i: {} for i in range(self.problem.n_jobs)}
+        present_job_per_machine_and_batch = {i: {} for i in range(self.problem.n_jobs)}
+        for i in range(self.problem.n_jobs):
+            for machine_index in self.problem.eligible_machines[i]:
+                present_job_per_machine[i][machine_index] = self.cp_model.NewBoolVar(f"present_job_{i}"
+                                                                                     f"_machine_{machine_index}")
+                present_job_per_machine_and_batch[i][machine_index] = [self.cp_model.NewBoolVar(f"present_job_{i}_"
+                                                                                                f"machine_"
+                                                                                                f"{machine_index}"
+                                                                                                f"_batch_{b}")
+                                                                       for b in range(self.max_nb_batch)]
+        self.variables["present_job_per_machine"] = present_job_per_machine
+        self.variables["present_job_per_machine_and_batch"] = present_job_per_machine_and_batch
+
+    def define_objectives(self, objectives: list[OvenObjectivesEnum],
+                          weight: list[float] = None):
+        if weight is None:
+            weight = [1]*len(objectives)
+        self.variables["objectives"] = {}
+        for obj in objectives:
+            if obj == OvenObjectivesEnum.NB_BATCH:
+                nb_batch = sum([x for m in self.variables["present_per_machines"]
+                                for x in self.variables["present_per_machines"][m]])
+                self.variables["objectives"][obj] = nb_batch
+            if obj == OvenObjectivesEnum.PROCESSING_TIME:
+                processing_time = sum([x for m in self.variables["durations_per_machines"]
+                                       for x in self.variables["durations_per_machines"][m]])
+                self.variables["objectives"][obj] = processing_time
+            if obj == OvenObjectivesEnum.SETUP_COST:
+                setup_cost = sum([x for m in self.variables["setup_cost_per_machine"]
+                                  for x in self.variables["setup_cost_per_machine"][m]])
+                self.variables["objectives"][obj] = setup_cost
+            if obj == OvenObjectivesEnum.MAKESPAN:
+                horizon = max([self.problem.availability_intervals[i][-1][1]
+                               for i in range(self.problem.n_machines)])
+                makespan = self.cp_model.NewIntVar(lb=max(self.problem.earliest_starts),
+                                                   ub=horizon, name=f"makespan")
+                self.cp_model.AddMaxEquality(makespan,
+                                             [self.variables["ends_job"][i] for i in self.variables["ends_job"]])
+                self.variables["objectives"][obj] = makespan
+            if obj == OvenObjectivesEnum.TARDINESS:
+                late = {i: self.cp_model.NewBoolVar(name=f"late_{i}")
+                        for i in range(self.problem.n_jobs)}
+                self.variables["late_jobs"] = late
+                horizon = max([self.problem.availability_intervals[i][-1][1]
+                               for i in range(self.problem.n_machines)])
+                for i in late:
+                    end_job = self.cp_model.NewIntVar(self.problem.earliest_starts[i], horizon,
+                                                      name=f"end_{i}")
+                    for m in self.variables["present_job_per_machine_and_batch"][i]:
+                        for b in range(len(self.variables["present_job_per_machine_and_batch"][i][m])):
+                            (self.cp_model.Add(end_job == self.variables["ends_per_machines"][m][b])
+                             .only_enforce_if(self.variables["present_job_per_machine_and_batch"][i][m][b]))
+                    (self.cp_model.Add(end_job > self.problem.latest_ends[i])
+                     .OnlyEnforceIf(late[i]))
+                    (self.cp_model.Add(end_job <= self.problem.latest_ends[i])
+                     .OnlyEnforceIf(late[i].Not()))
+                self.variables["objectives"][OvenObjectivesEnum.TARDINESS] = sum([late[i] for i in late])
+
+        self.cp_model.Minimize(sum([self.variables["objectives"][objectives[i]]*weight[i]
+                                    for i in range(len(objectives))]))
+
+    def constraint_convention_jobs(self):
+        # starts_job = self.variables["starts_job"]
+        # ends_job = self.variables["ends_job"]
+        # self.variables["durations_job"] = durations_job
+        # starts_job_per_machine = self.variables["starts_job_per_machine"]
+        # ends_job_per_machine = self.variables["ends_job_per_machine"]
+        # durations_job_per_machine = self.variables["durations_job_per_machine"]
+        present_job_per_machine: dict[int, dict[int, BoolVarT]] = self.variables["present_job_per_machine"]
+        present_job_per_machine_and_batch: dict[int, dict[int, list[BoolVarT]]] = self.variables[
+            "present_job_per_machine_and_batch"]
+
+        for i in present_job_per_machine:
+            self.cp_model.add_exactly_one([present_job_per_machine[i][m]
+                                           for m in present_job_per_machine[i]])
+            for m in present_job_per_machine_and_batch[i]:
+                self.cp_model.add(sum(present_job_per_machine_and_batch[i][m]) <= 1)
+                (self.cp_model.add(sum(present_job_per_machine_and_batch[i][m]) == 1)
+                 .OnlyEnforceIf(present_job_per_machine[i][m]))
+                (self.cp_model.add(sum(present_job_per_machine_and_batch[i][m]) == 0)
+                 .OnlyEnforceIf(present_job_per_machine[i][m].Not()))
+
+    def linking_jobs_and_machines(self):
+        present_job_per_machine: dict[int, dict[int, BoolVarT]] = self.variables["present_job_per_machine"]
+        present_job_per_machine_and_batch: dict[int, dict[int, list[BoolVarT]]] = (
+            self.variables["present_job_per_machine_and_batch"])
+        present_per_machines: dict[int, list[BoolVarT]] = self.variables["present_per_machines"]
+        present_per_machines_per_attr: dict[int, dict[int, list[BoolVarT]]] = self.variables[
+            "present_per_machines_per_attr"]
+        starts_per_machines: dict[int, list[IntVar]] = self.variables["starts_per_machines"]
+        ends_per_machines: dict[int, list[IntVar]] = self.variables["ends_per_machines"]
+        durations_per_machines: dict[int, list[IntVar]] = self.variables["durations_per_machines"]
+
+        for i in range(self.problem.n_jobs):
+            type_ = self.problem.job_attributes[i]
+            for m in present_job_per_machine[i]:
+                for b in range(self.max_nb_batch):
+                    present = present_job_per_machine_and_batch[i][m][b]
+                    # -> Batch b is present
+                    self.cp_model.add(present_per_machines[m][b] == 1).only_enforce_if(present)
+                    self.cp_model.add(durations_per_machines[m][b] >= self.problem.min_times[i]).only_enforce_if(present)
+                    self.cp_model.add(durations_per_machines[m][b] <= self.problem.max_times[i]).only_enforce_if(present)
+                    # -> Job i is done on machine i
+                    self.cp_model.add(present_job_per_machine[i][m] == 1).only_enforce_if(present)
+                    self.cp_model.add(starts_per_machines[m][b] >= self.problem.earliest_starts[i]).only_enforce_if(present)
+                    # -> Type is activated for this batch.
+                    self.cp_model.add(present_per_machines_per_attr[m][type_][b] == 1).only_enforce_if(present)
+        # if b-th batch of a machine is activated, some activities are put on it.
+        for b in range(self.max_nb_batch):
+            for m in range(self.problem.n_machines):
+                (self.cp_model.add(sum([present_job_per_machine_and_batch[i][m][b]
+                                        for i in present_job_per_machine if m in present_job_per_machine[i]]) >= 1)
+                 .only_enforce_if(present_per_machines[m][b]))
+                (self.cp_model.add(sum([present_job_per_machine_and_batch[i][m][b]
+                                        for i in present_job_per_machine if m in present_job_per_machine[i]]) == 0)
+                 .only_enforce_if(present_per_machines[m][b].Not()))
+
+    def constraint_batch_size(self):
+        present_job_per_machine_and_batch: dict[int, dict[int, list[BoolVarT]]] = (
+            self.variables["present_job_per_machine_and_batch"])
+        for m in range(self.problem.n_machines):
+            for b in range(self.max_nb_batch):
+                literal_and_coef = [(present_job_per_machine_and_batch[i][m][b], self.problem.job_sizes[i])
+                                    for i in present_job_per_machine_and_batch
+                                    if m in present_job_per_machine_and_batch[i]]
+                self.cp_model.add(LinearExpr.weighted_sum([x[0] for x in literal_and_coef],
+                                                          [x[1] for x in literal_and_coef])
+                                  <= self.problem.machine_capacities[m])
+
+    def constraint_setup_time(self):
+        starts_per_machines = self.variables["starts_per_machines"]
+        ends_per_machines = self.variables["ends_per_machines"]
+        present_per_machines = self.variables["present_per_machines"]
+        present_per_machines_per_attr = self.variables["present_per_machines_per_attr"]
+        possible_setup_times = sorted(set([0] + [x for i in range(len(self.problem.setup_times))
+                                                 for x in self.problem.setup_times[i]]))
+        possible_setup_cost = sorted(set([0] + [x for i in range(len(self.problem.setup_costs))
+                                                for x in self.problem.setup_costs[i]]))
+        setup_time = {m: [self.cp_model.NewIntVarFromDomain(Domain.FromValues(possible_setup_times),
+                                                            name=f"setup_machine_{m}_batch_{b}")
+                          for b in range(self.max_nb_batch)]
+                      for m in range(self.problem.n_machines)}
+        setup_cost = {m: [self.cp_model.NewIntVarFromDomain(Domain.FromValues(possible_setup_cost),
+                                                            name=f"setup_machine_{m}_batch_{b}")
+                          for b in range(self.max_nb_batch)]
+                      for m in range(self.problem.n_machines)}
+
+        for machine in starts_per_machines:
+            for t1 in present_per_machines_per_attr[machine]:
+                self.cp_model.add(starts_per_machines[machine][0] >=
+                                  self.problem.setup_times[self.problem.initial_states[machine]][t1]).only_enforce_if(
+                    present_per_machines_per_attr[machine][t1][0],
+                    present_per_machines[machine][0])
+                self.cp_model.add(setup_time[machine][0] ==
+                                  self.problem.setup_times[self.problem.initial_states[machine]][t1]).only_enforce_if(
+                    present_per_machines_per_attr[machine][t1][0],
+                    present_per_machines[machine][0])
+                self.cp_model.add(setup_cost[machine][0] ==
+                                  self.problem.setup_costs[self.problem.initial_states[machine]][t1]).only_enforce_if(
+                    present_per_machines_per_attr[machine][t1][0],
+                    present_per_machines[machine][0])
+            for i in range(1, self.max_nb_batch):
+                for t1 in present_per_machines_per_attr[machine]:
+                    for t2 in present_per_machines_per_attr[machine]:
+                        self.cp_model.add(starts_per_machines[machine][i] >=
+                                          ends_per_machines[machine][i - 1] +
+                                          self.problem.setup_times[t1][t2]).only_enforce_if(
+                            present_per_machines_per_attr[machine][t1][i - 1],
+                            present_per_machines_per_attr[machine][t2][i],
+                            present_per_machines[machine][i - 1],
+                            present_per_machines[machine][i])
+
+                        self.cp_model.add(setup_time[machine][i] ==
+                                          self.problem.setup_times[t1][t2]).only_enforce_if(
+                            present_per_machines_per_attr[machine][t1][i - 1],
+                            present_per_machines_per_attr[machine][t2][i],
+                            present_per_machines[machine][i])
+                        self.cp_model.add(setup_cost[machine][i] ==
+                                          self.problem.setup_costs[t1][t2]).only_enforce_if(
+                            present_per_machines_per_attr[machine][t1][i - 1],
+                            present_per_machines_per_attr[machine][t2][i],
+                            present_per_machines[machine][i])
+            for i in range(self.max_nb_batch):
+                self.cp_model.add(setup_cost[machine][i] == 0).only_enforce_if(
+                    present_per_machines[machine][i].Not())
         self.variables["setup_time_per_machine"] = setup_time
         self.variables["setup_cost_per_machine"] = setup_cost
 

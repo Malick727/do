@@ -38,6 +38,7 @@ class Location:
 
 @dataclass(frozen=True)
 class TransportLink:
+    id : int
     location_l1: Location
     location_l2: Location
     distance: int
@@ -66,6 +67,8 @@ class MultibatchingSolution(Solution):
                                      list_flows=list(self.list_flows))
 
 
+
+
 class MultibatchingProblem(Problem):
     def __init__(self,
                  transport_types: list[TransportType],
@@ -84,6 +87,7 @@ class MultibatchingProblem(Problem):
         self.nb_transport_links = len(self.transport_links)
 
         self.product_to_index = {self.products[i]: i for i in range(self.nb_products)}
+        self.product_dict = {p.id : p for p in self.products}
         self.transport_types_to_index = {self.transport_types[i]: i for i in range(self.nb_transport_types)}
         self.locations_to_index = {self.locations[i]: i for i in range(self.nb_locations)}
         self.transport_links_to_index = {self.transport_links[i]: i for i in range(self.nb_transport_links)}
@@ -94,6 +98,9 @@ class MultibatchingProblem(Problem):
         self.loc_and_transport_type_to_transport_link = {(tl.location_l1.id, tl.location_l2.id,
                                                           tl.transport_type.id): tl
                                                          for tl in self.transport_links}
+        
+        self.transport_links_id_to_object = {transport_link.id : transport_link for transport_link in transport_links}
+
 
     def evaluate(self, variable: "MultibatchingSolution") -> dict[str, float]:
         transport_cost = sum([flow.transport_link.transport_type.cost
@@ -246,6 +253,8 @@ class MultibatchingProblem(Problem):
 
             for product, units in flow_item.product_packing.items():
                 # Check 5: Non-negative Packed Units
+                if units == 0:
+                    continue
                 if units < -epsilon:
                     print(f"Validation Error: Negative packed units for P{product.id} in packing {flow_item.product_packing}: {units}")
                     return False
@@ -258,6 +267,7 @@ class MultibatchingProblem(Problem):
 
                 # Check 3: Product-Transport Compatibility
                 if link.transport_type not in product.valid_transports:
+                    print(f"Units {units} of product {product}...")
                     print(f"Validation Error: Product P{product.id} not compatible with TR{link.transport_type.id} on link {link.location_l1.id}->{link.location_l2.id}")
                     return False
 
