@@ -50,7 +50,7 @@ modelAtomTemplates = [
       {'name':'countPartsInL','filter':lambda s: s.name=='countPartsInL', 'columns':['parts','part','amount']},
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
        {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to', 'part', 'amount']},
-       {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr', 'packing']},
+       {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr', 'amount']},
        {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'binNr']},
        {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['tr' ,'cost']},
        {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['tr' ,'cost']},
@@ -114,40 +114,121 @@ def compute_costs(modelIndex, all_data_frames):
         cprint("drawing picture ...")
         draw_figures(cost_df)
 
-def check_correctness(modelIndex, all_data_frames):
-    demand_supply_df = all_data_frames["demandSupply"]
+def getTo(to):
+    return to if '(' not in str(to) else str(to.split(',')[-1][:-1])
+
+def evaluate_flow(modelIndex, all_data_frames):
+    demand_supply_df = all_data_frames["demandOffer"]
     locations_df = all_data_frames["location"]
     parts_df = all_data_frames["part"]
-    transport_link_df = all_data_frames["transportLink"]
+    flow_df = all_data_frames["flow"]
+
+    for location in list(locations_df['location']):
+      demand_supply_location_df = demand_supply_df.loc[demand_supply_df['location']==location]
+      flow_out = flow_df.loc[flow_df['from']==location].copy()
+      flow_in = flow_df.loc[flow_df['to']==getTo(location)].copy()
+
+      for part in list(parts_df['part']):
+        total_in = total_out = 0
+        part_supply_demand_amount = demand_supply_location_df.loc[demand_supply_location_df['part']==part, 'amount'].values 
+        # check if supply_demand predicate exists
+        if part_supply_demand_amount.size > 0:
+            count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
+        else:
+            count_supply_demand_amount = 0
+        part_flow_in = flow_in.loc[flow_in['part']==part].copy()
+        part_flow_out = flow_out.loc[flow_out['part']==part].copy()
+        total_in = part_flow_in['amount'].values.astype(str).astype(int).sum() if not part_flow_in.empty else 0
+        total_out = part_flow_out['amount'].values.astype(str).astype(int).sum() if not part_flow_out.empty else 0
+            
+        if (count_supply_demand_amount + total_in - total_out) != 0:
+                print(f"{YELLOW}============================== Model {modelIndex} does not seem corect: {location}|{part} count_supply_demand_amount: {count_supply_demand_amount}, total_in: {total_in}, total_out: {total_out}:", 
+                    count_supply_demand_amount + total_in - total_out ,  f"=============================={RESET}")
+                print("in_flow_df")
+                print(part_flow_in)
+                print("out_flow_df")
+                print(part_flow_out)
+                sys.exit('exit')
+        
+    print(f"Model {modelIndex} seems correct")
+
+def evaluate_route_flow(modelIndex, all_data_frames):
+    demand_supply_df = all_data_frames["demandOffer"]
+    locations_df = all_data_frames["location"]
+    parts_df = all_data_frames["part"]
+    route_flow_df = all_data_frames["routeflow"]
+
+    for location in list(locations_df['location']):
+      demand_supply_location_df = demand_supply_df.loc[demand_supply_df['location']==location]
+      flow_out = flow_df.loc[flow_df['from']==location].copy()
+      flow_in = flow_df.loc[flow_df['to']==getTo(location)].copy()
+
+      for part in list(parts_df['part']):
+        total_in = total_out = 0
+        part_supply_demand_amount = demand_supply_location_df.loc[demand_supply_location_df['part']==part, 'amount'].values 
+        # check if supply_demand predicate exists
+        if part_supply_demand_amount.size > 0:
+            count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
+        else:
+            count_supply_demand_amount = 0
+        part_flow_in = flow_in.loc[flow_in['part']==part].copy()
+        part_flow_out = flow_out.loc[flow_out['part']==part].copy()
+        total_in = part_flow_in['amount'].values.astype(str).astype(int).sum() if not part_flow_in.empty else 0
+        total_out = part_flow_out['amount'].values.astype(str).astype(int).sum() if not part_flow_out.empty else 0
+            
+        if (count_supply_demand_amount + total_in - total_out) != 0:
+                print(f"{YELLOW}============================== Model {modelIndex} does not seem corect: {location}|{part} count_supply_demand_amount: {count_supply_demand_amount}, total_in: {total_in}, total_out: {total_out}:", 
+                    count_supply_demand_amount + total_in - total_out ,  f"=============================={RESET}")
+                print("in_flow_df")
+                print(part_flow_in)
+                print("out_flow_df")
+                print(part_flow_out)
+                sys.exit('exit')
+    print(f"Model {modelIndex} seems correct")
+
+def check_flow_correctness(modelIndex, all_data_frames):
+    demand_supply_df = all_data_frames["demandOffer"]
+    locations_df = all_data_frames["location"]
+    parts_df = all_data_frames["part"]
+    flow_df = all_data_frames["flow"]
 
     for location in list(locations_df['location']):
       demand_supply_location_df = demand_supply_df.loc[demand_supply_df['location']==location]
       for part in list(parts_df['part']):
             total_in = total_out = 0
             part_supply_demand_amount = demand_supply_location_df.loc[demand_supply_location_df['part']==part, 'amount'].values 
-            count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
+            if part_supply_demand_amount.size > 0:
+                count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
+            else:
+                count_supply_demand_amount = 0
+
+            out_flow_df = flow_df.loc[flow_df['from']==location].copy()
+            print(out_flow_df)
+            print("part", part)
+            if out_flow_df.empty:
+                out_flow_df = out_flow_df.loc[out_flow_df['part']==part].values
+        
+
+                print("out_flow_df", out_flow_df)
+                #out_flow_df[f'amount {str(part)}'] = out_flow_df['part'].apply(lambda x: str(x).count(str(part)))
             
-            out_transport_link_df = transport_link_df.loc[transport_link_df['from']==location].copy()
-            if not out_transport_link_df.empty:
-                out_transport_link_df[f'amount {str(part)}'] = out_transport_link_df['parts'].apply(lambda x: str(x).count(str(part)))
-                out_tl = out_transport_link_df[f'amount {str(part)}'] * out_transport_link_df['freq'].astype(str).astype(int)
-                total_out = out_tl.sum()
+                #out_fl = out_flow_df[f'amount {str(part)}'] * out_flow_df['amount'].astype(str).astype(int)
+                #total_out = out_fl.sum()
             
-            in_transport_link_df = transport_link_df.loc[transport_link_df['to']==location].copy()
-            if not in_transport_link_df.empty:
-                in_transport_link_df[f'amount {str(part)}'] = in_transport_link_df['parts'].apply(lambda x: str(x).count(str(part)))
-                in_tl = in_transport_link_df[f'amount {str(part)}'] * in_transport_link_df['freq'].astype(str).astype(int)
-                total_in = in_tl.sum()
+            in_flow_df = flow_df.loc[flow_df['to']==location].copy()
+            if not in_flow_df.empty:
+                total_in = in_flow_df.loc[in_flow_df['part']==part]["amount"].astype(str).astype(int).sum()
 
             if (count_supply_demand_amount + total_in - total_out) != 0:
                 print(f"{YELLOW}============================== Model {modelIndex} does not seem corect: {location}|{part} count_supply_demand_amount: {count_supply_demand_amount}, total_in: {total_in}, total_out: {total_out}:", 
                     count_supply_demand_amount + total_in - total_out ,  f"=============================={RESET}")
-                print("in_transport_link_df")
-                print(in_transport_link_df)
-                print("out_transport_link_df")
-                print(out_transport_link_df)
-                sys.exit()
+                print("in_flow_df")
+                print(in_flow_df)
+                print("out_flow_df")
+                print(out_flow_df)
+                sys.exit('exit')
     print(f"Model {modelIndex} seems correct")
+
             
 
 def get_programs_by_categories(categories: list[str]):
@@ -225,10 +306,16 @@ def solve_clingo(programs, max_models=1, ngo=False):
 
 
 def processModel(m, modelIndex):
-    global check_correctness_var, compute_costs_var
-    if check_correctness_var == True:        
-        cprint("check correctness ...")
-        check_correctness(modelIndex, all_data_frames)
+    global check_route_correctness_var, check_flow_correctness_var, compute_costs_var
+
+    cprint("evaluate flow correctness ...")
+    evaluate_flow(modelIndex, all_data_frames)
+    if check_flow_correctness_var == True:        
+        cprint("check flow correctness ...")
+        check_flow_correctness(modelIndex, all_data_frames)
+    if check_route_correctness_var == True:        
+        cprint("check route correctness ...")
+        check_route_correctness(modelIndex, all_data_frames)
     if compute_costs_var == True:   
         cprint("compute costs ...")
         compute_costs(modelIndex, all_data_frames)
@@ -293,12 +380,14 @@ def on_model(m: clingo.Model):
 def run_asp(): 
     global output_hundredth_model, outputfolder, start_time_solving, ctl, \
     foundModelIndex, analyzedModelIndex, showModel, print_details, \
-    exit_after_optimal_found, draw, check_correctness_var, compute_costs_var
+    exit_after_optimal_found, draw, check_route_correctness_var, compute_costs_var, check_flow_correctness_var
   
     parser = argparse.ArgumentParser(description="Runs logic-programs in sub-folders 'facts' and 'rules'.")
     parser.add_argument("-t", "--timeout", required=False, default=100, type=int, help="time out.")
     parser.add_argument("-d", "--details", required=False, default=False, help="show details on configuration.")
-    parser.add_argument("-ch", "--check_correctness", required=False, default=False, help="checks correctness on multi batching.")
+    parser.add_argument("-cr", "--check_route_correctness", required=False, default=False, help="checks route correctness on multi batching.")
+    parser.add_argument("-cf", "--check_flow_correctness", required=False, default=False, help="checks flow correctness on multi batching.")
+
     parser.add_argument("-co", "--compute_costs", required=False, default=False, help="compute costs on multi batching.")
 
     parser.add_argument("-f", "--draw", required=False, default=False, help="draw figures while running.")
@@ -336,7 +425,8 @@ def run_asp():
         print_details = json_data["print_details"]
         exit_after_optimal_found = json_data["exit_after_optimal_found"]
         draw = json_data["draw"]
-        check_correctness_var = json_data["check_correctness"]
+        check_route_correctness_var = json_data["check_route_correctness"]
+        check_flow_correctness_var = json_data["check_flow_correctness"]
         compute_costs_var = json_data["compute_costs"]
         program_folder = json_data["program_folder"]
 
@@ -355,7 +445,8 @@ def run_asp():
         exit_after_optimal_found = args.exit_after_optimal_found
         draw = args.draw
         all_results_folder = F'{args.outputfolder}'
-        check_correctness_var = args.check_correctness
+        check_route_correctness_var = args.check_route_correctness
+        check_flow_correctness_var = args.check_flow_correctness
         compute_costs_var = args.compute_costs
         program_folder = args.program_folder
         if args.timestamp_on_results_folder:
@@ -378,7 +469,7 @@ def run_asp():
     else:  
         print(f"{YELLOW}============================== {categories} =============================={RESET}") 
         outputfolder = f'{all_results_folder}'
-        solve_clingo(get_programs_by_categories(categories), max_nr_models, True)
+        solve_clingo(get_programs_by_categories(categories), max_nr_models, False)
         gc.collect()  
 
 if __name__ == "__main__":

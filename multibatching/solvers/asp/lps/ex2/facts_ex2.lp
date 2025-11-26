@@ -38,17 +38,16 @@ partVal(p1,1000).
 partVal(p2,600).
 
 
-% netSupplyDemand: part name, location, offer/ produced/able
-offer(p1,l1,10).
-offer(p2,l1,40).
-offer(p1,l2,20).
+demandOffer(p1,l1,10).
+demandOffer(p2,l1,40).
+demandOffer(p1,l2,20).
 
-% netSupplyDemand: part name, location, demand/ consumed/able
-demand(p2,l2,10).
-demand(p1,l5,10).
-demand(p2,l5,20).
-demand(p1,l6,20).
-demand(p2,l6,10).
+demandOffer(p2,l2,-10).
+demandOffer(p1,l5,-10).
+demandOffer(p2,l5,-20).
+demandOffer(p1,l6,-20).
+demandOffer(p2,l6,-10).
+
 
 % 'real' simple example including production plan constraints
 % productionPlan(fullFuselageShort,section34).

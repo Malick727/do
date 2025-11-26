@@ -1,7 +1,7 @@
 [
 {   "program_folder": "airbus",
     "timeout": 3600,
-    "max_nr_models": 1,
+    "max_nr_models": 0,
     "show_model": true,
     "show_dataframes": true,
     "all_results_folder": "output-ab",
@@ -11,7 +11,8 @@
     "print_details": true,
     "exit_after_optimal_found": false,
     "draw": false,
-    "check_correctness": false,
+    "check_flow_correctness": false,
+    "check_route_correctness": false,
     "compute_costs": false,
     "runs":
     {  

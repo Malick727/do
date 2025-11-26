@@ -13,7 +13,7 @@ input_file = f'{file_name}.json'
 
 output_file = "factsASP.lp"
 
-cap_size_divde = 1000000000
+cap_size_divde = 1
 
 # only used for text and not 
 def reformulate(text):
@@ -117,7 +117,8 @@ def json2asp(file_out):
                              + "".join(part_names) + "\n" +  "".join(part_sizes) + "\n" +  "".join(parts_tr) + "\n" \
                              + "\n% ----------------------- demands and offers -----------------------\n" + "".join(demandOffers) + "\n" \
                              + "% ----------------------- harbors -----------------------\n" \
-                             + "harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor)."
+                             + "harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor)." + "\n" \
+                             + "ship(kugelbake;feederContainerShip;truckGeneralCargo;oversizedTianjinRoRoShip;truckonRoRoShip;smallContainerShip;airbusMobileExpressRoRoShip;oversizedRiverTransport;seaLargeContainerShip;oversizedUnderDeckRoRoShip)."
 
         
         if alternative_names == True:
