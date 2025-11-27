@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 
 import numpy as np
@@ -7,7 +8,7 @@ from discrete_optimization.generic_tools.do_problem import (Problem, Solution, E
                                                             TypeObjective, TypeAttribute)
 from discrete_optimization.vrptw.problem import VRPTWProblem, VRPTWSolution
 from dataclasses import dataclass, field
-from typing import Hashable
+from typing import Hashable, Union
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,17 @@ class ProductInstance:
 
 @dataclass
 class RequirementRelation:
-    """If product_type_1 is delivered you should also deliver some product of type 2"""
+    """If product_type_1 is delivered some vehicle should also deliver some product of type 2 to the
+        client"""
     product_type_1: ProductType
     product_type_2: ProductType
+
+@dataclass
+class RequiredProductRelation:
+    """If product_type_1 is delivered some vehicle should also deliver some product of type 2 to the
+        client"""
+    product_type_1: ProductType
+    product_types_2: set[ProductType]
 
 
 @dataclass
@@ -39,8 +48,11 @@ class Node:
     name: str
     is_client: bool
     is_depot: bool
-    time_window: list[tuple[int, int]]
+    time_window: tuple[int, int]
     service_time: int
+    group_id: Hashable
+    mandatory: bool
+
 
     def __post_init__(self):
         if self.is_client:
@@ -51,6 +63,7 @@ class Node:
     def __hash__(self):
         return hash((self.id, self.name))
 
+TeamId = Hashable
 
 @dataclass
 class Vehicle:
@@ -61,6 +74,7 @@ class Vehicle:
     max_speed: float
     start_node: Node
     end_node: Node
+    team_id: TeamId = field(default=0)
     load_per_type: list[tuple[ProductType, int]] = field(init=False)
     instance_dict_per_type: dict[ProductType, list[ProductInstance]] = field(init=False)
 
@@ -78,13 +92,17 @@ class Vehicle:
                               for type_ in count_per_product_type]
         self.instance_dict_per_type = instance_dict_per_type
 
+    def __hash__(self):
+        return hash((self.id, self.name))
 
 class VrpTwAltSolution(Solution):
     problem: "VrpTwAlternativeDeliveryProblem"
 
     def __init__(self, problem: "VrpTwAlternativeDeliveryProblem",
-                 # List of node_index, time, set_of_product_delivered
-                 trajectories: list[list[tuple[int, int, set[ProductInstance]]]]):
+                 # for each vehicle List of node_index, time, set_of_product_delivered
+                 trajectories: list[list[tuple[int,
+                                               int,
+                                               set[ProductInstance]]]]):
         self.problem = problem
         self.trajectories = trajectories
 
@@ -98,20 +116,35 @@ class VrpTwAltSolution(Solution):
 class VrpTwAlternativeDeliveryProblem(Problem):
     def __init__(self, nodes: list[Node],
                  vehicles: list[Vehicle],
+                 # Graph ??
                  distance_matrix: np.ndarray,
                  travel_times: np.ndarray,
                  travel_costs: np.ndarray,
-                 requirement_relations: list[RequirementRelation] = None,
+                 # To store different kpi on edges.
+                 edge_cost_dict: dict[tuple[Vehicle, Node, Node],
+                                      dict[str, float]] = None,
+                 # For each vehicle, product type and node,
+                 # different kpi on delivery of this product to the Node.
+                 product_delivery_reward: dict[tuple[Vehicle, ProductType, Node],
+                                               dict[str, float]] = None,
+                 requirement_relations: list[Union[RequirementRelation, RequiredProductRelation]] = None,
                  other_data: dict = None):
         self.nodes = nodes
         self.vehicles = vehicles
         self.distance_matrix = distance_matrix
         self.travel_times = travel_times
         self.travel_costs = travel_costs
+
+        self.edge_cost_dict = edge_cost_dict
+        if self.edge_cost_dict is None:
+            self.edge_cost_dict = {}
+        self.product_delivery_reward = product_delivery_reward
+        if self.product_delivery_reward is None:
+            self.product_delivery_reward = {}
+
         self.requirement_relations = requirement_relations
         if self.requirement_relations is None:
             self.requirement_relations = []
-        self.other_data = other_data
 
         self.number_vehicles = len(self.vehicles)
         self.number_nodes = len(self.nodes)
@@ -125,7 +158,23 @@ class VrpTwAlternativeDeliveryProblem(Problem):
         }
         self.client_indices = {i for i, n in enumerate(self.nodes) if n.is_client}
 
-    def evaluate(self, variable: VRPTWSolution) -> dict[str, float]:
+        self.other_data = other_data
+        self.index_of_nodes_per_group = self.build_group_data()
+
+    def build_group_data(self):
+        index_of_nodes_per_group = defaultdict(lambda: [])
+        for i in range(self.number_nodes):
+            index_of_nodes_per_group[self.nodes[i].group_id].append(i)
+        return index_of_nodes_per_group
+
+    def build_team_data(self):
+        index_of_vehicle_per_team = defaultdict(lambda: [])
+        for i in range(self.number_vehicles):
+            index_of_vehicle_per_team[self.vehicles[i].team_id].append(i)
+        return index_of_vehicle_per_team
+
+
+    def evaluate(self, variable: VrpTwAltSolution) -> dict[str, float]:
         return {"dummy": 0}
 
     def satisfy(self, variable: VrpTwAltSolution) -> bool:
@@ -172,7 +221,7 @@ class VrpTwAlternativeDeliveryProblem(Problem):
 
                 # Check node time window (assuming single TW)
                 if not (node.time_window[0] <= arrival_time <= node.time_window[1]):
-                    print("Arrive outside timewindow")
+                    print("Arrive outside time-window")
                     return False  # Arrived outside time window
 
                 # Update departure time from this node
@@ -232,9 +281,14 @@ class VrpTwAlternativeDeliveryProblem(Problem):
         for node_index in self.client_indices:
             delivered_types = deliveries_at_node_by_type.get(node_index, set())
             for req in self.requirement_relations:
-                if req.product_type_1 in delivered_types and req.product_type_2 not in delivered_types:
-                    print("Requirement not met")
-                    return False  # Requirement not met
+                if isinstance(req, RequirementRelation):
+                    if req.product_type_1 in delivered_types and req.product_type_2 not in delivered_types:
+                        print("Requirement not met")
+                        return False  # Requirement not met
+                if isinstance(req, RequiredProductRelation):
+                    if req.product_type_1 in delivered_types and not(any(r in delivered_types for r in req.product_types_2)):
+                        print("Requirement not met")
+                        return False  # Requirement not met
             if not any(not t.is_renewable for t in delivered_types):
                 print(delivered_types)
                 print(f"Missing delivery for node index {node_index}")

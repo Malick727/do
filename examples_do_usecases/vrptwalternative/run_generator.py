@@ -3,12 +3,12 @@ import logging
 from vrp_tw_alternative_delivery.generator import generate_from_vrptw, VRPTWProblem, VrpTwAlternativeDeliveryProblem
 from vrp_tw_alternative_delivery.solvers.cpsat import CpSatVrpTwAlternative
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
-from discrete_optimization.vrptw.parser import parse_solomon
+from discrete_optimization.vrptw.parser import parse_vrptw_file
 from discrete_optimization.generic_tools.callbacks.loggers import ObjectiveLogger
 logging.basicConfig(level=logging.INFO)
 
 def run_generator():
-    problem = parse_solomon("homberger_200_customer_instances/R2_2_2.TXT")
+    problem = parse_vrptw_file("homberger_200_customer_instances/R2_2_2.TXT")
     problem = generate_from_vrptw(vrptw_problem=problem,
                                   nb_nodes_target=50,
                                   nb_vehicles_target=20)

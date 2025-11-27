@@ -11,11 +11,13 @@ from examples_do_usecases.multibatching.instance2 import init_instance
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver, ModelingMultiBatch
 from multibatching.solvers.column_generation import ColumnGenerationSolver
+from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMultibatchingSolver,
                                              PackingViaBinPacking, GreedyPackingForMultibatching)
 from multibatching.problem import MultibatchingProblem, MultibatchingSolution
-
+import logging
+logging.basicConfig(level=logging.INFO)
 def run_two_step():
     """
     Just run a solver that can compute either continuous or approximated flows,
@@ -102,6 +104,33 @@ def run_cp_after_milp():
     print(sum(problem.evaluate(sol).values()))
 
 
+def run_two_step_asp_binpack():
+    """
+    Just run a solver that can compute either continuous or approximated flows,
+     and then we simply postprocess it to get valid discrete transport with another "Packing" solver.
+    :return:
+    """
+    from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
+    from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
+    problem = parse_problem()
+    solver = TwoStepMultibatchingSolver(problem=problem)
+    params_cp = ParametersCp.default_cpsat()
+    params_cp.nb_process = 16
+    res = solver.solve(flow_solver=SubBrick(cls=CpsatMultibatchingSolver,
+                                            kwargs=dict(modeling=ModelingMultiBatch.FLOW,
+                                                        parameters_cp=params_cp,
+                                                        ortools_cpsat_solver_kwargs={"log_search_progress": True},
+                                                        time_limit=20)),
+                       packing_solver=SubBrick(cls=PackingViaBinPacking,
+                                               kwargs={"time_limit_per_link": 1,
+                                                       "bin_packing_solver": SubBrick(cls=AspBinPackingSolver,
+                                                                                      kwargs={})}))
+
+    sol1 = res.get_best_solution()
+    print(problem.evaluate(sol1), problem.satisfy(sol1))
+
+
+
 if __name__ == "__main__":
-    run_cp_after_milp()
+    run_two_step_asp_binpack()
 
