@@ -50,6 +50,7 @@ modelAtomTemplates = [
       {'name':'countPartsInL','filter':lambda s: s.name=='countPartsInL', 'columns':['parts','part','amount']},
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
        {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to', 'part', 'amount']},
+       {'name':'route','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr']},
        {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr', 'amount']},
        {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'binNr']},
        {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['tr' ,'cost']},
@@ -248,7 +249,7 @@ def solve_clingo(programs, max_models=1, ngo=False):
     print(f'--models={max_models}')
 
     ctl = clingo.Control(
-        ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=optN", "--parallel-mode=12"])
+        ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=optN", "--parallel-mode=12", "--heuristic=Domain"])
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     ctl.register_observer(myobs)
     myobs.start()#
@@ -308,8 +309,8 @@ def solve_clingo(programs, max_models=1, ngo=False):
 def processModel(m, modelIndex):
     global check_route_correctness_var, check_flow_correctness_var, compute_costs_var
 
-    cprint("evaluate flow correctness ...")
-    evaluate_flow(modelIndex, all_data_frames)
+    #cprint("evaluate flow correctness ...")
+    #evaluate_flow(modelIndex, all_data_frames)
     if check_flow_correctness_var == True:        
         cprint("check flow correctness ...")
         check_flow_correctness(modelIndex, all_data_frames)

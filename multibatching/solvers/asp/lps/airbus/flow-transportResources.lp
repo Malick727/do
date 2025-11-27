@@ -36,26 +36,39 @@ notVia2(From,To,Part) :- not via2(From,(_,_,To),Part,_), location(From), locatio
 
 #show flowWithoutRoute/3.
 
-:- routeflow(From,To,Part,_,N), flow(From,Loc,Part,Val), N>Val.
-:- routeflow(From,To,Part,_,(N,_)), flow(From,Loc,Part,Val), N>Val.
-:- routeflow(From,To,Part,_,(N,_)), flow(From,Loc,Part,Val), N>Val.
-:- routeflow(From,To,Part,_,(N,_,_)), flow(From,Loc,Part,Val), N>Val.
-:- routeflow(From,To,Part,_,(_,N,_)), flow(From,Loc,Part,Val), N>Val.
-:- routeflow(From,To,Part,_,(_,_,N)), flow(From,Loc,Part,Val), N>Val.
+1{route(From,To,Part,TR):
+% condition for direct
+direct(From,To,Part,TR);
+route(From,(Via1,To),Part,(TR1,TR2)): 
+% condition for via1
+via1(From,(Via1,To),Part,(TR1,TR2));
+% condition for via2
+route(From,(Via1,Via2,To),Part,(TR1,TR2,TR3)):
+via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3))
+}1 :- flow(From,To,Part,_), From!=To.
 
 1{routeflow(From,To,Part,TR,N1):
 % condition for direct
-direct(From,To,Part,TR),numFlowPart(Part,N1);
+direct(From,To,Part,TR), numFlowPart(Part,N1);
 routeflow(From,(Via1,To),Part,(TR1,TR2),(N1,N2)): 
 % condition for via1
-via1(From,(Via1,To),Part,(TR1,TR2)),numFlowPart(Part,N1),numFlowPart(Part,N2);
+via1(From,(Via1,To),Part,(TR1,TR2)), numFlowPart(Part,N1), numFlowPart(Part,N2);
 % condition for via2
-routeflow(From,(Via1,Via2,To),Part,(TR1,TR2,TR3),(N1,N2,N3)):
-via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3)),numFlowPart(Part,N1),numFlowPart(Part,N2),numFlowPart(Part,N3)
-}1 :- flow(From,To,Part,N), From!=To.
+routeflow(From,(Via1,Via2,To),Part,(TR1,TR2,TR3),(N,N,N)):
+via2(From,(Via1,Via2,To),Part,(TR1,TR2,TR3))
+}1 :- flow(From,To,Part,N), route(From,To,Part,TR).
 
-:- Val!=#sum{N1,TR1:routeflow(From,Loc,Part,TR1,N1);
-N2,TR2:routeflow(From,(_,Loc),Part,TR2,N2);
-N3,TR3:routeflow(From,(_,_,Loc),Part,TR3,N3)}, 
-flow(From,Loc,Part,Val).
+:- routeflow(From,To,Part,_,N), flow(From,To,Part,Val), N>Val.
+:- routeflow(From,To,Part,_,(N,_)), flow(From,To,Part,Val), N>Val.
+:- routeflow(From,To,Part,_,(N,_)), flow(From,To,Part,Val), N>Val.
+:- routeflow(From,To,Part,_,(N,_,_)), flow(From,To,Part,Val), N>Val.
+:- routeflow(From,To,Part,_,(_,N,_)), flow(From,To,Part,Val), N>Val.
+:- routeflow(From,To,Part,_,(_,_,N)), flow(From,To,Part,Val), N>Val.
+
+
+
+%:- Val!=#sum{N1,TR1:routeflow(From,Loc,Part,TR1,N1);
+%N2,TR2:routeflow(From,(_,Loc),Part,TR2,N2);
+%N3,TR3:routeflow(From,(_,_,Loc),Part,TR3,N3)}, 
+%flow(From,Loc,Part,Val).
 
