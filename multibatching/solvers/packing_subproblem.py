@@ -18,7 +18,8 @@ from discrete_optimization.binpack.problem import BinPackProblem, BinPackSolutio
 from discrete_optimization.binpack.solvers.cpsat import CpSatBinPackSolver, ModelingBinPack
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from multibatching.solvers import MultibatchingSolver
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter, \
+    SubBrickHyperparameter, SubBrick
 import logging
 
 logger = logging.getLogger(__name__)
@@ -244,13 +245,22 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
 
 
 class PackingViaBinPacking(PackingSubproblemSolver):
+    from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
     hyperparameters = [CategoricalHyperparameter("round_flow", choices=["int", "round"],
-                                                 default="round")]
+                                                 default="round"),
+                       SubBrickHyperparameter(name="bin_packing_solver",
+                                              choices=[CpSatBinPackSolver,
+                                                       AspBinPackingSolver],
+                                              default=SubBrick(cls=CpSatBinPackSolver,
+                                                               kwargs=dict(modeling=ModelingBinPack.SCHEDULING,
+                                                                           parameters_cp=ParametersCp.default_cpsat())))
+                       ]
 
     def solve(self, callbacks: Optional[list[Callback]] = None,
               time_limit_per_link=2,
               **kwargs: Any) -> ResultStorage:
         kwargs = self.complete_with_default_hyperparameters(kwargs)
+        bin_packing_solver: SubBrick = kwargs["bin_packing_solver"]
         solution = self.base_solution
         transport_link_flows: dict[TransportLink, list[dict[Product, int]]] = defaultdict(lambda: [])
         aggregated_link_flow: dict[TransportLink, dict[Product, int]] = defaultdict(lambda: dict())
@@ -288,23 +298,19 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                 cur_index += aggregated_link_flow[tl][p]
                 index_to_product.extend([p for _ in range(aggregated_link_flow[tl][p])])
             if len(list_items) == 0:
-                print()
-                print(aggregated_link_flow[tl])
                 continue
             problem_bin_pack = BinPackProblem(list_items=list_items,
                                               capacity_bin=int(capacity))
-            solver = CpSatBinPackSolver(problem=problem_bin_pack)
-            solver.init_model(modeling=ModelingBinPack.SCHEDULING)
-            p = ParametersCp.default_cpsat()
-            p.nb_process = 32
-            res = solver.solve(parameters_cp=p,
-                               time_limit=time_limit_per_link,
-                               ortools_cpsat_solver_kwargs={"log_search_progress": False})
-            if solver.status_solver == StatusSolver.UNSATISFIABLE:
-                logger.info(f"One flow post process failed.")
-                print(list_items, int(capacity))
+            solver = bin_packing_solver.cls(problem=problem_bin_pack)
+            solver.init_model(**bin_packing_solver.kwargs)
+            res = solver.solve(time_limit=time_limit_per_link,
+                               **bin_packing_solver.kwargs)
+            #if solver.status_solver == StatusSolver.UNSATISFIABLE:
+            #    logger.info(f"One flow post process failed.")
+            #    print(list_items, int(capacity))
             sol: BinPackSolution = res[-1][0]
             nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
+            logger.info(f"Found {nb_bins} bins")
             # print("nb bins ", nb_bins)
             packings = [PackingTransport(transport_link=tl,
                                          product_packing=

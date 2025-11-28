@@ -235,10 +235,10 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                                                  nb_packing=1)]
                                 if sum([pack.product_packing[p]*pack.nb_packing for pack in packings]) != val:
                                     print(val, sum([pack.product_packing[p]*pack.nb_packing for pack in packings]))
-                                    print("Nb product per trasnport", nb_product_per_transport, val,
+                                    print("Nb product per transport", nb_product_per_transport, val,
                                           nb_trips_per_link_per_product)
                                     print(packings)
-                                    print("Problemmmm")
+                                    print("Problem")
                                 packing_solution.extend(packings)
 
         return MultibatchingSolution(problem=self.problem, list_flows=packing_solution)
@@ -262,7 +262,8 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         total_size_per_product = {p: p.size*supply_per_product[p] for p in self.problem.products}
         total_size_in_problem = sum(total_size_per_product.values())
         # TODO : this is not totally correct, but fine.
-        max_nb_trip = int(total_size_in_problem/min([tt.capacity for tt in self.problem.transport_types
+        max_nb_trip = int(total_size_in_problem/min([tt.capacity
+                                                     for tt in self.problem.transport_types
                                                      if tt.capacity > 0]))
         # Could provide non-hardcoded upper bound for our variables...
         model = cp_model.CpModel()
@@ -281,14 +282,16 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             if loc2.id not in keys_inflow_location_product:
                 keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
             tr: TransportType = tl.transport_type
-            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_nb_trip,
+            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0,
+                                                          ub=max_nb_trip,
                                                           name=f'num_trips_{index_tl}')
             list_var_weight = []
             # for index_product in range(self.problem.nb_products):
             for index_product in range(self.problem.nb_products):
-                product = self.problem.products[index_product]
+                product: Product = self.problem.products[index_product]
                 max_flow_product = max(supply_per_product[product],
                                        demand_per_product[product])
+                # Create flow of product when the current transport type is valid for this product.
                 if tr in product.valid_transports:
                     if tr.capacity > product.size:
                         flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
@@ -352,10 +355,13 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             for index_product in index_products:
                 product = self.problem.products[index_product]
                 net_supply = location.net_supply.get(product, 0)
+                # Linear expressions (not constraint)
                 flow_in = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
                                                    for x in
                                                    keys_inflow_location_product.get(loc_id, {}).get(product.id,
                                                                                                     set())])
+                #flow_in = sum([flows_variables[x[0]][x[1]]
+                #               for x in keys_inflow_location_product.get(loc_id, {}).get(product.id, set())])
                 flow_out = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
                                                     for x in
                                                     keys_outflow_location_product.get(loc_id, {}).get(product.id,

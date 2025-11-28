@@ -6,7 +6,10 @@ from discrete_optimization.vrptw.problem import VRPTWProblem
 from vrp_tw_alternative_delivery.problem import ProductInstance, Vehicle, VrpTwAlternativeDeliveryProblem, ProductType, \
     Node, RequirementRelation
 
-
+# 54 target
+# 16 vehicle
+# 72 effector, 72 sensor
+# Type : 5/6 ?
 def generate_from_vrptw(
         vrptw_problem: VRPTWProblem,
         nb_nodes_target: int,
@@ -26,7 +29,8 @@ def generate_from_vrptw(
     pt_non_renew_2 = ProductType(id="pt_nonrenew_2", name="Special Goods", is_renewable=False)
 
     # Requirements: "Special Goods" require "Special Service"
-    relation = RequirementRelation(product_type_1=pt_non_renew_2, product_type_2=pt_renewable)
+    relation = RequirementRelation(product_type_1=pt_non_renew_2,
+                                   product_type_2=pt_renewable)
 
     # --- 2. Select Subset of Nodes ---
     if nb_nodes_target > vrptw_problem.nb_nodes:
@@ -57,7 +61,9 @@ def generate_from_vrptw(
             is_client=not is_depot,
             is_depot=is_depot,
             time_window=new_tw_list[0],
-            service_time=new_service_time
+            service_time=new_service_time,
+            group_id=new_id,
+            mandatory=True
         )
         new_nodes.append(new_node)
 
@@ -167,6 +173,13 @@ def generate_from_vrptw(
         travel_times=new_travel_times,
         travel_costs=new_travel_costs,
         requirement_relations=[relation],
+        edge_cost_dict={(v,n1,n2):{"distance": new_dist_matrix[n1.id,n2.id],
+                                   "cost": new_travel_costs[n1.id, n2.id]}
+                        for v in new_vehicles
+                        for n1 in new_nodes for n2 in new_nodes},
+        product_delivery_reward={(v, pt, n): {"reward": 1}
+                                 for v in new_vehicles for n in new_nodes
+                                 for pt in v.instance_dict_per_type},
         # client_needs=client_needs_spec
     )
     return problem

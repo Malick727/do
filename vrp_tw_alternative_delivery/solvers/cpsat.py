@@ -3,18 +3,43 @@ from typing import Optional, Any
 
 from discrete_optimization.generic_tools.ortools_cpsat_tools import OrtoolsCpSatSolver
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, Solution
+from pydantic.version import version_short
+
 from vrp_tw_alternative_delivery.problem import (VrpTwAlternativeDeliveryProblem,
                                                  VRPTWSolution,
                                                  VrpTwAltSolution,
                                                  RequirementRelation,
                                                  ProductInstance,
-                                                 ProductType, Vehicle)
+                                                 ProductType, Vehicle, RequiredProductRelation)
 from ortools.sat.python.cp_model import CpModel, CpSolverSolutionCallback, IntVar, LinearExpr
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import (CategoricalHyperparameter,
+                                                                                EnumHyperparameter)
+
+#TODO :
+
+# - write a version with relaxed visits.
+# - contrainte "cluster de client", quand un vehicle visite un ensemble de client C, alors quand il
+# part visiter un client en dehors de C, tu ne reviens pas dans C ensuite.
+# - Contraintes de type patrouille :
+# Lorsque les patrouilles sont "autonomes" i.e have all "RequirementRelations" inside, we should use them.
+#
+#
+from enum import Enum
+class GroupRuleConstraint(Enum):
+    FLOW_REASONING = 0
+    TIME_REASONING = 1
+
 
 class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
-    hyperparameters = [CategoricalHyperparameter(name="symmetry_breaking_vehicle", choices=[True, False],
-                                                 default=False)]
+    hyperparameters = [CategoricalHyperparameter(name="symmetry_breaking_vehicle",
+                                                 choices=[True, False],
+                                                 default=False),
+                       CategoricalHyperparameter(name="create_time_per_vehicle",
+                                                 choices=[True, False],
+                                                 default=False),
+                       EnumHyperparameter(name="group_constraint", enum=GroupRuleConstraint,
+                                          default=GroupRuleConstraint.FLOW_REASONING),
+                       ]
     problem: VrpTwAlternativeDeliveryProblem
 
     def __init__(self, problem: VrpTwAlternativeDeliveryProblem,
@@ -27,7 +52,9 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
 
     def init_model(self, **kwargs: Any) -> None:
         kwargs = self.complete_with_default_hyperparameters(kwargs)
+        relaxed = kwargs.get("relaxed", False)
         self.init_model_default(**kwargs)
+        # self.init_model_relaxed(**kwargs)
         pass
 
     def compute_equivalent_vehicle_classes(self):
@@ -40,7 +67,10 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
             dict_vehicle_per_feature[features].append(i)
         return dict_vehicle_per_feature
 
-    def init_model_default(self, **kwargs: Any) -> None:
+    def init_model_relaxed(self, **kwargs):
+        pass
+
+    def init_model_default(self, optional: bool = False, **kwargs: Any) -> None:
         self.cp_model = CpModel()
         arcs_dict = {}
         used_vehicle_dict = {}
@@ -48,6 +78,7 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
             arcs_dict_k, used_vehicle_k = self.create_flow_variables_per_vehicle(index_vehicle=k)
             arcs_dict.update(arcs_dict_k)
             used_vehicle_dict[k] = used_vehicle_k
+
         if kwargs["symmetry_breaking_vehicle"]:
             dict_vehicle_per_feature = self.compute_equivalent_vehicle_classes()
             not_used_per_class_key = {}
@@ -64,8 +95,9 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
             keys = list(not_used_per_class_key.keys())
             self.cp_model.add(not_used_per_class_key[keys[0]]-not_used_per_class_key[keys[1]] <= 2)
             self.cp_model.add(not_used_per_class_key[keys[1]]-not_used_per_class_key[keys[0]] <= 2)
-
-        self.create_many_constraints(arcs_dict=arcs_dict)
+        self.create_many_constraints(arcs_dict=arcs_dict,
+                                     optional=optional,
+                                     **kwargs)
         self.variables["used"] = used_vehicle_dict
         self.variables["arcs_dict"] = arcs_dict
         self.create_objectives()
@@ -109,7 +141,10 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
                     self.cp_model.add(sum_in == sum_out)
         return arcs_dict, used_vehicle
 
-    def create_many_constraints(self, arcs_dict: dict[tuple[int, int, int], IntVar]):
+    def create_many_constraints(self, arcs_dict: dict[tuple[int, int, int], IntVar],
+                                optional: bool = False, **kwargs):
+        create_time_per_vehicle = kwargs["create_time_per_vehicle"]
+        group_constraint: GroupRuleConstraint = kwargs["group_constraint"]
         visited_node_per_vehicle = {}
         delivered_to_node_per_vehicle = {}
         time_per_index = {}
@@ -117,18 +152,33 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
                            if self.problem.nodes[i].is_client]
         incoming_arc_to_i = {i: {x for x in arcs_dict if x[1] == i
                                  and x[0] != x[1]} for i in index_customers}
-        outgoing_arc_to_i = {i: {x for x in arcs_dict
+        outgoing_arc_from_i = {i: {x for x in arcs_dict
                                  if x[0] == i
                                  and x[0] != x[1]} for i in index_customers}
+        # Creating the time.
         for index in incoming_arc_to_i:
-            visited_node_per_vehicle[index] = {}
             node = self.problem.nodes[index]
             time_per_index[index] = self.cp_model.NewIntVar(lb=node.time_window[0],
                                                             ub=node.time_window[1],
                                                             name=f"arrival_time_{index}")
+        if create_time_per_vehicle:
+            time_per_index_per_vehicle = {}
+            horizon = max([n.time_window[1] for n in self.problem.nodes])
+            for index in incoming_arc_to_i:
+                #node = self.problem.nodes[index]
+                for index_vehicle in range(self.problem.number_vehicles):
+                    time_per_index_per_vehicle[(index, index_vehicle)] = (
+                        self.cp_model.NewIntVar(lb=0,
+                                                ub=horizon,
+                                                name=f"arrival_time_{index}_{index_vehicle}"))
+
+
+        for index in incoming_arc_to_i:
+            visited_node_per_vehicle[index] = {}
+
             for index_vehicle in range(self.problem.number_vehicles):
                 inc_ = {x for x in incoming_arc_to_i[index] if x[2] == index_vehicle}
-                out_ = {x for x in outgoing_arc_to_i[index] if x[2] == index_vehicle}
+                out_ = {x for x in outgoing_arc_from_i[index] if x[2] == index_vehicle}
                 visited_index_per_vehicle = self.cp_model.NewBoolVar(name=f"{index}_visited_by_{index_vehicle}")
                 self.cp_model.add(visited_index_per_vehicle == sum(arcs_dict[c] for c in inc_))
                 self.cp_model.add(visited_index_per_vehicle == sum(arcs_dict[c] for c in out_))
@@ -141,7 +191,7 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
                                                                         f"{index_vehicle}_to_{index}")
                     delivered_to_node_per_vehicle[(index, index_vehicle, type_product)] = delivered_prod_type
                     keys_product_by_vehicle.append((index, index_vehicle, type_product))
-                # Index is visited per the vehicle <-> at least one product is visited.
+                # Index is visited per the vehicle <-> at least one product is delivered.
                 (self.cp_model.add(sum([delivered_to_node_per_vehicle[x] for x in keys_product_by_vehicle]) >= 1)
                  .OnlyEnforceIf(visited_index_per_vehicle))
                 (self.cp_model.add(sum([delivered_to_node_per_vehicle[x] for x in keys_product_by_vehicle]) == 0)
@@ -157,8 +207,46 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
             time_per_index[("end", index_vehicle)] = self.cp_model.NewIntVar(lb=0,
                                                                              ub=self.nodes[index_end_node].time_window[1],
                                                                              name=f"end_{index_vehicle}")
-
+        if optional:
+            is_visited = {}
+            for index in range(self.problem.number_nodes):
+                node = self.problem.nodes[index]
+                if node.mandatory:
+                    is_visited[index] = 1
+                else:
+                    is_visited[index] = self.cp_model.NewBoolVar(name=f"is_visited_{index}")
+        else:
+            is_visited = {i: 1 for i in range(self.problem.number_nodes)}
         # Timings constraints
+        if create_time_per_vehicle:
+            # Synchronize...
+            for (index, index_vehicle) in time_per_index_per_vehicle:
+                (self.cp_model.Add(time_per_index_per_vehicle[(index, index_vehicle)] == time_per_index[index])
+                 .OnlyEnforceIf(visited_node_per_vehicle[index][index_vehicle]))
+
+            for i in range(self.problem.number_nodes):
+                incoming_arc_to_i = {x for x in arcs_dict if x[1] == i}
+                for arc in incoming_arc_to_i:
+                    if arc[0] == arc[1]:
+                        # Ignore loops
+                        continue
+                    vehicle_index = arc[2]
+                    vehicle: Vehicle = self.problem.vehicles[vehicle_index]
+                    start_node = vehicle.start_node
+                    index_start_node = self.id_to_index[start_node.id]
+                    end_node = vehicle.end_node
+                    index_end_node = self.id_to_index[end_node.id]
+                    if arc[0] == index_start_node:
+                        t0 = time_per_index[(index_start_node, vehicle_index)]
+                    else:
+                        t0 = time_per_index_per_vehicle[(arc[0], vehicle_index)]
+                    if arc[1] == index_end_node:
+                        t1 = time_per_index[("end", vehicle_index)]
+                    else:
+                        t1 = time_per_index_per_vehicle[(arc[1], vehicle_index)]
+                    # TODO : put specific vehicle speed constraint here.
+                    self.cp_model.add(t1 >= t0 + int(self.problem.distance_matrix[arc[0], arc[1]])
+                                      + int(self.problem.nodes[arc[0]].service_time)).OnlyEnforceIf(arcs_dict[arc])
         for i in range(self.problem.number_nodes):
             incoming_arc_to_i = {x for x in arcs_dict if x[1] == i}
             for arc in incoming_arc_to_i:
@@ -182,23 +270,79 @@ class CpSatVrpTwAlternative(OrtoolsCpSatSolver):
                 # TODO : put specific vehicle speed constraint here.
                 self.cp_model.add(t1 >= t0 + int(self.problem.distance_matrix[arc[0], arc[1]])
                                   + int(self.problem.nodes[arc[0]].service_time)).OnlyEnforceIf(arcs_dict[arc])
+                # TODO : Minimum Speed ??
+                #self.cp_model.add(t1 <= t0 + int(self.problem.distance_matrix[arc[0], arc[1]])
+                #                  + int(self.problem.nodes[arc[0]].service_time)).OnlyEnforceIf(arcs_dict[arc])
+
+
+        if group_constraint == GroupRuleConstraint.FLOW_REASONING:
+            for group in self.problem.index_of_nodes_per_group:
+                indexes_in_group = self.problem.index_of_nodes_per_group[group]
+                other_indexes = {i for i in range(self.problem.number_nodes) if i not in indexes_in_group}
+                incoming_i_j = {(i, j) for i in other_indexes for j in indexes_in_group}
+                outcoming_j_i = {(j, i) for i in other_indexes for j in indexes_in_group}
+                for index_vehicle in range(self.problem.number_vehicles):
+                    arcs_in = {(i, j, index_vehicle) for (i, j) in incoming_i_j
+                               if (i, j, index_vehicle) in arcs_dict}
+                    self.cp_model.add_at_most_one([arcs_dict[arc] for arc in arcs_in])
+                    arcs_out = {(i, j, index_vehicle) for (i, j) in outcoming_j_i
+                                if (i, j, index_vehicle) in arcs_dict}
+                    self.cp_model.add_at_most_one([arcs_dict[arc] for arc in arcs_out])
+
+        if group_constraint == GroupRuleConstraint.TIME_REASONING:
+            # Group constraint : This seems rather complicated, should we maybe include them lazily
+            # #Group*#Vehicle*(nbnodesPerGroup=#Nodes/#group)*#Nodes*#Nodes/#Group
+            # = #Vehicle*#Nodes^3/#Group constraint.
+            if create_time_per_vehicle:
+                for group in self.problem.index_of_nodes_per_group:
+                    indexes = self.problem.index_of_nodes_per_group[group]
+                    for vehicle in range(self.problem.number_vehicles):
+                        for i in indexes:
+                            outgoing_outside = {x for x in outgoing_arc_from_i[i]
+                                                if x[2] == vehicle
+                                                and x[1] not in indexes}
+                            for arc in outgoing_outside:
+                                for j in indexes:
+                                    if i == j:
+                                        continue
+                                    (self.cp_model.Add(time_per_index_per_vehicle[(j, vehicle)]<=time_per_index[i])
+                                     .only_enforce_if(self.variables["arcs_dict"][arc]))
 
         # Requirements constraints
         for index in index_customers:
             keys = {key for key in delivered_to_node_per_vehicle if key[0] == index}
             # Index in visited by at least one vehicle
-            self.cp_model.add_at_least_one([visited_node_per_vehicle[index][vehicle]
-                                            for vehicle in visited_node_per_vehicle[index]])
+            # For the classical vrp : it would be add_exactly_one instead.
+            # For the optional visit version : no constraint at all or something like
+            # sum(is_node_visited[node])>=0.5*len(nodes)
             consumable_delivery_keys = {key for key in keys
                                         if not key[2].is_renewable}
-            self.cp_model.add_at_least_one([delivered_to_node_per_vehicle[key]
-                                            for key in consumable_delivery_keys])
+            if not optional: # all nodes are visited..
+                self.cp_model.add_at_least_one([visited_node_per_vehicle[index][vehicle]
+                                                for vehicle in visited_node_per_vehicle[index]])
+                self.cp_model.add_at_least_one([delivered_to_node_per_vehicle[key]
+                                                for key in consumable_delivery_keys])
+            else:
+                self.cp_model.add(sum([visited_node_per_vehicle[index][vehicle]
+                                       for vehicle in visited_node_per_vehicle[index]])>=1).OnlyEnforceIf(
+                    is_visited[index])
+                self.cp_model.add(sum([delivered_to_node_per_vehicle[key]
+                                       for key in consumable_delivery_keys])>=1).OnlyEnforceIf(is_visited[index])
             for req in self.problem.requirement_relations:
-                req: RequirementRelation
-                prod1 = req.product_type_1
-                prod2 = req.product_type_2
-                keys_prod1 = {key for key in keys if key[2] == prod1}
-                keys_prod2 = {key for key in keys if key[2] == prod2}
+                keys_prod1 = set()
+                keys_prod2 = set()
+                if isinstance(req, RequirementRelation):
+                    req: RequirementRelation
+                    prod1 = req.product_type_1
+                    prod2 = req.product_type_2
+                    keys_prod1 = {key for key in keys if key[2] == prod1}
+                    keys_prod2 = {key for key in keys if key[2] == prod2}
+                elif isinstance(req, RequiredProductRelation):
+                    req: RequiredProductRelation
+                    prod1 = req.product_type_1
+                    prod2 = req.product_types_2
+                    keys_prod1 = {key for key in keys if key[2] == prod1}
+                    keys_prod2 = {key for key in keys if key[2] in prod2}
                 if len(keys_prod1) > 0 and len(keys_prod2) > 0:
                     sum_prod1 = sum([delivered_to_node_per_vehicle[key] for key in keys_prod1])
                     sum_prod2 = sum([delivered_to_node_per_vehicle[key] for key in keys_prod2])
