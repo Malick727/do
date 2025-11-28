@@ -49,10 +49,10 @@ modelAtomTemplates = [
       {'name':'part','filter':lambda s: s.name=='part', 'columns':['part']},
       {'name':'countPartsInL','filter':lambda s: s.name=='countPartsInL', 'columns':['parts','part','amount']},
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
-       {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to', 'part', 'amount']},
+       {'name':'flow','filter':lambda s: s.name=='flow', 'columns':['from' ,'to','part', 'tr', 'amount']},
        {'name':'route','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr']},
        {'name':'routeflow','filter':lambda s: s.name=='routeflow', 'columns':['from' ,'to', 'part', 'tr', 'amount']},
-       {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'binNr']},
+       {'name':'transportLink','filter':lambda s: s.name=='transportLink', 'columns':['from' ,'to', 'tr', 'amount']},
        {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['tr' ,'cost']},
        {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['tr' ,'cost']},
        {'name':'transportSpeed','filter':lambda s: s.name=='transportSpeed', 'columns':['tr' ,'cost']},
@@ -153,16 +153,17 @@ def evaluate_flow(modelIndex, all_data_frames):
         
     print(f"Model {modelIndex} seems correct")
 
-def evaluate_route_flow(modelIndex, all_data_frames):
+
+def evaluate_transportLinks(modelIndex, all_data_frames):
     demand_supply_df = all_data_frames["demandOffer"]
     locations_df = all_data_frames["location"]
     parts_df = all_data_frames["part"]
-    route_flow_df = all_data_frames["routeflow"]
+    transportLink_df = all_data_frames["transportLink"]
 
     for location in list(locations_df['location']):
       demand_supply_location_df = demand_supply_df.loc[demand_supply_df['location']==location]
-      flow_out = flow_df.loc[flow_df['from']==location].copy()
-      flow_in = flow_df.loc[flow_df['to']==getTo(location)].copy()
+      transportLink_out = transportLink_df.loc[transportLink_df['from']==location].copy()
+      transportLink_in = transportLink_df.loc[transportLink_df['to']==getTo(location)].copy()
 
       for part in list(parts_df['part']):
         total_in = total_out = 0
@@ -172,65 +173,21 @@ def evaluate_route_flow(modelIndex, all_data_frames):
             count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
         else:
             count_supply_demand_amount = 0
-        part_flow_in = flow_in.loc[flow_in['part']==part].copy()
-        part_flow_out = flow_out.loc[flow_out['part']==part].copy()
-        total_in = part_flow_in['amount'].values.astype(str).astype(int).sum() if not part_flow_in.empty else 0
-        total_out = part_flow_out['amount'].values.astype(str).astype(int).sum() if not part_flow_out.empty else 0
+        part_flow_in = transportLink_in.loc[transportLink_in['part']==part].copy()
+        part_flow_out = transportLink_out.loc[transportLink_out['part']==part].copy()
+        total_in = transportLink_in['amount'].values.astype(str).astype(int).sum() if not part_flow_in.empty else 0
+        total_out = transportLink_out['amount'].values.astype(str).astype(int).sum() if not part_flow_out.empty else 0
             
         if (count_supply_demand_amount + total_in - total_out) != 0:
                 print(f"{YELLOW}============================== Model {modelIndex} does not seem corect: {location}|{part} count_supply_demand_amount: {count_supply_demand_amount}, total_in: {total_in}, total_out: {total_out}:", 
                     count_supply_demand_amount + total_in - total_out ,  f"=============================={RESET}")
-                print("in_flow_df")
+                print("part_flow_in")
                 print(part_flow_in)
-                print("out_flow_df")
+                print("part_flow_out")
                 print(part_flow_out)
                 sys.exit('exit')
-    print(f"Model {modelIndex} seems correct")
-
-def check_flow_correctness(modelIndex, all_data_frames):
-    demand_supply_df = all_data_frames["demandOffer"]
-    locations_df = all_data_frames["location"]
-    parts_df = all_data_frames["part"]
-    flow_df = all_data_frames["flow"]
-
-    for location in list(locations_df['location']):
-      demand_supply_location_df = demand_supply_df.loc[demand_supply_df['location']==location]
-      for part in list(parts_df['part']):
-            total_in = total_out = 0
-            part_supply_demand_amount = demand_supply_location_df.loc[demand_supply_location_df['part']==part, 'amount'].values 
-            if part_supply_demand_amount.size > 0:
-                count_supply_demand_amount = int(str(part_supply_demand_amount[0]))
-            else:
-                count_supply_demand_amount = 0
-
-            out_flow_df = flow_df.loc[flow_df['from']==location].copy()
-            print(out_flow_df)
-            print("part", part)
-            if out_flow_df.empty:
-                out_flow_df = out_flow_df.loc[out_flow_df['part']==part].values
         
-
-                print("out_flow_df", out_flow_df)
-                #out_flow_df[f'amount {str(part)}'] = out_flow_df['part'].apply(lambda x: str(x).count(str(part)))
-            
-                #out_fl = out_flow_df[f'amount {str(part)}'] * out_flow_df['amount'].astype(str).astype(int)
-                #total_out = out_fl.sum()
-            
-            in_flow_df = flow_df.loc[flow_df['to']==location].copy()
-            if not in_flow_df.empty:
-                total_in = in_flow_df.loc[in_flow_df['part']==part]["amount"].astype(str).astype(int).sum()
-
-            if (count_supply_demand_amount + total_in - total_out) != 0:
-                print(f"{YELLOW}============================== Model {modelIndex} does not seem corect: {location}|{part} count_supply_demand_amount: {count_supply_demand_amount}, total_in: {total_in}, total_out: {total_out}:", 
-                    count_supply_demand_amount + total_in - total_out ,  f"=============================={RESET}")
-                print("in_flow_df")
-                print(in_flow_df)
-                print("out_flow_df")
-                print(out_flow_df)
-                sys.exit('exit')
     print(f"Model {modelIndex} seems correct")
-
-            
 
 def get_programs_by_categories(categories: list[str]):
     programs = []
@@ -310,7 +267,8 @@ def processModel(m, modelIndex):
     global check_route_correctness_var, check_flow_correctness_var, compute_costs_var
 
     #cprint("evaluate flow correctness ...")
-    #evaluate_flow(modelIndex, all_data_frames)
+    evaluate_flow(modelIndex, all_data_frames)
+    #evaluate_transportLinks(modelIndex, all_data_frames)
     if check_flow_correctness_var == True:        
         cprint("check flow correctness ...")
         check_flow_correctness(modelIndex, all_data_frames)
