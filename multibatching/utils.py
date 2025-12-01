@@ -1041,7 +1041,7 @@ def generate_multibatching_problem(
                 # Each TT will be used at most once for a given (loc1, loc2) pair in this loop.
 
                 link = TransportLink(
-                    #id=current_link_id,  # Assign a unique ID for each link
+                    id=current_link_id,  # Assign a unique ID for each link
                     location_l1=loc1,
                     location_l2=loc2,
                     distance=round(random.uniform(min_dist, max_dist), 1),
