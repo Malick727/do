@@ -245,12 +245,13 @@ class GreedyPackingForMultibatching(PackingSubproblemSolver):
 
 
 class PackingViaBinPacking(PackingSubproblemSolver):
-    from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
+    #from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
     hyperparameters = [CategoricalHyperparameter("round_flow", choices=["int", "round"],
                                                  default="round"),
                        SubBrickHyperparameter(name="bin_packing_solver",
                                               choices=[CpSatBinPackSolver,
-                                                       AspBinPackingSolver],
+                                                       #AspBinPackingSolver
+                                                       ],
                                               default=SubBrick(cls=CpSatBinPackSolver,
                                                                kwargs=dict(modeling=ModelingBinPack.SCHEDULING,
                                                                            parameters_cp=ParametersCp.default_cpsat())))
