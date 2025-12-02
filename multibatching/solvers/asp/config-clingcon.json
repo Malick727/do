@@ -1,0 +1,25 @@
+[
+{   "program_folder": "airbus",
+    "run_clingcon": true,
+    "timeout": 3600,
+    "max_nr_models": 0,
+    "show_model": true,
+    "show_dataframes": true,
+    "all_results_folder": "output-clingcon",
+    "timestamp_on_results_folder": false,
+    "example": false,
+    "output_hundredth_model": false,
+    "print_details": true,
+    "exit_after_optimal_found": false,
+    "draw": false,
+    "check_clingcon_flow" : true,
+    "check_flow_correctness": false,
+    "check_route_correctness": false,
+    "compute_costs": false,
+    "runs":
+    {  
+    },
+    "__alternatives": 
+    {  }
+}
+]

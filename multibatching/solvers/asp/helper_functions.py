@@ -46,17 +46,6 @@ def get_artifacts_no_hidden_files(type: str):
     return list(map(lambda x: './' + type + '/' + x, os.listdir('./' + type)))
 
 
-def get_programs_by_categories(categories: list[str]):
-    programs = []
-    for category in categories:
-        if os.path.isdir(category):
-            programs += get_artifacts(category)
-        elif os.path.isfile(category):
-            programs += [category]
-        else:
-            print(f"Folder or file \'{category}\' does not exist.")
-    return programs
-
 def get_programs_by_categories_no_hidden(categories: list[str]):
     programs = []
     for category in categories:
@@ -86,3 +75,83 @@ def read_files_to_string(file_list, separator="\n"):
             print(f"Error reading '{filename}': {e}")
 
     return separator.join(accumulated_content)
+
+def cprint(Text):
+    global print_details
+    if print_details:
+        print(Text)
+
+def get_programs_by_categories(categories: list[str]):
+    programs = []
+    for category in categories:
+        if os.path.isdir(category):
+            programs += get_artifacts(category)
+        elif os.path.isfile(category):
+            programs += [category]
+        else:
+            print(f"Folder or file \'{category}\' does not exist.")
+    return programs
+
+
+
+def solve_clingo(programs, max_models=1, ngo=False):
+    global start_solving, produced_at_atoms, ctl
+    print('Configuring Clingo ...')
+    print(f'--models={max_models}')
+
+    ctl = clingo.Control(
+        ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=optN", "--parallel-mode=12", "--heuristic=Domain"])
+    print(f'Configuration Keys: {ctl.configuration.solve.keys}')
+    ctl.register_observer(myobs)
+    myobs.start()#
+    
+    print("programs", programs)
+    if ngo==True:
+        print(f"=== NGO: Encoding Optimization ===")
+        all_programs = " ".join(programs)
+        command1 = f"cat {all_programs} > encoding.lp" 
+        command2 = " cat encoding.lp | ngo > new_encoding.lp"
+        
+        programs = ['new_encoding.lp']
+        # 5. Execute the combined pipeline
+        try:
+        
+            result1 = subprocess.run(
+                command1,
+                shell=True,
+                check=True,  # Raise CalledProcessError on non-zero exit code
+                capture_output=True,
+                text=True
+            )
+            
+            print("\n✅ Merge completed successfully!")
+
+            result2 = subprocess.run(
+                command2,
+                shell=True,
+                check=True,  # Raise CalledProcessError on non-zero exit code
+                capture_output=True,
+                text=True
+            )
+            print(f"The optimized logic program is in: **new_encoding.lp**")
+
+        except subprocess.CalledProcessError as e:
+            print(f"\n❌ Error during command execution (Exit Code {e.returncode}):")
+            print(f"Stderr from ngo: {e.stderr}")
+        except FileNotFoundError:
+            print("\n❌ Error: The 'cat' or 'ngo' command was not found.")
+
+    print(f"=== Loading programs: {programs} ===")
+    for p in programs:
+        ctl.load(p)
+    start_time_grounding = time.process_time()
+
+    print(f"=== Grounding programs: {programs} ... ===")
+    ctl.ground([("base", [])])
+    end_time_grounding = time.process_time()
+    print(f"=== Grounding done ({round((time.process_time() - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
+    
+    start_solving = time.process_time()
+    res = ctl.solve(on_model=on_model)
+    ctl.cleanup()
+    return res
