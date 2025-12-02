@@ -12,27 +12,6 @@ from multibatching.problem import (MultibatchingProblem,
 # --- Parsing Function ---
 
 
-def mapToAsp(predicateConstantsDict):
-    aspString = "".join(f"{predicate}({','.join(str(n) for n in constants)}).\n" for predicate, constants in predicateConstantsDict.items())
-    return aspString
-
-def parse_asp_model_to_solution(model):
-
-    
-    returns a list of 
-class PackingTransport:
-    transport_link: TransportLink
-    id : int
-    location_l1: Location
-    location_l2: Location
-    distance: int
-    transport_type: TransportType
-    max_trips: Optional[int] = field(repr=True, hash=False, default=None)
-
-
-
-    product_packing: dict[Product, int]
-    nb_packing: int
 
 def parse_problem_to_facts(mbp):
     output_folder = os.path.join(this_folder, "lps/airbus/")
