@@ -15,6 +15,8 @@ from discrete_optimization.generic_tools.study import Hdf5Database
 # study_name = "msrcpsp"
 study_name = "sm-study"
 # study_name = "workforce-scheduling-study-0"
+study_name = "rcpsp-study-cpsat-vs-hexaly-vs-optal-greedy-sm"
+study_name = "jsp-study-cpsat-vs-hexaly-vs-optalcp-vs-tempo-vs-cpo-"
 # retrieve data
 with Hdf5Database(f"{study_name}.h5") as database:
     results = database.load_results()
