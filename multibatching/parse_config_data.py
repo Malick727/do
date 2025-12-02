@@ -11,6 +11,93 @@ from multibatching.problem import (MultibatchingProblem,
 
 # --- Parsing Function ---
 
+
+def mapToAsp(predicateConstantsDict):
+    aspString = "".join(f"{predicate}({','.join(str(n) for n in constants)}).\n" for predicate, constants in predicateConstantsDict.items())
+    return aspString
+
+def parse_asp_model_to_solution(model):
+
+    
+    returns a list of 
+class PackingTransport:
+    transport_link: TransportLink
+    id : int
+    location_l1: Location
+    location_l2: Location
+    distance: int
+    transport_type: TransportType
+    max_trips: Optional[int] = field(repr=True, hash=False, default=None)
+
+
+
+    product_packing: dict[Product, int]
+    nb_packing: int
+
+def parse_problem_to_facts(mbp):
+    output_folder = os.path.join(this_folder, "lps/airbus/")
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    with open(os.path.join(output_folder, output_file), 'w') as file_out:
+        
+        
+        tp_name_asp =  "\n".join(f"transportationResource({tp.name})." for tp in mbp.transport_types)
+        tp_co2_asp = "\n".join(f"transportCO2({tp.name},{tp.emissions})." for tp in mbp.transport_types)
+        tp_cost_asp = "\n".join(f"transportCost({tp.name},{tp.cost})." for tp in mbp.transport_types)
+        tp_cap_asp =  "\n".join(f"transportCapacity({tp.name},{tp.capacity})." for tp in mbp.transport_types)
+        tp_speed_asp = "\n".join(f"transportSpeed({tp.name},{tp.speed})." for tp in mbp.transport_types)
+        
+        transportationsString = tp_name_asp + tp_co2_asp + tp_cost_asp + tp_cap_asp + tp_speed_asp
+        file_out.writelines(transportationsString)
+    
+        p_name_asp = "\n".join(f"part({product.name})." for product in mbp.products)
+        p_size_asp = "\n".join(f"part({product.name},{product.size})." for product in mbp.products)
+        p_validtp_asp = ""
+        for product in mbp.products:
+            p_validtp_asp += "\n".join(f"partTR({product.name},{validtp})." for validtp in products.valid_transports)
+        
+        productString = p_name_asp + p_size_asp + p_validtp_asp
+        file_out.writelines(productString)
+
+        loc_name_asp = "\n".join(f"location({location.name})." for location in mbp.locations)
+        for location in mbp.locations:
+            net_supply_asp = "\n".join(f"demandOffer({location.name},{product},{val})." for for product, val in location.net_supply.items())
+        locationString = loc_name_asp + net_supply_asp
+        file_out.writelines(locationString)
+
+        tp_cost_dict = {tp:tp.cost for tp in mbp.transport_types}
+        routes_asp =  "\n".join(f"route({tk.location_l1},{tk.location_l2},{tk.transport_type},{tk.distance},{compute_costs(tk.distance,tp_cost_dict.get(tp))})." for for tk mbp.transport_links)
+        file_out.writelines(routes_asp)
+
+
+def compute_costs(distance,cost):
+    return distance*cost
+
+
+
+    
+
+
+    json2asp(file_out)
+    output_file = "factsASP.lp"
+
+    MultibatchingProblem(
+        transport_types=list(transport_types_map.values()),
+        products=list(products_map.values()),
+        locations=locations_list,
+        transport_links=transport_links_list,
+        capital_factor=settings["capitalCosts"],
+        # co2_costs=settings["co2Costs"]
+    )
+
+
+
+    
+
+
+
+
+
 def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
     """
     Parses a JSON dictionary into a MultibatchingProblem object.

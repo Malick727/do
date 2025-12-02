@@ -67,6 +67,7 @@ def json2asp(file_out):
         routes_data = json_data["routes"]
         routes = ""
 
+        idx = 0
         for route in routes_data:
             route_dict = routes_data.get(route)
             source = location_name_id_mapping.get(route_dict["from"])
@@ -76,7 +77,8 @@ def json2asp(file_out):
                 tr_name = tr_name_id_mapping.get(tr_id)
                 distance = int(tr_dict["distance"])
                 costs = int(tr_id_cost_mapping.get(tr_id) * distance)
-                routes += (f"route({source},{destination},{tr_name},{distance},{costs}).\n")
+                routes += (f"route({idx},{source},{destination},{tr_name},{distance},{costs}).\n")
+                idx += 1
 
     
 
@@ -139,3 +141,9 @@ if not os.path.exists(output_folder):
 with open(os.path.join(output_folder, output_file), 'w') as file_out:
     json2asp(file_out)
     print(f"successfully parsed ./{folder}/{input_file} and created {output_file} saved in {output_folder}.")
+
+
+#def mapToAsp(predicateConstantsDict):
+#    aspString = "".join(f"{predicate}({','.join(str(n) for n in constants)}).\n" for predicate, constants in predicateConstantsDict.items())
+#    return aspString
+

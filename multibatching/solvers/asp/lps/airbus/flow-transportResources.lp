@@ -6,7 +6,7 @@ partTR(Part,intrasite) :- part(Part).
 
 root(eARFullFuselage). 
 
-total_supply(P, S) :- S = #sum { V*2 : demandOffer(P,_,V), V > 0 }, part(P).
+%total_supply(P, S) :- S = #sum { V*2 : demandOffer(P,_,V), V > 0 }, part(P).
 
 % 2. ROBUST DEMAND/OFFER
 has_demand(P, L) :- demandOffer(P, L, V), V < 0.
@@ -23,17 +23,18 @@ required_net(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
 &dom { N..N } = req(P,L) :- required_net(P, L, N).
 
 %%%
-possible_flow(From, To, TR, P) :- route(From, To, TR, _, _), part(P), not root(P), transportCapacity(TR, Cap), Cap>0.
+possible_flow(From, To, TR, P) :- route(_, From, To, TR, _,_), part(P), not root(P), transportCapacity(TR, Cap), Cap>0.
 
 {partOnFlow(From, To, TR, P)} :- possible_flow(From, To, TR, P).
-
 
 active_flow(From, To, TR) :- partOnFlow(From, To, TR, _).
 
 %:- partOnFlow(From, To, TR, P), partSize(P,S), transportCapacity(TR, Cap), S > Cap.
 
+total_supply(P, S) :- S = #sum { V*2 : demandOffer(P,_,V), V > 0 }, part(P).
+
 &dom { 0..Max } = load(From, To, TR, P) :- 
-    possible_flow(From, To, TR, P),total_supply(P, Max) .
+    possible_flow(From, To, TR, P),total_supply(P, Max).
 
 % CONSTRAINT 1 (The Off Switch):
 % If ASP says "No Flow", Load MUST be 0.
@@ -59,35 +60,32 @@ active_flow(From, To, TR) :- partOnFlow(From, To, TR, _).
 % Balance Constraint
 &sum { flowIn(P,L); -1 * flowOut(P,L) } = req(P,L) :- part(P), location(L).
 
-
-active_flow(From, To, TR) :- partOnFlow(From, To, TR, _).
 &dom { 0..100000000 } = total_weight(From, To, TR) :- active_flow(From, To, TR).
 &sum {  S*load(From, To, TR, P) : partSize(P, S) } = total_weight(From, To, TR)
     :- active_flow(From, To, TR).
 
-
 &dom { 0..10 } = estimatedFreq(From, To, TR) :- active_flow(From, To, TR).
 &sum { Cap * estimatedFreq(From, To, TR) } >= total_weight(From, To, TR)
     :- active_flow(From, To, TR), transportCapacity(TR, Cap).
-
 
 % 2. Tightly constrain the estimatedFreq domain
 % Assuming Max=10 is safe, we now restrict the variable to [Min..10]
 &dom { 0..10 } = estimatedFreq(From, To, TR) :- 
     active_flow(From, To, TR).
     
-&dom { 0..10000000 } = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+&dom { 0..4654102 } = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
 
-&sum { Cost * estimatedFreq(From, To, TR) :route(From, To, TR, _, Cost) } = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+&sum {  C * estimatedFreq(From, To, TR) :route(_, From, To, TR, _, C)} = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
   
-%&sum { routeCostTotal(From, To, TR) } = total_transport_cost :- active_flow(From, To, TR).
+ % 1519384
+%&dom { 0..1519384 } = total_transport_cost.
+%&sum { routeCostTotal(From, To, TR) :possible_flow(From,To,TR,_) } = total_transport_cost.
+&minimize{ routeCostTotal(From, To, TR) :possible_flow(From,To,TR,_) }.
+%&minimize{total_transport_cost}.
 
-%&minimize {total_transport_cost}.
-&minimize {routeCostTotal(From, To, TR):possible_flow(From, To, TR,_);load(From, To, TR, P) : possible_flow(From, To, TR, P)}.
-%&minimize {}.
-%4654102
-%&dom { 0..4654102 } = total_transport_cost.
-%&sum { routeCostTotal(From, To, TR)  } <= total_transport_cost   :- active_flow(From, To, TR).
-%&minimize {total_transport_cost}.
+%&dom { 0..10000000 } = total_load.
+%&sum { load(From, To, TR) :possible_flow(From,To,TR,_) } = total_load.
+%&minimize{total_load}.
 
-
+%&minimize {routeCostTotal(From, To, TR):possible_flow(From, To, TR,_)}.
+%&minimize {load(From, To, TR):possible_flow(From, To, TR,_)}.
