@@ -1,226 +1,277 @@
-#  Copyright (c) 2024 AIRBUS and its affiliates.
-#  This source code is licensed under the MIT license found in the
-#  LICENSE file in the root directory of this source tree.
 import logging
 from collections import defaultdict
-from typing import Any, List, Optional
+from typing import Any, Optional, List, Dict
 
 import clingo
+from clingo.ast import parse_string, ProgramBuilder
+from clingcon import ClingconTheory
 
-from discrete_optimization.generic_tools.asp_tools import AspClingoSolver
+from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
+from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction
+from discrete_optimization.generic_tools.do_solver import SolverDO, StatusSolver
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from multibatching.problem import (
     MultibatchingProblem,
     MultibatchingSolution,
     PackingTransport,
+    Product,
+    TransportLink
 )
 
 logger = logging.getLogger(__name__)
 
+# Logic Program Content
+ASP_MODEL_CONTENT = """
+transportResource(intrasite). 
+transportCO2(intrasite,0). 
+transportCost(intrasite,0).
+transportCapacity(intrasite,2000000).
+partTR(Part,intrasite) :- part(Part).
 
-class AspMultibatchingSolver(AspClingoSolver):
-    """
-    Solver based on Answer Set Programming formulation and clingo solver.
-    It solves the Multibatching problem using a Flow formulation (aggregated items).
-    """
+root(eARFullFuselage). 
+
+% 2. ROBUST DEMAND/OFFER
+has_demand(P, L) :- demandOffer(P, L, V), V < 0.
+has_offer(P, L)  :- demandOffer(P, L, V), V > 0.
+
+demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
+demand(P, L, 0)        :- part(P), location(L), not has_demand(P, L).
+offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
+offer(P, L, 0)   :- part(P), location(L), not has_offer(P, L).
+
+% 3. CALCULATE NET REQUIREMENT
+required_net(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
+&dom { N..N } = req(P,L) :- required_net(P, L, N).
+
+%%%
+possible_flow(From, To, TR, P) :- route(_, From, To, TR, _,_), part(P), not root(P), transportCapacity(TR, Cap), Cap>0.
+{partOnFlow(From, To, TR, P)} :- possible_flow(From, To, TR, P).
+
+active_flow(From, To, TR) :- partOnFlow(From, To, TR, _).
+
+total_supply(P, S) :- S = #sum { V*2 : demandOffer(P,_,V), V > 0 }, part(P).
+
+&dom { 0..Max } = load(From, To, TR, P) :- 
+    possible_flow(From, To, TR, P), total_supply(P, Max).
+
+% CONSTRAINT 1 (The Off Switch):
+&sum { load(From, To, TR, P) } = 0 :- possible_flow(From, To, TR, P), 
+                                      not partOnFlow(From, To, TR, P).
+
+% CONSTRAINT 2 (The On Switch - Optional but helpful):
+&sum { load(From, To, TR, P) } >= 1 :- partOnFlow(From, To, TR, P).
+
+% =========================================================
+% 5. CALCULATIONS & BALANCE
+% =========================================================
+
+&sum { load(From, L, TR, P): possible_flow(From, L, TR, P)} = flowIn(P, L)
+    :- location(L), part(P).
+
+&sum { load(L, To, TR, P): possible_flow(L, To, TR, P)} = flowOut(P, L)
+    :-  location(L), part(P).
+
+% Balance Constraint
+&sum { flowIn(P,L); -1 * flowOut(P,L) } = req(P,L) :- part(P), location(L).
+
+&dom { 0..100000000 } = total_weight(From, To, TR) :- active_flow(From, To, TR).
+
+&sum {  S*load(From, To, TR, P) : partSize(P, S) } = total_weight(From, To, TR)
+    :- active_flow(From, To, TR).
+
+&dom { 0..10 } = estimatedFreq(From, To, TR) :- active_flow(From, To, TR).
+
+&sum { Cap * estimatedFreq(From, To, TR) } >= total_weight(From, To, TR)
+    :- active_flow(From, To, TR), transportCapacity(TR, Cap).
+
+% 2. Tightly constrain the estimatedFreq domain
+&dom { 0..10 } = estimatedFreq(From, To, TR) :- 
+    active_flow(From, To, TR).
+
+&dom { 0..4654102 } = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+
+&sum {  C * estimatedFreq(From, To, TR) :route(_, From, To, TR, _, C)} = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+
+&minimize{ routeCostTotal(From, To, TR) :possible_flow(From,To,TR,_) }.
+"""
+
+
+class ClingconMultibatchingSolver(SolverDO):
     problem: MultibatchingProblem
-
-    def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
-        super().__init__(problem, **kwargs)
-        self.scaling_factor = kwargs.get("scaling_factor", 100)
+    def __init__(
+            self,
+            problem: MultibatchingProblem,
+            params_objective_function: Optional[ParamsObjectiveFunction] = None,
+            **kwargs: Any,
+    ):
+        super().__init__(problem, params_objective_function, **kwargs)
+        self.ctl: Optional[clingo.Control] = None
+        self.theory: Optional[ClingconTheory] = None
+        self.name_to_location: Dict[str, Any] = {}
+        self.name_to_transport_type: Dict[str, Any] = {}
+        self.name_to_product: Dict[str, Any] = {}
+        self.route_key_to_link: Dict[tuple, TransportLink] = {}
 
     def init_model(self, **kwargs: Any) -> None:
-        # Default bounds (ensure these are integers)
-        max_flow = int(kwargs.get("max_flow_per_product", 50))
-        max_trips = int(kwargs.get("max_trips_per_link", 20))
+        # Default options
+        clingo_args = kwargs.get("clingo_args", [# "--models=1",
+                                                 "--opt-mode=optN"])
 
-        # ASP Program
-        # Note: We use {{ }} for literal braces in f-strings.
-        # We added keys (e.g., ", P") to #sum aggregates to ensure distinct items are summed correctly.
-        basic_model = f"""
-        #const max_flow={max_flow}.
-        #const max_trips={max_trips}.
+        self.ctl = clingo.Control(clingo_args)
+        self.theory = ClingconTheory()
 
-        % --- Generation ---
+        # 1. Register Clingcon theory
+        self.theory.register(self.ctl)
 
-        % For every valid link-product combination, choose exactly one flow quantity Q.
-        1 {{ flow(L, P, Q) : Q=0..max_flow }} 1 :- valid_transport(L, P).
+        # 2. Add Logic Program using the rewriter
+        # This fixes the "no definition found for theory atom" error
+        with ProgramBuilder(self.ctl) as bld:
+            # Parse main model
+            parse_string(ASP_MODEL_CONTENT, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
-        % --- Constraints ---
+            # Generate and parse facts
+            facts_str = self._generate_facts()
+            logger.debug("Generated ASP Facts:\n" + facts_str)
+            parse_string(facts_str, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
-        % 1. Flow Conservation
-        % Calculate Total Inflow for a (Node, Product)
-        flow_in(Node, P, TotalIn) :- 
-            location(Node), product(P, _, _),
-            TotalIn = #sum {{ Q, L : flow(L, P, Q), link_dest(L, Node) }}.
+        # 3. Ground
+        logger.info("Grounding logic program...")
+        self.ctl.ground([("base", [])])
 
-        % Calculate Total Outflow for a (Node, Product)
-        flow_out(Node, P, TotalOut) :- 
-            location(Node), product(P, _, _),
-            TotalOut = #sum {{ Q, L : flow(L, P, Q), link_src(L, Node) }}.
+        # 4. Prepare theory (must happen after grounding)
+        self.theory.prepare(self.ctl)
 
-        % Enforce: In + Supply == Out
-        :- location(Node), product(P, _, _), 
-           net_supply(Node, P, Supply), 
-           flow_in(Node, P, In), 
-           flow_out(Node, P, Out), 
-           In + Supply != Out.
+    def solve(
+            self,
+            callbacks: Optional[List[Callback]] = None,
+            time_limit: Optional[float] = None,
+            **kwargs: Any
+    ) -> ResultStorage:
 
-        % 2. Capacity and Trips
-        % Calculate volume used on link L. 
-        % Key 'P' is added to #sum tuple {{ Q*Size, P : ... }} to avoid merging identical values.
-        volume_on_link(L, Vol) :- 
-            link(L, _, _, _, _, _, _),
-            Vol = #sum {{ Q * Size, P : flow(L, P, Q), product(P, Size, _) }}.
+        if self.ctl is None:
+            self.init_model(**kwargs)
 
-        % Determine number of trips needed (Integer Ceiling Division).
-        % Trips >= Volume / Capacity  =>  Trips = (Volume + Capacity - 1) / Capacity
-        trips(L, T) :- 
-            link(L, _, _, Cap, _, _, _), Cap > 0,
-            volume_on_link(L, Vol),
-            T = (Vol + Cap - 1) / Cap.
+        callbacks_list = CallbackList(callbacks=callbacks)
+        callbacks_list.on_solve_start(solver=self)
 
-        % Enforce max trips bound
-        :- trips(L, T), T > max_trips.
+        res = self.create_result_storage()
 
-        % --- Objective Function ---
+        def on_model_wrapper(model: clingo.Model):
+            sol = self.retrieve_solution(model)
+            fit = self.aggreg_from_sol(sol)
+            res.append((sol, fit))
+            stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
+            return stopping
 
-        % Transport Cost: Sum of (Trips * Distance * CostFactor) for each Link L
-        cost_transport(Cost) :- 
-            Cost = #sum {{ T * Dist * C, L : trips(L, T), link(L, _, _, _, C, _, Dist) }}.
+        logger.info("Starting Clingcon solve...")
 
-        % Emission Cost: Sum of (Trips * Distance * EmissionFactor) for each Link L
-        cost_emission(Cost) :- 
-            Cost = #sum {{ T * Dist * E, L : trips(L, T), link(L, _, _, _, _, E, Dist) }}.
+        # Timeout handling via async handle
+        if time_limit is None:
+            self.ctl.solve(on_model=on_model_wrapper)
+        else:
+            with self.ctl.solve(on_model=on_model_wrapper, async_=True) as handle:
+                finished = handle.wait(time_limit)
+                if not finished:
+                    logger.info(f"Time limit of {time_limit}s reached.")
+                    handle.cancel()
 
-        % Holding/Capital Cost: Sum of (Quantity * HoldingCoeff) for each Link L, Product P
-        cost_holding(Cost) :-
-            Cost = #sum {{ Q * K, L, P : flow(L, P, Q), holding_coeff(L, P, K) }}.
+        if len(res) > 0:
+            self.status_solver = StatusSolver.SATISFIED
+        else:
+            self.status_solver = StatusSolver.UNSATISFIABLE
 
-        % Total Objective to Minimize
-        total_cost(C) :- 
-            cost_transport(CT), cost_emission(CE), cost_holding(CH),
-            C = CT + CE + CH.
-
-        #minimize {{ C : total_cost(C) }}.
-
-        #show flow/3.
-        #show trips/2.
-        """
-
-        self.ctl = clingo.Control(
-            ["--warn=no-atom-undefined", "--opt-mode=optN"]
-        )
-        self.ctl.add("base", [], basic_model)
-
-        # Add the data facts
-        string_data_input = self.build_string_data_input()
-        self.ctl.add("base", [], string_data_input)
-
-    def build_string_data_input(self) -> str:
-        facts = []
-
-        # 1. Products: product(ID, Size, Value).
-        # Force integer casting to avoid "10.0" which crashes Clingo
-        for p in self.problem.products:
-            p_idx = self.problem.product_to_index[p]
-            facts.append(f"product({p_idx}, {int(p.size)}, {int(p.value)}).")
-
-        # 2. Locations: location(ID).
-        for loc in self.problem.locations:
-            l_idx = self.problem.locations_to_index[loc]
-            facts.append(f"location({l_idx}).")
-
-            # Net Supply: net_supply(LocID, ProdID, Amount).
-            for p, amount in loc.net_supply.items():
-                if amount != 0:
-                    p_idx = self.problem.product_to_index[p]
-                    # 'amount' can sometimes be float in input data, force int
-                    facts.append(f"net_supply({l_idx}, {p_idx}, {int(amount)}).")
-
-        # 3. Links: link(ID, Src, Dst, Cap, Cost, Emission, Dist).
-        for link in self.problem.transport_links:
-            l_idx = self.problem.transport_links_to_index[link]
-            src_idx = self.problem.locations_to_index[link.location_l1]
-            dst_idx = self.problem.locations_to_index[link.location_l2]
-
-            tt = link.transport_type
-
-            # Helper predicates
-            facts.append(f"link_src({l_idx}, {src_idx}).")
-            facts.append(f"link_dest({l_idx}, {dst_idx}).")
-
-            # Main link fact: Force int() on ALL numerical fields
-            facts.append(f"link({l_idx}, {src_idx}, {dst_idx}, "
-                         f"{int(tt.capacity)}, {int(tt.cost)}, {int(tt.emissions)}, {int(link.distance)}).")
-
-            # 4. Valid Transports & Holding Costs
-            # Calculate time safely
-            speed = tt.speed if tt.speed > 0 else 0.0001  # avoid div by zero
-            time = link.distance / speed
-
-            for p in self.problem.products:
-                if tt in p.valid_transports and tt.capacity >= p.size:
-                    p_idx = self.problem.product_to_index[p]
-                    facts.append(f"valid_transport({l_idx}, {p_idx}).")
-
-                    # Pre-calculate holding cost coefficient
-                    # Formula: Value * ((1+alpha)^time - 1)
-                    capital_factor = self.problem.capital_factor
-                    holding_val = p.value * ((1 + capital_factor) ** time - 1)
-
-                    # Scale and cast to int
-                    holding_coeff = int(holding_val * self.scaling_factor)
-                    facts.append(f"holding_coeff({l_idx}, {p_idx}, {holding_coeff}).")
-
-        return " ".join(facts)
+        callbacks_list.on_solve_end(res=res, solver=self)
+        return res
 
     def retrieve_solution(self, model: clingo.Model) -> MultibatchingSolution:
-        symbols = model.symbols(atoms=True)
+        logger.info(f"Optimality proven : {model.optimality_proven}, cost = {model.cost}")
+        assignment = list(self.theory.assignment(model.thread_id))
+        flows_aggregation = defaultdict(lambda: defaultdict(int))
 
-        # Parse flows: flow(LinkIdx, ProdIdx, Qty)
-        flows = {}
-        trips = {}
+        for name, value in assignment:
+            if name.name == "load" and value > 0:
+                try:
+                    args = name.arguments
+                    from_name, to_name, tr_name, p_name = map(str, args)
 
-        for atom in symbols:
-            if atom.name == "flow":
-                # args: L, P, Q
-                l_idx = atom.arguments[0].number
-                p_idx = atom.arguments[1].number
-                qty = atom.arguments[2].number
-                if qty > 0:
-                    if l_idx not in flows:
-                        flows[l_idx] = {}
-                    flows[l_idx][self.problem.products[p_idx]] = qty
+                    route_key = (from_name, to_name, tr_name)
+                    link = self.route_key_to_link.get(route_key)
+                    product = self.name_to_product.get(p_name)
 
-            if atom.name == "trips":
-                # args: L, T
-                l_idx = atom.arguments[0].number
-                t_count = atom.arguments[1].number
-                trips[l_idx] = t_count
+                    if link and product:
+                        flows_aggregation[link][product] += value
+                except Exception as e:
+                    logger.error(f"Error parsing variable {name}: {e}")
 
-        # Reconstruct PackingTransport objects
-        packing_solution = []
-        for l_idx, product_quantities in flows.items():
-            nb_trips = trips.get(l_idx, 1)  # Should exist if flow > 0
-            if nb_trips == 0:
-                continue
+        list_flows = []
+        for link, product_quantities in flows_aggregation.items():
+            packing = {p: q for p, q in product_quantities.items() if q > 0}
+            if packing:
+                list_flows.append(PackingTransport(link, packing, 1))
 
-            # We create a homogenized packing where every trip on this link
-            # carries the average amount of products. 
-            # (Similar to CpsatMultibatchingSolver.retrieve_solution Flow mode)
-            cur_packing = {}
-            for prod, total_qty in product_quantities.items():
-                cur_packing[prod] = total_qty / nb_trips
+        return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
-            if len(cur_packing) > 0:
-                link = self.problem.transport_links[l_idx]
-                packing_solution.append(
-                    PackingTransport(
-                        transport_link=link,
-                        product_packing=cur_packing,
-                        nb_packing=nb_trips
-                    )
-                )
-        print("hey")
-        return MultibatchingSolution(problem=self.problem, list_flows=packing_solution)
+    def _generate_facts(self) -> str:
+        # Same generation logic as before, ensure it returns a valid ASP string
+        facts = []
+
+        def sanitize(s: str) -> str:
+            s = str(s).replace(".", "").replace("-", "").replace(" ", "")
+            return s[0].lower() + s[1:]
+
+        def sanitize_num(val) -> int:
+            return max(1, int(val))
+
+        cap_size_divide = 10000
+
+        # Locations
+        self.name_to_location = {}
+        for loc in self.problem.locations:
+            s_name = sanitize(loc.name)
+            self.name_to_location[s_name] = loc
+            facts.append(f"location({s_name}).")
+
+        # Transport Resources
+        self.name_to_transport_type = {}
+        for tt in self.problem.transport_types:
+            s_name = sanitize(tt.name if tt.name else f"tr{tt.id}")
+            self.name_to_transport_type[s_name] = tt
+            facts.append(f"transportResource({s_name}).")
+            facts.append(f"transportCO2({s_name},{sanitize_num(tt.emissions)}).")
+            facts.append(f"transportCost({s_name},{sanitize_num(tt.cost)}).")
+            scaled_cap = max(1, int(tt.capacity / cap_size_divide))
+            facts.append(f"transportCapacity({s_name},{scaled_cap}).")
+            facts.append(f"transportSpeed({s_name},{sanitize_num(tt.speed)}).")
+
+        # Routes
+        self.route_key_to_link = {}
+        for idx, tl in enumerate(self.problem.transport_links):
+            source = sanitize(tl.location_l1.name)
+            dest = sanitize(tl.location_l2.name)
+            tr_name = sanitize(tl.transport_type.name if tl.transport_type.name else f"tr{tl.transport_type.id}")
+            self.route_key_to_link[(source, dest, tr_name)] = tl
+            dist = int(tl.distance)
+            cost = int(sanitize_num(tl.transport_type.cost) * dist)
+            facts.append(f"route({idx},{source},{dest},{tr_name},{dist},{cost}).")
+
+        # Products
+        self.name_to_product = {}
+        for p in self.problem.products:
+            s_name = sanitize(p.name if p.name else f"p{p.id}")
+            self.name_to_product[s_name] = p
+            facts.append(f"part({s_name}).")
+            scaled_size = int(p.size / cap_size_divide)
+            facts.append(f"partSize({s_name},{scaled_size}).")
+            for valid_tr in p.valid_transports:
+                tr_s_name = sanitize(valid_tr.name if valid_tr.name else f"tr{valid_tr.id}")
+                facts.append(f"partTR({s_name},{tr_s_name}).")
+
+        # Demand/Offers
+        for loc in self.problem.locations:
+            loc_s_name = sanitize(loc.name)
+            for p, amount in loc.net_supply.items():
+                if amount != 0:
+                    p_s_name = sanitize(p.name if p.name else f"p{p.id}")
+                    facts.append(f"demandOffer({p_s_name},{loc_s_name},{int(amount)}).")
+
+        return "\n".join(facts)
