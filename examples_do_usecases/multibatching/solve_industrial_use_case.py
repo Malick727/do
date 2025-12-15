@@ -102,16 +102,21 @@ def run_cp_2steps():
                            time_limit=10,
                            ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res_[-1][0]
-    print(problem.evaluate(sol))
-    print(sum(problem.evaluate(sol).values()))
-    print(problem.evaluate(sol), problem.satisfy(sol))
+
+    sol: MultibatchingSolution
+
+    for s in sol.list_flows:
+        print(s.transport_link.transport_type, s.product_packing)
+    #print(problem.evaluate(sol))
+    #print(sum(problem.evaluate(sol).values()))
+    #print(problem.evaluate(sol), problem.satisfy(sol))
     # plot_solution_graph(problem=problem, solution=sol)
-    for i in range(len(problem.products)):
-        plotly_solution_graph(solution=sol,
-                              problem=problem,
-                              use_logical_layout=False,
-                              products_to_plot=[problem.products[i]],
-                              explode_flows=True)
+    #for i in range(len(problem.products)):
+    #    plotly_solution_graph(solution=sol,
+    #                          problem=problem,
+    #                          use_logical_layout=False,
+    #                          products_to_plot=[problem.products[i]],
+    #                          explode_flows=True)
 
 def run_cp_2steps_and_complete():
     # problem = parse_problem()
@@ -535,8 +540,8 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    run_milp_2step()
-    # run_cp_2steps_and_complete()
+    # run_milp_2step()
+    #run_cp_2steps_and_complete()
     # run_milp_2step()
     # run_milp_lazy()
     # run_milp_2step()
@@ -554,7 +559,7 @@ if __name__ == "__main__":
     # run_oe()
     # run_cpmpy()
     # run_explanation()
-    # run_cp_2steps()
+    run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
     # run_cp_2steps()

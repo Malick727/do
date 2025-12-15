@@ -13,7 +13,7 @@ input_file = f'{file_name}.json'
 
 output_file = "factsASP.lp"
 
-cap_size_divde = 10000
+cap_size_divde = 1000000
 
 # only used for text and not 
 def reformulate(text):
@@ -50,11 +50,23 @@ def json2asp(file_out):
         location_name_id_mapping = dict(zip(loc_ids_for_mapping,loc_names_for_mapping))
         
         transportation_data = json_data["transportResources"]
-        tr_names = list(map(lambda x: f"transportResource({reformulate(transportation_data.get(x)['name'])}).\n", transportation_data))
-        tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['co2Emissions'])])}).\n",transportation_data))
-        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data))
         tr_capacities = list(map(lambda x: f"transportCapacity({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(int(transportation_data.get(x)['capacity'])/cap_size_divde)])}).\n", transportation_data))
-        tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['speed'])])}).\n", transportation_data))
+        
+        tr_to_delete = []    
+        for tr_cap in tr_capacities:
+            if tr_cap.endswith("1).\n"):
+                end_loc = tr_cap.find(',')
+                tr_name = tr_cap[18:end_loc]
+                tr_to_delete.append(tr_name)
+        print(tr_to_delete)
+
+        transportation_data_filter = transportation_data #filter(lambda x: reformulate(transportation_data.get(x)['name']) not in tr_to_delete, transportation_data)
+        tr_capacities = list(map(lambda x: f"transportCapacity({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(int(transportation_data.get(x)['capacity'])/cap_size_divde)])}).\n",transportation_data_filter))
+
+        tr_names = list(map(lambda x: f"transportResource({reformulate(transportation_data.get(x)['name'])}).\n", transportation_data_filter))
+        tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['co2Emissions'])])}).\n", transportation_data_filter))
+        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data_filter))
+        tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['speed'])])}).\n",  transportation_data_filter))
 
         alt_tr_names_mapping = zip([reformulate(transportation_data.get(x)['name']) for x in transportation_data], [f"tr{n}" for n in range(0, len(transportation_data))]) 
 

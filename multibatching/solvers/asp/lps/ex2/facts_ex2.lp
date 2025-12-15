@@ -38,15 +38,26 @@ partVal(p1,1000).
 partVal(p2,600).
 
 
-demandOffer(p1,l1,10).
-demandOffer(p2,l1,40).
-demandOffer(p1,l2,20).
 
-demandOffer(p2,l2,-10).
-demandOffer(p1,l5,-10).
-demandOffer(p2,l5,-20).
-demandOffer(p1,l6,-20).
-demandOffer(p2,l6,-10).
+demandOffer(p1,l1,1).
+demandOffer(p2,l1,4).
+demandOffer(p1,l2,2).
+
+demandOffer(p2,l2,-1).
+demandOffer(p1,l5,-1).
+demandOffer(p2,l5,-2).
+demandOffer(p1,l6,-2).
+demandOffer(p2,l6,-1).
+
+%demandOffer(p1,l1,10).
+%demandOffer(p2,l1,40).
+%demandOffer(p1,l2,20).
+
+%demandOffer(p2,l2,-10).
+%demandOffer(p1,l5,-10).
+%demandOffer(p2,l5,-20).
+%demandOffer(p1,l6,-20).
+%demandOffer(p2,l6,-10).
 
 
 % 'real' simple example including production plan constraints
@@ -75,22 +86,22 @@ demandOffer(p2,l6,-10).
 %demand(l6,section7,10).
 
 % route: from, to, transport mean, distance, cost (per 1)
-route(l1,l2,tr1,1,56).
-route(l1,l2,tr2,2,84).
-route(l1,l3,tr1,3,168).
-route(l1,l3,tr2,4,168).
-route(l1,l4,tr1,4,224).
-route(l1,l4,tr2,8,336).
-route(l2,l3,tr1,1,56).
-route(l2,l3,tr2,2,84).
-route(l2,l4,tr1,2,112).
-route(l2,l4,tr2,6,252).
-route(l2,l6,tr1,2,112).
-route(l3,l5,tr1,1,56).
-route(l3,l5,tr2,3,126).
-route(l3,l6,tr1,1,56).
-route(l3,l6,tr2,2,84).
-route(l4,l5,tr1,2,112).
-route(l4,l5,tr2,4,168).
-route(l4,l6,tr1,3,168).
-route(l4,l6,tr2,5,210).
+route(1,l1,l2,tr1,1,56).
+route(2,l1,l2,tr2,2,84).
+route(3,l1,l3,tr1,3,168).
+route(4,l1,l3,tr2,4,168).
+route(5,l1,l4,tr1,4,224).
+route(6,l1,l4,tr2,8,336).
+route(7,l2,l3,tr1,1,56).
+route(8,l2,l3,tr2,2,84).
+route(9,l2,l4,tr1,2,112).
+route(10,l2,l4,tr2,6,252).
+route(11,l2,l6,tr1,2,112).
+route(12,l3,l5,tr1,1,56).
+route(13,l3,l5,tr2,3,126).
+route(14,l3,l6,tr1,1,56).
+route(15,l3,l6,tr2,2,84).
+route(16,l4,l5,tr1,2,112).
+route(17,l4,l5,tr2,4,168).
+route(18,l4,l6,tr1,3,168).
+route(19,l4,l6,tr2,5,210).

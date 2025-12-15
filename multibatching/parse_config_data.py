@@ -1,5 +1,6 @@
 import os
 import json
+import clingo
 from dataclasses import dataclass, field
 from typing import Hashable
 from multibatching.problem import (MultibatchingProblem,
@@ -9,8 +10,48 @@ from multibatching.problem import (MultibatchingProblem,
                                    TransportLink)
 
 
-# --- Parsing Function ---
 
+
+all_data_frames = {}
+# --- Parsing Function ---
+# globally defined variables 
+# modelAggregateTemplates = [ {'name':'flowOut', 'filter':lambda s: s.name=='flowOut', 'columns':['part' ,'location', 'amount']},
+#                           {'name':'flowIn', 'filter':lambda s: s.name=='flowIn', 'columns':['part' ,'location', 'amount']},
+#                           {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['part' ,'location', 'amount']},
+#                          {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transport resource', 'costs']}
+#                           ]
+# 
+# modelAtomTemplates = [
+ #     {'name':'route','filter':lambda s: s.name=='route', 'columns':['idx', 'from', 'to', 'tr', 'distance', 'cost']},
+# before
+# with ctl.solve(yield_=True, on_model=on_model) as hnd:
+#    for idx, mdl in enumerate(hnd):
+#       assignment_data = list(thy.assignment(mdl.thread_id))
+
+def parse_asp_model_to_solution(assignment_data, idx):
+    with ctl.solve(yield_=True, on_model=on_model) as hnd:
+        for idx, mdl in enumerate(hnd):
+           assignment_data = list(thy.assignment(mdl.thread_id))
+    for modelAggregateTemplate in modelAggregateTemplates:
+        dataName=modelAggregateTemplate["name"]
+        columns=modelAggregateTemplate["columns"]
+        filtered_data = [[*key.arguments, val] for key, val in assignment_data if key.name==dataName]
+        df = pd.DataFrame(data=filtered_data, columns=columns)
+        all_data_frames[dataName] = df
+    
+
+
+def on_model(m: clingo.Model):
+        path_symbols = []
+        for name in [next(iter(d.values())) for d in modelAtomTemplates]:
+            path_symbols += list(filter(lambda s: s.name == name, m.symbols(atoms=True)))
+        for modelAtomTemplate in modelAtomTemplates:
+            filteredSymbols = list(filter(modelAtomTemplate['filter'], path_symbols))
+            arguments = list(map(lambda s: s.arguments, filteredSymbols))
+            df = pd.DataFrame(data=arguments, columns=modelAtomTemplate['columns'])
+            all_data_frames[modelAtomTemplate['name']] = df
+            
+    
 
 
 def parse_problem_to_facts(mbp):
@@ -40,12 +81,12 @@ def parse_problem_to_facts(mbp):
 
         loc_name_asp = "\n".join(f"location({location.name})." for location in mbp.locations)
         for location in mbp.locations:
-            net_supply_asp = "\n".join(f"demandOffer({location.name},{product},{val})." for for product, val in location.net_supply.items())
+            net_supply_asp = "\n".join(f"demandOffer({location.name},{product},{val})." for product, val in location.net_supply.items())
         locationString = loc_name_asp + net_supply_asp
         file_out.writelines(locationString)
 
         tp_cost_dict = {tp:tp.cost for tp in mbp.transport_types}
-        routes_asp =  "\n".join(f"route({tk.location_l1},{tk.location_l2},{tk.transport_type},{tk.distance},{compute_costs(tk.distance,tp_cost_dict.get(tp))})." for for tk mbp.transport_links)
+        routes_asp =  "\n".join(f"route({tk.location_l1},{tk.location_l2},{tk.transport_type},{tk.distance},{compute_costs(tk.distance,tp_cost_dict.get(tp))})." for tk in mbp.transport_links)
         file_out.writelines(routes_asp)
 
 
@@ -89,7 +130,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
             cost=data["cost"],
             speed=data["speed"],
             emissions=data["co2Emissions"],
-            capacity=data["capacity"]//10**6
+            capacity=data["capacity"]//10**4
         ) for _id, data in json_data["transportResources"].items()
     }
 
@@ -98,7 +139,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
         _id: Product(
             id=_id,
             name=data["name"],
-            size=data["size"]//10**6,
+            size=data["size"]//10**4,
             value=data["value"],
             valid_transports=frozenset(
                 transport_types_map[tr_id] for tr_id in data["validTR"]

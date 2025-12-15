@@ -1006,7 +1006,7 @@ def generate_multibatching_problem(
 
     for i in range(num_locations):
         loc_id = f'l{i + 1}'
-        loc = Location(id=loc_id, net_supply=temp_demands[loc_id])
+        loc = Location(id=loc_id, net_supply=temp_demands[loc_id], name=loc_id)
         locations_list.append(loc)
 
     # Check if total demand for each product is truly balanced

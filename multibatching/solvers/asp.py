@@ -18,86 +18,103 @@ from multibatching.problem import (
     TransportLink
 )
 
+import pandas as pd
 logger = logging.getLogger(__name__)
 
+
+cap_size_divide = 1
 # Logic Program Content
 ASP_MODEL_CONTENT = """
-transportResource(intrasite). 
-transportCO2(intrasite,0). 
-transportCost(intrasite,0).
-transportCapacity(intrasite,2000000).
-partTR(Part,intrasite) :- part(Part).
-
 root(eARFullFuselage). 
 
-% 2. ROBUST DEMAND/OFFER
-has_demand(P, L) :- demandOffer(P, L, V), V < 0.
-has_offer(P, L)  :- demandOffer(P, L, V), V > 0.
+totalSupply(P, S) :- S = #sum {V : demandOffer(P,_,V), V > 0;-1* V : demandOffer(P,_,V), V < 0 }, part(P).
+#show totalSupply/2.
+
+
+hasDemand(P, L) :- demandOffer(P, L, V), V < 0.
+hasOffer(P, L)  :- demandOffer(P, L, V), V > 0.
 
 demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
-demand(P, L, 0)        :- part(P), location(L), not has_demand(P, L).
-offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
-offer(P, L, 0)   :- part(P), location(L), not has_offer(P, L).
+demand(P, L, 0)        :- part(P), location(L), not hasDemand(P, L).
 
-% 3. CALCULATE NET REQUIREMENT
-required_net(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
-&dom { N..N } = req(P,L) :- required_net(P, L, N).
+offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
+offer(P, L, 0)   :- part(P), location(L), not hasOffer(P, L).
+
+#show demand/3.
+#show offer/3.
+
+requiredNet(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
+requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), part(P).
+&dom { N..N } = req(P,L) :- requiredNet(P, L, N).
 
 %%%
-possible_flow(From, To, TR, P) :- route(_, From, To, TR, _,_), part(P), not root(P), transportCapacity(TR, Cap), Cap>0.
-{partOnFlow(From, To, TR, P)} :- possible_flow(From, To, TR, P).
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  partTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>1, Cost>0.
 
-active_flow(From, To, TR) :- partOnFlow(From, To, TR, _).
+&dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 
-total_supply(P, S) :- S = #sum { V*2 : demandOffer(P,_,V), V > 0 }, part(P).
-
-&dom { 0..Max } = load(From, To, TR, P) :- 
-    possible_flow(From, To, TR, P), total_supply(P, Max).
-
-% CONSTRAINT 1 (The Off Switch):
-&sum { load(From, To, TR, P) } = 0 :- possible_flow(From, To, TR, P), 
-                                      not partOnFlow(From, To, TR, P).
-
-% CONSTRAINT 2 (The On Switch - Optional but helpful):
-&sum { load(From, To, TR, P) } >= 1 :- partOnFlow(From, To, TR, P).
-
-% =========================================================
-% 5. CALCULATIONS & BALANCE
-% =========================================================
-
-&sum { load(From, L, TR, P): possible_flow(From, L, TR, P)} = flowIn(P, L)
-    :- location(L), part(P).
-
-&sum { load(L, To, TR, P): possible_flow(L, To, TR, P)} = flowOut(P, L)
+&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L)
     :-  location(L), part(P).
 
+&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L)
+    :-  location(L), part(P).
+
+:- &sum{flow_out(P,From)}!=V, offer(P,From,V), V!=0.
+:- &sum{flow_in(P,To)}!= V, demand(P,To,V), V!=0.
+:- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
+:- &sum{flow_out(P,From)} !=0, demand(P,From,V), V!=0.
+
+:- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
+:- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
+
 % Balance Constraint
-&sum { flowIn(P,L); -1 * flowOut(P,L) } = req(P,L) :- part(P), location(L).
+%&sum { flow_in(P,L); -1 * flow_out(P,L)} = req(P,L) :- part(P), location(L).
+% when demandOffer is 0, then flow_in and flow_out need to be the same
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = 0 :- demandOffer(P,L,0).
+% when demandOffer is <0 (i.e. there is demand), then in-out needs to be -1*V  
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = -1*V :- demandOffer(P,L,V), V<0.
+% when demandOffer is > 0 (i.e. there is supply), then the out-in needs to be V
+&sum { flow_out(P,L); -1 * flow_in(P,L)} = V :- demandOffer(P,L,V), V>0.
 
-&dom { 0..100000000 } = total_weight(From, To, TR) :- active_flow(From, To, TR).
 
-&sum {  S*load(From, To, TR, P) : partSize(P, S) } = total_weight(From, To, TR)
-    :- active_flow(From, To, TR).
+#const maxFreq = 30.
+&dom {0..maxFreq} = estimated_freq(From,To,TR) :- possibleFlow(From, To, TR, _).
 
-&dom { 0..10 } = estimatedFreq(From, To, TR) :- active_flow(From, To, TR).
 
-&sum { Cap * estimatedFreq(From, To, TR) } >= total_weight(From, To, TR)
-    :- active_flow(From, To, TR), transportCapacity(TR, Cap).
+&sum {C * estimated_freq(From, To, TR);
+   -1 * S * load(From, To, TR, P) : partSize(P, S), possibleFlow(From, To, TR, P)
+} >= 0 :- possibleFlow(From, To, TR, _), transportCapacity(TR, C).
 
-% 2. Tightly constrain the estimatedFreq domain
-&dom { 0..10 } = estimatedFreq(From, To, TR) :- 
-    active_flow(From, To, TR).
+% it cannot be the case that there is a load > 0 and no estimated freq for this trajectory
+:- &sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P)}>0, estimated_freq(From, To, TR)=0, possibleFlow(From, To, TR, P).
+% it cannot be the case that if there is no load, there is a frequency
+freqButNoLoad(From, To, TR):- &sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P)}!=0, estimated_freq(From, To, TR)=0, possibleFlow(From, To, TR, _).
+#show freqButNoLoad/3.
 
-&dom { 0..4654102 } = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+%&sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P); -1* estimated_freq(From, To, TR)
+%} >= 0 :- possibleFlow(From, To, TR, _).
 
-&sum {  C * estimatedFreq(From, To, TR) :route(_, From, To, TR, _, C)} = routeCostTotal(From, To, TR) :- active_flow(From, To, TR).
+&minimize{estimated_freq(From,To,TR):route(_, From, To, TR, _, C) }.
 
-&minimize{ routeCostTotal(From, To, TR) :possible_flow(From,To,TR,_) }.
+#const limit = 1000000000.
+&dom { 0..limit } = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_).
+&sum {  C * estimated_freq(From,To,TR)} = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_),route(_, From, To, TR, _, C).
+&minimize{ C * estimated_freq(From,To,TR):route(_, From, To, TR, _, C) }.
+
 """
 
 
 class ClingconMultibatchingSolver(SolverDO):
     problem: MultibatchingProblem
+
+    all_dataframes = {}
+
+    modelAggregateTemplates = [ {'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['product' ,'location', 'amount']},
+                            {'name':'flow_in', 'filter':lambda s: s.name=='flow_in', 'columns':['product' ,'location', 'amount']},
+                            {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['product' ,'location', 'amount']},
+                            {'name':'route_cost_total', 'filter':lambda s: s.name=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
+                            {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']}
+                            ]
+
     def __init__(
             self,
             problem: MultibatchingProblem,
@@ -114,8 +131,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
-        clingo_args = kwargs.get("clingo_args", [# "--models=1",
-                                                 "--opt-mode=optN"])
+        clingo_args = kwargs.get("clingo_args", ["--models=0"]) #", "--opt-mode=optN"
 
         self.ctl = clingo.Control(clingo_args)
         self.theory = ClingconTheory()
@@ -161,7 +177,8 @@ class ClingconMultibatchingSolver(SolverDO):
             fit = self.aggreg_from_sol(sol)
             res.append((sol, fit))
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
-            return stopping
+            print("stopping", stopping)
+            return not stopping
 
         logger.info("Starting Clingcon solve...")
 
@@ -181,14 +198,21 @@ class ClingconMultibatchingSolver(SolverDO):
             self.status_solver = StatusSolver.UNSATISFIABLE
 
         callbacks_list.on_solve_end(res=res, solver=self)
+
         return res
 
     def retrieve_solution(self, model: clingo.Model) -> MultibatchingSolution:
-        logger.info(f"Optimality proven : {model.optimality_proven}, cost = {model.cost}")
+        logger.info(f"Optimality proven : {model.optimality_proven}")
         assignment = list(self.theory.assignment(model.thread_id))
         flows_aggregation = defaultdict(lambda: defaultdict(int))
+        #print([f'{key}={val}' for key, val in assignment if val!=0])
+        for template in self.modelAggregateTemplates:
+            df = pd.DataFrame(data={}, columns=template["columns"])
+            self.all_dataframes[template["name"]] = df
+
 
         for name, value in assignment:
+
             if name.name == "load" and value > 0:
                 try:
                     args = name.arguments
@@ -200,17 +224,56 @@ class ClingconMultibatchingSolver(SolverDO):
 
                     if link and product:
                         flows_aggregation[link][product] += value
+                        df = self.all_dataframes["load"]
+                        df.loc[len(df)]  = {"from": from_name, "to":to_name , "transportresource": tr_name, "product":product, "amount":value}
+                        
                 except Exception as e:
                     logger.error(f"Error parsing variable {name}: {e}")
+            
+            if name.name == "flow_in" and value > 0:
+                df = self.all_dataframes["flow_in"]
+                args = name.arguments
+                p_name, to_name = map(str, args)
+                product = self.name_to_product.get(p_name)
+                df.loc[len(df)] = {"product": p_name, "location":to_name, "amount":value}
+            
+            if name.name == "flow_out" and value > 0:
+                df = self.all_dataframes["flow_out"]
+                args = name.arguments
+                p_name, from_name = map(str, args)
+                product = self.name_to_product.get(p_name)
+                df.loc[len(df)] = {"product": p_name, "location":from_name, "amount":value}
+            
+            if name.name == "route_cost_total" and value > 0:
+                df = self.all_dataframes["route_cost_total"]
+                args = name.arguments 
+                from_name, to_name, tr_name = map(str, args)
+               
+                df.loc[len(df)]= {"from": from_name, "to":to_name, "transportresource": tr_name, "cost":value}
+                
+            if name.name == "req" and value > 0:
+                df = self.all_dataframes["req"]
+                args = name.arguments
+                p_name, loc_name  = map(str, args)
+                df.loc[len(df)] = {"product": p_name, "location":loc_name, "amount":value}
+
+        route_cost_total_df = self.all_dataframes["route_cost_total"]
+        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
 
         list_flows = []
         for link, product_quantities in flows_aggregation.items():
             packing = {p: q for p, q in product_quantities.items() if q > 0}
             if packing:
                 list_flows.append(PackingTransport(link, packing, 1))
-
+        #sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
+        #print("aggreg", self.aggreg_from_sol(sol))
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
+
+    def compute_costs(self):
+        route_cost_total_df = self.all_dataframes["route_cost_total"]
+        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
+    
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
         facts = []
@@ -222,7 +285,6 @@ class ClingconMultibatchingSolver(SolverDO):
         def sanitize_num(val) -> int:
             return max(1, int(val))
 
-        cap_size_divide = 10000
 
         # Locations
         self.name_to_location = {}
@@ -273,5 +335,4 @@ class ClingconMultibatchingSolver(SolverDO):
                 if amount != 0:
                     p_s_name = sanitize(p.name if p.name else f"p{p.id}")
                     facts.append(f"demandOffer({p_s_name},{loc_s_name},{int(amount)}).")
-
         return "\n".join(facts)

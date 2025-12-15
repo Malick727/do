@@ -50,15 +50,28 @@ analyzedModelIndex = 0
 all_data_frames = {}
 costs = []
 
-modelAggregateTemplates = [ {'name':'flowOut', 'filter':lambda s: s.name=='flowOut', 'columns':['part' ,'location', 'amount']},
-                           {'name':'flowIn', 'filter':lambda s: s.name=='flowIn', 'columns':['part' ,'location', 'amount']},
+modelAggregateTemplates = [{'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['part' ,'location', 'amount']},
+                           {'name':'flow_in', 'filter':lambda s: s.name=='flow_in', 'columns':['part' ,'location', 'amount']},
                            {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['part' ,'location', 'amount']},
-                          {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transport resource', 'costs']}
-                           ]
+                          {'name':'route_cost_total', 'filter':lambda s: s.ame=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
+                        {'name':'estimated_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'cost']},
+                        {'name':'actual_weight', 'filter':lambda s: s.name=='actual_weight', 'columns':['from' ,'to', 'transportresource', 'weight']},
+                        {'name':'max_weight', 'filter':lambda s: s.name=='max_weight', 'columns':['from' ,'to', 'transportresource', 'weight']},
+                        {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']}
+]
 
 modelAtomTemplates = [
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['part', 'location', 'amount']},
-      {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['part', 'location', 'amount']}
+            {'name':'totalSupply','filter':lambda s: s.name=='totalSupply', 'columns':['part', 'supply']},
+      {'name':'active_location','filter':lambda s: s.name=='active_location', 'columns':['location']},
+    {'name':'error_disconnected','filter':lambda s: s.name=='error_disconnected', 'columns':['location']},
+    {'name':'error_capacity_exceeded','filter':lambda s: s.name=='error_capacity_exceeded', 'columns':['location','ReqAbs','Max']},
+
+      {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+      {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['part', 'location', 'amount']},
+      {'name':'partTR','filter':lambda s: s.name=='partTR', 'columns':['product', 'transportresource']},
+      {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
+      {'name':'partOnFlow','filter':lambda s: s.name=='partOnFlow', 'columns':['from', 'to', 'transportresource','product']}
 ]
 
 def cprint(Text):
@@ -68,14 +81,17 @@ def cprint(Text):
 
 
 def solve_clingcon(programs, max_models=1, ngo=False):
-    global start_solving, produced_at_atoms, ctl
+    global start_solving, produced_at_atoms, ctl, timeout
     print('Configuring Clingcon ...')
     print(f'--models={max_models}')
 
     prg = hf.read_files_to_string(programs)
 
     thy = ClingconTheory()
-    ctl = Control(['0'])
+    # , "--parallel-mode=12"
+    #ctl = Control(["--opt-strategy=usc"])
+
+    ctl = Control(["--opt-mode=optN", "--heuristic=Domain"])
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     print("programs", programs)
     ctl.register_observer(myobs)
@@ -87,24 +103,46 @@ def solve_clingcon(programs, max_models=1, ngo=False):
     start_time_grounding = time.process_time()
     print(f"=== Grounding programs: {programs} ... ===")
     ctl.ground([('base', [])])
+    #ctl.configuration.solve.solve_limit = timeout
+    ctl.configuration.solve.opt_mode = "optN"
     
     end_time_grounding = time.process_time()
     print(f"=== Grounding done ({round((end_time_grounding - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
     
     thy.prepare(ctl)
     start_solving = time.process_time()
-    with ctl.solve(yield_=True, on_model=on_model) as hnd:
+    with ctl.solve(yield_=True, async_=True, on_model=on_model) as hnd:
         for idx, mdl in enumerate(hnd):
-            print(f"Model {idx}")
+            #print(mdl)
             assignment_data = list(thy.assignment(mdl.thread_id))
+            
+            #print([f'{key}={val}' for key, val in thy.assignment(mdl.thread_id) if key.name == "load" and val!=0])
             processAggregates(assignment_data, idx)            
             check_clingcon_flow(idx)
             compute_costs(idx)
+            check_partTR_validity(idx)
     ctl.cleanup()
 
+
+
+def check_partTR_validity(idx):
+    partTR_df_str = all_data_frames["partTR"].astype(str) 
+    partTR_dict = list(zip(partTR_df_str['product'], partTR_df_str['transportresource']))
+
+    load_df = all_data_frames["load"].astype(str) 
+    
+    count = 0
+    for row in load_df.itertuples():
+        if  (row.product,row.transportresource) not in partTR_dict:
+            print(f"Invalid product/ TR pair: {row.product,row.transportresource }")
+            count += 1
+            #sys.exit('exit')
+    
+    print(f"{count} # of invalid (product, transportresource) pairs for model {idx}.")
+    
 def compute_costs(idx):
-    routeCostTotal_df = all_data_frames["routeCostTotal"]
-    print(f"Total costs for model {idx}: {routeCostTotal_df["costs"].sum()}")
+    routeCostTotal_df = all_data_frames["route_cost_total"]
+    print(f"Total costs for model {idx}: {routeCostTotal_df["cost"].sum()}")
     
 def processAggregates(assignment_data, idx):
     for modelAggregateTemplate in modelAggregateTemplates:
@@ -116,7 +154,8 @@ def processAggregates(assignment_data, idx):
         )
     
 def showModelAggregates(assignment_data, dataName, columns, index):
-    filtered_data = [[*key.arguments, val] for key, val in assignment_data if key.name==dataName]
+    filtered_data = [[*key.arguments, val] for key, val in assignment_data if key.name==dataName and val!=0]
+    #print([f'{key}={val}' for key, val in assignment_data if key.name == "routeCostTotal" and val!=0])
     df = pd.DataFrame(data=filtered_data, columns=columns)
     all_data_frames[dataName] = df
     output_dir = f"{outputfolder}/model_{index}"
@@ -126,8 +165,8 @@ def showModelAggregates(assignment_data, dataName, columns, index):
 
 def check_clingcon_flow(modelIndex):
     demand_supply_df = all_data_frames["req"]
-    flow_in = all_data_frames["flowIn"]
-    flow_out = all_data_frames["flowOut"]
+    flow_in = all_data_frames["flow_in"]
+    flow_out = all_data_frames["flow_out"]
 
     in_and_out = pd.merge(
     flow_in, 
@@ -146,6 +185,7 @@ def check_clingcon_flow(modelIndex):
     )   
     final_merged_df['net_flow'] = final_merged_df['amount_in'] - final_merged_df['amount_out']
     final_merged_df['remaining_req'] = final_merged_df['amount'] - final_merged_df['net_flow']
+    final_merged_df = final_merged_df.fillna(0)
 
     is_consistent = np.all(np.isclose(final_merged_df['remaining_req'], 0))
     if is_consistent != True:
@@ -236,7 +276,8 @@ def on_model(m: clingo.Model):
 def run_asp(): 
     global output_hundredth_model, outputfolder, start_time_solving, ctl, \
     foundModelIndex, analyzedModelIndex, showModel, print_details, \
-    exit_after_optimal_found, draw, check_route_correctness_var, compute_costs_var, check_flow_correctness_var, check_clingcon_flow_var
+    exit_after_optimal_found, draw, check_route_correctness_var, timeout, \
+    compute_costs_var, check_flow_correctness_var, check_clingcon_flow_var
   
     parser = argparse.ArgumentParser(description="Runs logic-programs in sub-folders 'facts' and 'rules'.")
     parser.add_argument("-rc", "--run_clingcon", required=False, default=100, type=int, help="runs clingcon.")
