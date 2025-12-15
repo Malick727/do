@@ -103,10 +103,6 @@ def run_cp_2steps():
                            ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res_[-1][0]
 
-    sol: MultibatchingSolution
-
-    for s in sol.list_flows:
-        print(s.transport_link.transport_type, s.product_packing)
     #print(problem.evaluate(sol))
     #print(sum(problem.evaluate(sol).values()))
     #print(problem.evaluate(sol), problem.satisfy(sol))

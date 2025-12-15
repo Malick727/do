@@ -63,6 +63,9 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  partTR(P,TR), 
 :- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
 :- &sum{flow_out(P,From)} !=0, demand(P,From,V), V!=0.
 
+%&sum{flow_in(P,L); -1*flow_out(P,L)} =0 :- demand(P,L,0), offer(P,L,0).
+:- &sum{flow_in(P,L); -1*flow_out(P,L)} !=0, not demandOffer(P,L,_),  location(L), part(P).
+
 :- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
 
@@ -78,7 +81,6 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  partTR(P,TR), 
 
 #const maxFreq = 30.
 &dom {0..maxFreq} = estimated_freq(From,To,TR) :- possibleFlow(From, To, TR, _).
-
 
 &sum {C * estimated_freq(From, To, TR);
    -1 * S * load(From, To, TR, P) : partSize(P, S), possibleFlow(From, To, TR, P)

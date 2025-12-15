@@ -12,10 +12,8 @@
     "print_details": true,
     "exit_after_optimal_found": false,
     "draw": false,
-    "check_clingcon_flow" : true,
-    "check_flow_correctness": false,
-    "check_route_correctness": false,
-    "compute_costs": false,
+    "check_clingcon_multibatching" : true,
+    "compute_costs": true,
     "runs":
     {  
     },
