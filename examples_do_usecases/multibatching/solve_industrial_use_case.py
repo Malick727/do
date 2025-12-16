@@ -11,7 +11,8 @@ import plotly.io as pio
 pio.renderers.default = "browser"
 os.environ["SDKROOT"] = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 from multibatching.parse_config_data import parse_json_to_problem
-from multibatching.problem import compute_graph_for_product, Product, PackingTransport, MultibatchingSolution
+from multibatching.problem import compute_graph_for_product, Product, PackingTransport, MultibatchingSolution, \
+    MultibatchingProblem
 from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
                                          CpsatBendersMultibatchingSolver,
                                          ModelingMultiBatch,
@@ -84,7 +85,7 @@ def run_oe():
 def run_cp_2steps():
     # problem = parse_problem()
     # problem = init_instance()
-    problem = parse_problem()
+    problem: MultibatchingProblem = parse_problem()
     solver = CpsatMultibatchingSolver(problem=problem,
                                       scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
@@ -536,12 +537,11 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    # run_milp_2step()
-    #run_cp_2steps_and_complete()
+    run_cp_2steps()
     # run_milp_2step()
     # run_milp_lazy()
     # run_milp_2step()
-    #run_milp_lazy()
+    # run_milp_lazy()
     # run_cpopt_2steps()
     # run_cp_singlebatch_ws()
     # run_cp_benders()

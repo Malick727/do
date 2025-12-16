@@ -85,7 +85,7 @@ class CpsatPackingSubproblem(OrtoolsCpSatSolver, PackingSubproblemSolver):
         transport_links = [x.transport_link for x in solution.list_flows]
         transport_link_to_index = {transport_links[i]: i for i in range(len(transport_links))}
         flow_per_link: dict[TransportLink, dict[Product, int]] = {x.transport_link:
-                                                                  {p: int(x.product_packing[p]*x.nb_packing)
+                                                                  {p: int(math.ceil(x.product_packing[p]*x.nb_packing))
                                                                    for p in x.product_packing}
                                                                   for x in solution.list_flows}
         sum_size_per_link = {x: sum([p.size*flow_per_link[x][p]

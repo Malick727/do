@@ -32,6 +32,13 @@ class ModelingMultiBatch(Enum):
     FLOW = 0
     UNIT_FLOW = 1
 
+class CpsatTest(OrtoolsCpSatSolver):
+    def init_model(self, **kwargs: Any) -> None:
+        pass
+
+    def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> Solution:
+        pass
+
 
 class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
 
