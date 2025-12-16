@@ -5,7 +5,6 @@ from typing import Any, Optional, List, Dict
 import clingo
 from clingo.ast import parse_string, ProgramBuilder
 from clingcon import ClingconTheory
-
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction
 from discrete_optimization.generic_tools.do_solver import SolverDO, StatusSolver
@@ -102,6 +101,7 @@ freqButNoLoad(From, To, TR):- &sum {load(From, To, TR, P) : possibleFlow(From, T
 &sum {  C * estimated_freq(From,To,TR)} = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_),route(_, From, To, TR, _, C).
 &minimize{ C * estimated_freq(From,To,TR):route(_, From, To, TR, _, C) }.
 
+
 """
 
 
@@ -133,8 +133,8 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
-        clingo_args = kwargs.get("clingo_args", ["--models=0"]) #", "--opt-mode=optN"
-
+        clingo_args = kwargs.get("clingo_args", [#"--models=0",
+                                                 "--opt-mode=opt"])
         self.ctl = clingo.Control(clingo_args)
         self.theory = ClingconTheory()
 
@@ -260,7 +260,7 @@ class ClingconMultibatchingSolver(SolverDO):
                 df.loc[len(df)] = {"product": p_name, "location":loc_name, "amount":value}
 
         route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
+        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
 
         list_flows = []
         for link, product_quantities in flows_aggregation.items():
@@ -274,7 +274,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def compute_costs(self):
         route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
+        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
     
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
