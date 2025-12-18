@@ -27,50 +27,39 @@ cap_size_divide = 1
 ASP_MODEL_CONTENT = """
 root(eARFullFuselage). 
 
-totalSupply(P, S) :- S = #sum {V : demandOffer(P,_,V), V > 0;-1* V : demandOffer(P,_,V), V < 0 }, part(P).
+totalSupply(P, S) :- S = #sum {V : demandOffer(P,_,V), V > 0;-1* V : demandOffer(P,_,V), V < 0 }, product(P).
 #show totalSupply/2.
-
 
 hasDemand(P, L) :- demandOffer(P, L, V), V < 0.
 hasOffer(P, L)  :- demandOffer(P, L, V), V > 0.
 
 demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
-demand(P, L, 0)        :- part(P), location(L), not hasDemand(P, L).
+demand(P, L, 0)        :- product(P), location(L), not hasDemand(P, L).
 
 offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
-offer(P, L, 0)   :- part(P), location(L), not hasOffer(P, L).
-
-#show demand/3.
-#show offer/3.
+offer(P, L, 0)   :- product(P), location(L), not hasOffer(P, L).
 
 requiredNet(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
-requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), part(P).
+requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), product(P).
 &dom { N..N } = req(P,L) :- requiredNet(P, L, N).
 
 %%%
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  partTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>1, Cost>0.
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>1, Cost>0.
 
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
-
-&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L)
-    :-  location(L), part(P).
-
-&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L)
-    :-  location(L), part(P).
+&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
+&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
 :- &sum{flow_out(P,From)}!=V, offer(P,From,V), V!=0.
 :- &sum{flow_in(P,To)}!= V, demand(P,To,V), V!=0.
 :- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
 :- &sum{flow_out(P,From)} !=0, demand(P,From,V), V!=0.
-
-%&sum{flow_in(P,L); -1*flow_out(P,L)} =0 :- demand(P,L,0), offer(P,L,0).
-:- &sum{flow_in(P,L); -1*flow_out(P,L)} !=0, not demandOffer(P,L,_),  location(L), part(P).
+:- &sum{flow_in(P,L); -1*flow_out(P,L)} !=0, not demandOffer(P,L,_),  location(L), product(P).
 
 :- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
 
 % Balance Constraint
-%&sum { flow_in(P,L); -1 * flow_out(P,L)} = req(P,L) :- part(P), location(L).
 % when demandOffer is 0, then flow_in and flow_out need to be the same
 &sum { flow_in(P,L); -1 * flow_out(P,L)} = 0 :- demandOffer(P,L,0).
 % when demandOffer is <0 (i.e. there is demand), then in-out needs to be -1*V  
@@ -78,29 +67,24 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  partTR(P,TR), 
 % when demandOffer is > 0 (i.e. there is supply), then the out-in needs to be V
 &sum { flow_out(P,L); -1 * flow_in(P,L)} = V :- demandOffer(P,L,V), V>0.
 
-
 #const maxFreq = 30.
 &dom {0..maxFreq} = estimated_freq(From,To,TR) :- possibleFlow(From, To, TR, _).
 
 &sum {C * estimated_freq(From, To, TR);
-   -1 * S * load(From, To, TR, P) : partSize(P, S), possibleFlow(From, To, TR, P)
+   -1 * S * load(From, To, TR, P) : productSize(P, S), possibleFlow(From, To, TR, P)
 } >= 0 :- possibleFlow(From, To, TR, _), transportCapacity(TR, C).
 
 % it cannot be the case that there is a load > 0 and no estimated freq for this trajectory
 :- &sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P)}>0, estimated_freq(From, To, TR)=0, possibleFlow(From, To, TR, P).
-% it cannot be the case that if there is no load, there is a frequency
-freqButNoLoad(From, To, TR):- &sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P)}!=0, estimated_freq(From, To, TR)=0, possibleFlow(From, To, TR, _).
-#show freqButNoLoad/3.
 
-%&sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P); -1* estimated_freq(From, To, TR)
-%} >= 0 :- possibleFlow(From, To, TR, _).
-
-&minimize{estimated_freq(From,To,TR):route(_, From, To, TR, _, C) }.
+&sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P); -1* estimated_freq(From, To, TR)} >= 0 :- possibleFlow(From, To, TR, _).
 
 #const limit = 1000000000.
 &dom { 0..limit } = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_).
 &sum {  C * estimated_freq(From,To,TR)} = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_),route(_, From, To, TR, _, C).
-&minimize{ C * estimated_freq(From,To,TR):route(_, From, To, TR, _, C) }.
+
+&minimize{ route_cost_total(From, To, TR):route(_, From, To, TR, _, C) }.
+&minimize{ load(From, To, TR, P):possibleFlow(From, To, TR, P) }.
 
 """
 
@@ -132,10 +116,13 @@ class ClingconMultibatchingSolver(SolverDO):
         self.route_key_to_link: Dict[tuple, TransportLink] = {}
 
     def init_model(self, **kwargs: Any) -> None:
-        # Default options
-        clingo_args = kwargs.get("clingo_args", ["--models=0"]) #", "--opt-mode=optN"
+        # --model=0,  #", "--opt-mode=optN": enumerates all models
 
-        self.ctl = clingo.Control(clingo_args)
+        max_models = kwargs.get("max_models", 100)
+        self.ctl = clingo.Control(
+            ["--warn=no-atom-undefined", f"--models={max_models}", "--opt-mode=opt", f"--models={max_models}"]
+        )
+        logger.info(f'Configuration Keys: {self.ctl.configuration.solve.keys}')
         self.theory = ClingconTheory()
 
         # 1. Register Clingcon theory
@@ -261,6 +248,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
         route_cost_total_df = self.all_dataframes["route_cost_total"]
         logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
+        route_cost_total_df.to_csv('route_cost_total_df.csv', index=False, sep=',')
 
         list_flows = []
         for link, product_quantities in flows_aggregation.items():
@@ -272,9 +260,6 @@ class ClingconMultibatchingSolver(SolverDO):
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
 
-    def compute_costs(self):
-        route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
     
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
@@ -323,12 +308,12 @@ class ClingconMultibatchingSolver(SolverDO):
         for p in self.problem.products:
             s_name = sanitize(p.name if p.name else f"p{p.id}")
             self.name_to_product[s_name] = p
-            facts.append(f"part({s_name}).")
+            facts.append(f"product({s_name}).")
             scaled_size = int(p.size / cap_size_divide)
-            facts.append(f"partSize({s_name},{scaled_size}).")
+            facts.append(f"productSize({s_name},{scaled_size}).")
             for valid_tr in p.valid_transports:
                 tr_s_name = sanitize(valid_tr.name if valid_tr.name else f"tr{valid_tr.id}")
-                facts.append(f"partTR({s_name},{tr_s_name}).")
+                facts.append(f"productTR({s_name},{tr_s_name}).")
 
         # Demand/Offers
         for loc in self.problem.locations:

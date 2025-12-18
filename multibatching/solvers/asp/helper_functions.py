@@ -99,8 +99,8 @@ def solve_clingo(programs, max_models=1, ngo=False):
     print('Configuring Clingo ...')
     print(f'--models={max_models}')
 
-    ctl = clingo.Control(
-        ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=optN", "--parallel-mode=12", "--heuristic=Domain"])
+    ctl = clingo.Control(["--opt-mode=opt"])
+       # ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=opt", "--parallel-mode=12"]) #, "--heuristic=Domain"
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     ctl.register_observer(myobs)
     myobs.start()#

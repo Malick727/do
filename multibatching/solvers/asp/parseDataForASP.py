@@ -3,7 +3,7 @@ import os.path
 
 location_name_id_mapping = {}
 tr_name_id_mapping = {}
-part_name_id_mapping = {}
+product_name_id_mapping = {}
 tr_id_cost_mapping = {}
 
 alternative_names = False
@@ -13,7 +13,7 @@ input_file = f'{file_name}.json'
 
 output_file = "factsASP.lp"
 
-cap_size_divde = 1000000
+cap_size_divde = 1000000000
 
 # only used for text and not 
 def reformulate(text):
@@ -67,6 +67,8 @@ def json2asp(file_out):
         tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['co2Emissions'])])}).\n", transportation_data_filter))
         tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data_filter))
         tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['speed'])])}).\n",  transportation_data_filter))
+        tr_costPerCap = list(map(lambda x: f"transportCostPerCap({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(int((transportation_data.get(x)['capacity']/cap_size_divde)/transportation_data.get(x)['cost']))])}).\n",  transportation_data_filter))        
+        
 
         alt_tr_names_mapping = zip([reformulate(transportation_data.get(x)['name']) for x in transportation_data], [f"tr{n}" for n in range(0, len(transportation_data))]) 
 
@@ -92,43 +94,42 @@ def json2asp(file_out):
                 routes += (f"route({idx},{source},{destination},{tr_name},{distance},{costs}).\n")
                 idx += 1
 
-    
-
-        parts_data = json_data["products"]
-        part_names = list(map(lambda x: f"part({reformulate(parts_data.get(x).get('name'))}).\n", parts_data))
-        part_sizes = list(map(lambda x: f"partSize({reformulate(parts_data.get(x).get('name'))},{reformulateNr(parts_data.get(x).get('size')/cap_size_divde)}).\n", parts_data))
+        products_data = json_data["products"]
+        product_names = list(map(lambda x: f"product({reformulate(products_data.get(x).get('name'))}).\n", products_data))
+        product_sizes = list(map(lambda x: f"productSize({reformulate(products_data.get(x).get('name'))},{reformulateNr(products_data.get(x).get('size')/cap_size_divde)}).\n", products_data))
         
-        alt_part_names_mapping = zip([reformulate(parts_data.get(x)['name']) for x in parts_data], [f"part{n}" for n in range(0, len(parts_data))]) 
+        alt_product_names_mapping = zip([reformulate(products_data.get(x)['name']) for x in products_data], [f"product{n}" for n in range(0, len(products_data))]) 
 
 
-        parts_tr = ""
-        for part in parts_data:
-            part_dict = parts_data.get(part)
-            name = reformulate(part_dict.get("name"))
-            for tr in part_dict.get("validTR"):
-                 parts_tr += f"partTR({name},{tr_name_id_mapping.get(str(tr))}).\n"
+        products_tr = ""
+        for product in products_data:
+            product_dict = products_data.get(product)
+            name = reformulate(product_dict.get("name"))
+            for tr in product_dict.get("validTR"):
+                 products_tr += f"productTR({name},{tr_name_id_mapping.get(str(tr))}).\n"
 
  
-        #parts_names_for_mapping = list(map(lambda x: reformulate(parts_data.get(x).get('name')), parts_data))        
-        #parts_ids_for_mapping = list(map(lambda x: x, parts_data))
+        #products_names_for_mapping = list(map(lambda x: reformulate(products_data.get(x).get('name')), products_data))        
+        #products_ids_for_mapping = list(map(lambda x: x, products_data))
 
-        #part_name_id_mapping = dict(zip(parts_ids_for_mapping,parts_names_for_mapping))
+        #product_name_id_mapping = dict(zip(products_ids_for_mapping,products_names_for_mapping))
 
         demandOffers = []
-        for part in parts_data:
-            part_dict = parts_data.get(part)
-            part_name = reformulate(parts_data.get(part).get("name"))
-            supply_demand_dict = part_dict.get("netSupplyDemand")
-            demandOffers += list(map(lambda x: f"demandOffer({part_name},{location_name_id_mapping.get(x)},{supply_demand_dict.get(x)}).\n", supply_demand_dict))
+        for product in products_data:
+            product_dict = products_data.get(product)
+            product_name = reformulate(products_data.get(product).get("name"))
+            supply_demand_dict = product_dict.get("netSupplyDemand")
+            demandOffers += list(map(lambda x: f"demandOffer({product_name},{location_name_id_mapping.get(x)},{supply_demand_dict.get(x)}).\n", supply_demand_dict))
             check_on_balance =  list(map(lambda x: supply_demand_dict.get(x), supply_demand_dict))
-            #print("check_on_balance", part_name, sum(check_on_balance))
+            #print("check_on_balance", product_name, sum(check_on_balance))
         
         text_to_be_written = "% ----------------------- locations -----------------------\n" + "".join(locations) \
                              + "\n% ----------------------- transport resources -----------------------\n" \
-                             + "".join(tr_names) + "\n" +  "".join(tr_co2) + "\n" + "".join(tr_costs) + "\n" + "".join(tr_capacities) + "\n" + "".join(tr_speeds) + "\n\n" \
+                             + "".join(tr_names) + "\n" +  "".join(tr_co2) + "\n" + "".join(tr_costs) + "\n" + "".join(tr_capacities) + "\n" \
+                              + "".join(tr_speeds) + "\n"  +  "".join(tr_costPerCap) + "\n\n" \
                              + "\n% ----------------------- routes -----------------------\n" + routes \
-                             + "\n% ----------------------- parts -----------------------\n" \
-                             + "".join(part_names) + "\n" +  "".join(part_sizes) + "\n" +  "".join(parts_tr) + "\n" \
+                             + "\n% ----------------------- products -----------------------\n" \
+                             + "".join(product_names) + "\n" +  "".join(product_sizes) + "\n" +  "".join(products_tr) + "\n" \
                              + "\n% ----------------------- demands and offers -----------------------\n" + "".join(demandOffers) + "\n" \
                              + "% ----------------------- harbors -----------------------\n" \
                              + "harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor)." + "\n" \
@@ -139,7 +140,7 @@ def json2asp(file_out):
             # first replace harbor names to avoid wrong replacements
             for old_word, new_word in dict(alt_harbour_names_mapping).items():
                 text_to_be_written = text_to_be_written.replace(old_word, new_word)
-            alt_names_dict = dict(alt_prodloc_names_mapping) | dict(alt_tr_names_mapping) | dict(alt_part_names_mapping)
+            alt_names_dict = dict(alt_prodloc_names_mapping) | dict(alt_tr_names_mapping) | dict(alt_product_names_mapping)
             for old_word, new_word in alt_names_dict.items():
                 text_to_be_written = text_to_be_written.replace(old_word, new_word)
         file_out.writelines(text_to_be_written)

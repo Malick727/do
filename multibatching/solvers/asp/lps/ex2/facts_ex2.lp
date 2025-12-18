@@ -25,17 +25,17 @@ transportCost(tr2,42).
 transportSpeed(tr1,3).
 transportSpeed(tr2,2).
 
-% Part: name, validTR, size, value
-part(p1).
-part(p2).
-partSize(p1,4).
-partSize(p2,3).
-partTR(p1,tr1).
-partTR(p1,tr2).
-partTR(p2,tr1).
-partTR(p2,tr2).
-partVal(p1,1000).
-partVal(p2,600).
+% product: name, validTR, size, value
+product(p1).
+product(p2).
+productSize(p1,4).
+productSize(p2,3).
+productTR(p1,tr1).
+productTR(p1,tr2).
+productTR(p2,tr1).
+productTR(p2,tr2).
+productVal(p1,1000).
+productVal(p2,600).
 
 
 

@@ -49,7 +49,7 @@ class MisASPSolver(MisSolver):
                         """
         max_models = kwargs.get("max_models", 100)
         self.ctl = clingo.Control(
-            ["--warn=no-atom-undefined", f"--models={max_models}", "--opt-mode=optN"]
+            ["--warn=no-atom-undefined", f"--models={max_models}", "--opt-mode=opt", f"--models={max_models}"]
         )
         self.ctl.add("base", [], basic_model)
         string_data_input = self.build_data_string()

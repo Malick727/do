@@ -200,13 +200,11 @@ def get_programs_by_categories(categories: list[str]):
             print(f"Folder or file \'{category}\' does not exist.")
     return programs
 
-def solve_clingo(programs, max_models=1, ngo=False):
+def solve_clingo(programs, max_models=0, ngo=False):
     global start_solving, produced_at_atoms, ctl
-    print('Configuring Clingo ...')
-    print(f'--models={max_models}')
-
-    ctl = clingo.Control(
-        ['--warn=no-atom-undefined', f'--models={max_models}', "--opt-mode=optN", "--parallel-mode=12", "--heuristic=Domain"])
+    ctl = Control(["--opt-mode=opt","--parallel-mode=12", f"--models={max_models}"]) 
+    conf = ctl.configuration.solve
+    print("Solver Config:", ", ".join([f"{key}: {getattr(conf, key)}" for key in conf.keys]))
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     ctl.register_observer(myobs)
     myobs.start()#
