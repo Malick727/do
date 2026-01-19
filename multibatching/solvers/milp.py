@@ -94,7 +94,8 @@ class MilpSolver(GurobiMilpSolver):
         # Batch selection
         for tl in self.problem.transport_links:
             for p in products_on_links[tl]:
-                model.addConstr(gp.quicksum(x[tl][b]*batches[tl.transport_type][b][p] for b in range(len(batches[tl.transport_type]))) == y[tl][p])
+                model.addConstr(gp.quicksum(x[tl][b]*batches[tl.transport_type][b][p]
+                                            for b in range(len(batches[tl.transport_type]))) == y[tl][p])
 
 
         # Set objective

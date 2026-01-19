@@ -760,6 +760,9 @@ def plotly_solution_graph(
                     to_loc_id = flow_item.transport_link.location_l2.id
                     aggregated_flows[(from_loc_id, to_loc_id, product, flow_item.transport_link.transport_type)] += (
                         total_units)
+                    if product.name="S3 Right Shell":
+                    print("product", product, "from_loc_id", flow_item.transport_link.location_l1, "to_loc_id", flow_item.transport_link.location_l2)
+                    print("product", product, "from_loc_id", from_loc_id, "to_loc_id", to_loc_id)
 
     if not aggregated_flows:
         print(f"No active flows found for the specified products: {title_product_part}")

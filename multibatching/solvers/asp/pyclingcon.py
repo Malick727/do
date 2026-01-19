@@ -54,12 +54,15 @@ modelAggregateTemplates = [{'name':'flow_out', 'filter':lambda s: s.name=='flow_
                            {'name':'flow_in', 'filter':lambda s: s.name=='flow_in', 'columns':['product' ,'location', 'amount']},
                            {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['product' ,'location', 'amount']},
                           {'name':'route_cost_total', 'filter':lambda s: s.ame=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
-                        {'name':'estimated_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'freq']},
+                        {'name':'route_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'freq']},
                         {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']},
-                        {'name':'total_weight', 'filter':lambda s: s.name=='weight', 'columns':['from' ,'to', 'transportresource']}
+                        {'name':'total_weight', 'filter':lambda s: s.name=='total_weight', 'columns':['from' ,'to', 'transportresource', 'weight']}
 ]
  
 modelAtomTemplates = [
+      {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
+      {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
+      {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq']},
       {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
       {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
       {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
@@ -67,7 +70,7 @@ modelAtomTemplates = [
       {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
       {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
       {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
-      {'name':'partOnFlow','filter':lambda s: s.name=='partOnFlow', 'columns':['from', 'to', 'transportresource','product']}
+      {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
 ]
 
 def cprint(Text):
@@ -85,8 +88,12 @@ def solve_clingcon(programs, max_models=0, ngo=False):
 
     thy = ClingconTheory()
     # , "--parallel-mode=12"
-    #ctl = Control(["--opt-strategy=usc"])
-    ctl = Control(["--opt-mode=opt", "--heuristic=Domain"]) #, f"--models={max_models}"
+    clingo_args = [f"--models={max_models}", "--opt-mode=opt","--heuristic=Domain"]
+
+    ctl = clingo.Control(clingo_args)
+    ctl.configuration.solve.models = 0  # Search for better models
+    #ctl.configuration.solver.opt_strategy = "bb"
+    #ctl = Control(["--opt-mode=opt", "--heuristic=Domain","--opt-strategy=usc"]) #, f"--models={max_models}"
     print(f'Configuration Keys: {ctl.configuration.solve.keys}')
     #conf = ctl.configuration.solve
     #print("Solver Config:", ", ".join([f"{key}: {getattr(conf, key)}" for key in conf.keys]))
@@ -100,20 +107,24 @@ def solve_clingcon(programs, max_models=0, ngo=False):
     start_time_grounding = time.process_time()
     print(f"=== Grounding programs: {programs} ... ===")
     ctl.ground([('base', [])])
+    current_best = 1000000
+    optimum_model = None
     ctl.configuration.solve.solve_limit = timeout
-    #ctl.configuration.solve.opt_mode = "opt"
+
+    ctl.configuration.solve.opt_mode = "opt"
     
     end_time_grounding = time.process_time()
     print(f"=== Grounding done ({round((end_time_grounding - start_time_grounding) / 60, 2)} minutes, {myobs.number_rules} rules, {myobs.number_choice_rules} choice rules) ===")
     
     thy.prepare(ctl)
     start_solving = time.process_time()
+    
     with ctl.solve(yield_=True, async_=True, on_model=on_model) as hnd:
         for idx, mdl in enumerate(hnd):
             #print(mdl)
             assignment_data = list(thy.assignment(mdl.thread_id))
             print("aggregates selection:")
-            print([f'{key}={val}' for key, val in thy.assignment(mdl.thread_id) if key.name == "total_weight" and val!=0])
+            print([f'{key}={val}' for key, val in thy.assignment(mdl.thread_id) if key.name == "route_freq" and val!=0])
             processAggregates(assignment_data, idx)   
             processModel(idx)         
     ctl.cleanup()
@@ -129,7 +140,6 @@ def processAggregates(assignment_data, idx):
     
 def showModelAggregates(assignment_data, dataName, columns, index):
     filtered_data = [[*key.arguments, val] for key, val in assignment_data if key.name==dataName and val!=0]
-    #print([f'{key}={val}' for key, val in assignment_data if key.name == "routeCostTotal" and val!=0])
     df = pd.DataFrame(data=filtered_data, columns=columns)
     all_data_frames[dataName] = df
     output_dir = f"{outputfolder}/model_{index}"
@@ -196,13 +206,6 @@ def check_clingcon_flow(modelIndex):
             sys.exit('exit')
     else:
         print(f"Model {modelIndex}: Flow seems consistent.")
-
-def to_int(val):
-    # If it's a Clingo Symbol (has 'number' attribute), extract it
-    if hasattr(val, 'number'): 
-        return val.number
-    # If it's already an int or float, return as is
-    return val
 
 def check_clingcon_load_freq(modelIndex):
 
@@ -338,24 +341,6 @@ def check_clingcon_load_freq(modelIndex):
             sys.exit('exit')
     print(f"Model {modelIndex}: Frequencies, and Capacities seem consistent.")
 
-
-def check_clingcon_load_possible(modelIndex):
-
-    load_df = all_data_frames["load"]
-    possible_flows_df = all_data_frames["possibleFlow"]
-    load_df = load_df.drop(columns=['amount'])
-
-    print("load")
-    print(load_df.to_string())
-    for index, row in load_df.iterrows():
-        #print("row", row) 
-        convert_row = [row.name for row in row.tolist()]
-        new_row_df = pd.DataFrame([convert_row], columns=['from' ,'to', 'transportresource'])
-        #print("row", convert_row)
-        if not (possible_flows_df == new_row_df).all(axis=1).any():
-            print("row", convert_row," does not exist in possible flows")
-            print("row", new_row_df," does not exist in possible flows")
-
 def check_clingcon_load(modelIndex):
 
     """
@@ -408,15 +393,28 @@ def check_clingcon_load(modelIndex):
         print(inconsistent[['product', 'location', 'amount', 'net_flow_calc', 'balance_check']])
         #sys.exit('exit')
     
-
     print(f"Model {modelIndex}: Loads seem consistent.")
 
 
+def to_int(val):
+    # If it's a Clingo Symbol (has 'number' attribute), extract it
+    if hasattr(val, 'number'): 
+        return val.number
+    # If it's already an int or float, return as is
+    return val
 
-def compute_costs(modelIndex):
-    routeCostTotal_df = all_data_frames["route_cost_total"]
+def compute_costs_active_flow(modelIndex):
+    routeCostTotal_df = all_data_frames["routeCostTotal"]
+    #print("routeCostTotal_df", routeCostTotal_df)
+    routeCostTotal_df["cost"] = routeCostTotal_df["cost"].apply(to_int)
     print(f"Model {modelIndex}: Total costs are {routeCostTotal_df["cost"].sum()}.")
 
+
+def compute_costs(modelIndex):
+    routeCostTotal_df = all_data_frames["routeCostTotal"]
+    #print("routeCostTotal_df", routeCostTotal_df)
+    routeCostTotal_df["cost"] = routeCostTotal_df["cost"].apply(to_int)
+    print(f"Model {modelIndex}: Total costs are {routeCostTotal_df["cost"].sum()}.")
 
 def processModel(modelIndex):
     global check_clingcon_multibatching, compute_costs_var
@@ -424,7 +422,6 @@ def processModel(modelIndex):
         cprint(f"Model {modelIndex}: Check clingcon flow, load and product/TR consistency ...")
         check_clingcon_flow(modelIndex)
         check_clingcon_load(modelIndex)
-        #check_clingcon_load_possible(modelIndex)
         check_productTR(modelIndex)
     if compute_costs_var == True:   
         compute_costs(modelIndex)
@@ -561,3 +558,37 @@ def run_asp():
 if __name__ == "__main__":
     myobs = hf.MyObserver()
     run_asp()
+
+
+
+
+## externals
+#     ctl.ground([('base', [])])
+#   current_best = 1000000
+#    optimum_model = None
+#    ctl.configuration.solve.solve_limit = timeout
+#
+#    while True:
+#        # Assign the current best cost to the external bound
+#        ctl.assign_external(clingo.Function("bound", [clingo.Number(current_best)]), True)
+#        
+#        found_better = False
+#        with ctl.solve(yield_=True) as handle:
+#            for model in handle:
+#                # Get theory variables
+#                for name, val in thy.assignment(model.thread_id):
+#                    if str(name) == "total_costs":
+#                        if val < current_best:
+#                            optimum_model = model.symbols(shown=True)
+#                            print(f"Improved Model Found! New Bound: {current_best}")
+#                            found_better = True
+#                            current_best = val
+#                            # We found a better one, so break this solve handle 
+#                        # and restart with a tighter bound
+#                        break 
+#        
+#        if not found_better:
+#            print("Optimization Complete.")
+#            break
+#
+#    print(f"Final Optimum Cost: {current_best}")

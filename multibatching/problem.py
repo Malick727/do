@@ -5,7 +5,7 @@ from discrete_optimization.generic_tools.do_problem import *
 from discrete_optimization.generic_tools.graph_api import Graph, from_networkx
 import networkx as nx
 from dataclasses import dataclass, field
-
+import pydantic
 
 @dataclass(frozen=True)
 class TransportType:

@@ -11,7 +11,8 @@ import plotly.io as pio
 pio.renderers.default = "browser"
 os.environ["SDKROOT"] = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 from multibatching.parse_config_data import parse_json_to_problem
-from multibatching.problem import compute_graph_for_product, Product, PackingTransport, MultibatchingSolution
+from multibatching.problem import compute_graph_for_product, Product, PackingTransport, MultibatchingSolution, \
+    MultibatchingProblem
 from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
                                          CpsatBendersMultibatchingSolver,
                                          ModelingMultiBatch,
@@ -84,7 +85,7 @@ def run_oe():
 def run_cp_2steps():
     # problem = parse_problem()
     # problem = init_instance()
-    problem = parse_problem()
+    problem: MultibatchingProblem = parse_problem()
     solver = CpsatMultibatchingSolver(problem=problem,
                                       scaling_factor=1)
     solver.init_model(modeling=ModelingMultiBatch.FLOW,
@@ -102,17 +103,17 @@ def run_cp_2steps():
                            time_limit=10,
                            ortools_cpsat_solver_kwargs={"log_search_progress": True})
     sol = res_[-1][0]
-
-    #print(problem.evaluate(sol))
-    #print(sum(problem.evaluate(sol).values()))
-    #print(problem.evaluate(sol), problem.satisfy(sol))
-    # plot_solution_graph(problem=problem, solution=sol)
-    #for i in range(len(problem.products)):
-    #    plotly_solution_graph(solution=sol,
-    #                          problem=problem,
-    #                          use_logical_layout=False,
-    #                          products_to_plot=[problem.products[i]],
-    #                          explode_flows=True)
+    print("sol", problem.evaluate(sol).values())
+    print(problem.evaluate(sol))
+    print(sum(problem.evaluate(sol).values()))
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    plot_solution_graph(problem=problem, solution=sol)
+    for i in range(len(problem.products)):
+        plotly_solution_graph(solution=sol,
+                              problem=problem,
+                              use_logical_layout=False,
+                              products_to_plot=[problem.products[i]],
+                              explode_flows=True)
 
 def run_cp_2steps_and_complete():
     # problem = parse_problem()
@@ -442,10 +443,11 @@ def run_cp_detailed_trips():
                           parameters_cp=p,
                           ortools_cpsat_solver_kwargs=dict(log_search_progress=True))
     sol = result[-1][0]
+    print("Sol", sol)
     print(problem.evaluate(sol))
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
-    # plot_solution_graph(problem=problem, solution=sol)
+    plot_solution_graph(problem=problem, solution=sol)
     for i in range(len(problem.products)):
         plotly_solution_graph(solution=sol,
                               problem=problem,
@@ -536,12 +538,11 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
-    # run_milp_2step()
-    #run_cp_2steps_and_complete()
+    run_cp_2steps()
     # run_milp_2step()
     # run_milp_lazy()
     # run_milp_2step()
-    #run_milp_lazy()
+    # run_milp_lazy()
     # run_cpopt_2steps()
     # run_cp_singlebatch_ws()
     # run_cp_benders()
@@ -555,7 +556,7 @@ if __name__ == "__main__":
     # run_oe()
     # run_cpmpy()
     # run_explanation()
-    run_cp_2steps()
+    #run_cp_2steps()
     # 2637923900.2783985
     # 2686538384.2949004
     # run_cp_2steps()

@@ -40,14 +40,14 @@ productVal(p2,600).
 
 
 demandOffer(p1,l1,1).
-demandOffer(p2,l1,4).
+%demandOffer(p2,l1,4).
 demandOffer(p1,l2,2).
 
-demandOffer(p2,l2,-1).
+%demandOffer(p2,l2,-1).
 demandOffer(p1,l5,-1).
-demandOffer(p2,l5,-2).
+%demandOffer(p2,l5,-2).
 demandOffer(p1,l6,-2).
-demandOffer(p2,l6,-1).
+%demandOffer(p2,l6,-1).
 
 %demandOffer(p1,l1,10).
 %demandOffer(p2,l1,40).

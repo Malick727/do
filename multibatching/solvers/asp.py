@@ -5,7 +5,6 @@ from typing import Any, Optional, List, Dict
 import clingo
 from clingo.ast import parse_string, ProgramBuilder
 from clingcon import ClingconTheory
-
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction
 from discrete_optimization.generic_tools.do_solver import SolverDO, StatusSolver
@@ -86,6 +85,7 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 &minimize{ route_cost_total(From, To, TR):route(_, From, To, TR, _, C) }.
 &minimize{ load(From, To, TR, P):possibleFlow(From, To, TR, P) }.
 
+
 """
 
 
@@ -116,13 +116,10 @@ class ClingconMultibatchingSolver(SolverDO):
         self.route_key_to_link: Dict[tuple, TransportLink] = {}
 
     def init_model(self, **kwargs: Any) -> None:
-        # --model=0,  #", "--opt-mode=optN": enumerates all models
-
-        max_models = kwargs.get("max_models", 100)
-        self.ctl = clingo.Control(
-            ["--warn=no-atom-undefined", f"--models={max_models}", "--opt-mode=opt", f"--models={max_models}"]
-        )
-        logger.info(f'Configuration Keys: {self.ctl.configuration.solve.keys}')
+        # Default options
+        clingo_args = kwargs.get("clingo_args", [#"--models=0",
+                                                 "--opt-mode=opt"])
+        self.ctl = clingo.Control(clingo_args)
         self.theory = ClingconTheory()
 
         # 1. Register Clingcon theory
@@ -247,8 +244,8 @@ class ClingconMultibatchingSolver(SolverDO):
                 df.loc[len(df)] = {"product": p_name, "location":loc_name, "amount":value}
 
         route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df["cost"].sum()}")
-        route_cost_total_df.to_csv('route_cost_total_df.csv', index=False, sep=',')
+        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
+>>>>>>> f66ca6e4842c6ec462a791ba3f82edb5348855fd
 
         list_flows = []
         for link, product_quantities in flows_aggregation.items():
@@ -260,6 +257,12 @@ class ClingconMultibatchingSolver(SolverDO):
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
 
+<<<<<<< HEAD
+=======
+    def compute_costs(self):
+        route_cost_total_df = self.all_dataframes["route_cost_total"]
+        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
+>>>>>>> f66ca6e4842c6ec462a791ba3f82edb5348855fd
     
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
