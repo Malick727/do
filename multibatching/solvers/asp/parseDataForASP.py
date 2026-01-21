@@ -13,7 +13,7 @@ input_file = f'{file_name}.json'
 
 output_file = "factsASP.lp"
 
-cap_size_divde = 1000000000
+cap_size_divde = 100000000
 
 # only used for text and not 
 def reformulate(text):

@@ -29,8 +29,8 @@ def script():
                                              min_dist=1,
                                              max_dist=5,
                                              seed=51)
-
-    # problem = parse_problem()
+    
+    problem = parse_problem()
     # 2. Initialize the solver
     solver = ClingconMultibatchingSolver(problem)
     solver.init_model()  # Initialize the ASP/Clingcon model
@@ -43,7 +43,10 @@ def script():
 
     # 4. Retrieve and display results
     solution, fitness = result_storage.get_best_solution_fit()
-    print(problem.satisfy(solution), problem.evaluate(solution))
+    if solution == None:
+        print("UNSAT")
+    else:
+        print(problem.satisfy(solution), problem.evaluate(solution))
 
     print(f"Solve Status: {solver.status_solver}")
     if solution:

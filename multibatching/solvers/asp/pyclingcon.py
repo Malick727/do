@@ -47,7 +47,7 @@ showDataframes = False
 print_details = True
 foundModelIndex = 0
 analyzedModelIndex = 0
-all_data_frames = {}
+all_dataframes = {}
 costs = []
 
 modelAggregateTemplates = [{'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['product' ,'location', 'amount']},
@@ -56,22 +56,24 @@ modelAggregateTemplates = [{'name':'flow_out', 'filter':lambda s: s.name=='flow_
                           {'name':'route_cost_total', 'filter':lambda s: s.ame=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
                         {'name':'route_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'freq']},
                         {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']},
-                        {'name':'total_weight', 'filter':lambda s: s.name=='total_weight', 'columns':['from' ,'to', 'transportresource', 'weight']}
+                        {'name':'total_weight_per_product', 'filter':lambda s: s.name=='total_weight_per_product', 'columns':['from' ,'to', 'transportresource', 'product', 'weight']}
 ]
  
 modelAtomTemplates = [
-      {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
-      {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
-      {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq']},
-      {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
-      {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
-      {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
-      {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
-      {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
-      {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
-      {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
-      {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
-]
+        {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
+        {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
+        {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
+        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'total']},
+        {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+        {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
+        {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
+        {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
+        {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
+        {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
+        {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+        {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
+    ]
+
 
 def cprint(Text):
     global print_details
@@ -88,7 +90,7 @@ def solve_clingcon(programs, max_models=0, ngo=False):
 
     thy = ClingconTheory()
     # , "--parallel-mode=12"
-    clingo_args = [f"--models={max_models}", "--opt-mode=opt","--heuristic=Domain"]
+    clingo_args = [f"--models={max_models}", "--opt-mode=opt"]
 
     ctl = clingo.Control(clingo_args)
     ctl.configuration.solve.models = 0  # Search for better models
@@ -109,7 +111,6 @@ def solve_clingcon(programs, max_models=0, ngo=False):
     ctl.ground([('base', [])])
     current_best = 1000000
     optimum_model = None
-    ctl.configuration.solve.solve_limit = timeout
 
     ctl.configuration.solve.opt_mode = "opt"
     
@@ -141,16 +142,16 @@ def processAggregates(assignment_data, idx):
 def showModelAggregates(assignment_data, dataName, columns, index):
     filtered_data = [[*key.arguments, val] for key, val in assignment_data if key.name==dataName and val!=0]
     df = pd.DataFrame(data=filtered_data, columns=columns)
-    all_data_frames[dataName] = df
+    all_dataframes[dataName] = df
     output_dir = f"{outputfolder}/model_{index}"
     os.makedirs(output_dir, exist_ok=True)
     df.to_csv(f"{output_dir}/{dataName}.csv", index=False)
 
 def check_productTR(modelIndex):
-    productTR_df_str = all_data_frames["productTR"].astype(str) 
+    productTR_df_str = all_dataframes["productTR"].astype(str) 
     productTR_dict = list(zip(productTR_df_str['product'], productTR_df_str['transportresource']))
 
-    load_df = all_data_frames["load"].astype(str) 
+    load_df = all_dataframes["load"].astype(str) 
     
     count = 0
     for row in load_df.itertuples():
@@ -165,9 +166,9 @@ def check_productTR(modelIndex):
         sys.exit()
     
 def check_clingcon_flow(modelIndex):
-    demand_supply_df = all_data_frames["req"]
-    flow_in = all_data_frames["flow_in"]
-    flow_out = all_data_frames["flow_out"]
+    demand_supply_df = all_dataframes["req"]
+    flow_in = all_dataframes["flow_in"]
+    flow_out = all_dataframes["flow_out"]
 
     in_and_out = pd.merge(
     flow_in, 
@@ -214,12 +215,12 @@ def check_clingcon_load_freq(modelIndex):
     1. Aggregated loads (from/to) match the net requirements at each location.
     2. Loads are consistent with estimated frequencies (e.g., no load without frequency).
     """
-    demand_supply_df = all_data_frames["req"]
+    demand_supply_df = all_dataframes["req"]
 
-    estimated_freq_df = all_data_frames["estimated_freq"]
-    load_df = all_data_frames["load"]
-    product_size_df = all_data_frames["productSize"]
-    transport_capacity_df = all_data_frames["transportCapacity"]
+    estimated_freq_df = all_dataframes["estimated_freq"]
+    load_df = all_dataframes["load"]
+    product_size_df = all_dataframes["productSize"]
+    transport_capacity_df = all_dataframes["transportCapacity"]
 
     # 1. Aggregate loads entering locations (Group by product, To)
     load_in_agg = load_df.groupby(['product', 'to'])['amount'].sum().reset_index()
@@ -346,8 +347,8 @@ def check_clingcon_load(modelIndex):
     """
     Verifies that aggregated loads (from/to) match the net requirements at each location.
     """
-    demand_supply_df = all_data_frames["req"]
-    load_df = all_data_frames["load"]
+    demand_supply_df = all_dataframes["req"]
+    load_df = all_dataframes["load"]
 
     # 1. Aggregate loads entering locations (Group by product, To)
     load_in_agg = load_df.groupby(['product', 'to'])['amount'].sum().reset_index()
@@ -404,17 +405,34 @@ def to_int(val):
     return val
 
 def compute_costs_active_flow(modelIndex):
-    routeCostTotal_df = all_data_frames["routeCostTotal"]
+    routeCostTotal_df = all_dataframes["routeCostTotal"]
     #print("routeCostTotal_df", routeCostTotal_df)
     routeCostTotal_df["cost"] = routeCostTotal_df["cost"].apply(to_int)
     print(f"Model {modelIndex}: Total costs are {routeCostTotal_df["cost"].sum()}.")
 
 
-def compute_costs(modelIndex):
-    routeCostTotal_df = all_data_frames["routeCostTotal"]
-    #print("routeCostTotal_df", routeCostTotal_df)
-    routeCostTotal_df["cost"] = routeCostTotal_df["cost"].apply(to_int)
-    print(f"Model {modelIndex}: Total costs are {routeCostTotal_df["cost"].sum()}.")
+def compute_costs(self):
+    global all_dataframes
+        
+    active_flows_df = all_dataframes["activeFlow"]
+    print(f"Total active flows for model: {active_flows_df.shape[0]}")
+    route_df = all_dataframes["route"]
+    route_df['cost'] = route_df['cost'].values
+    route_df['cost'] = route_df['cost'].apply(to_int)
+    route_freq_df = all_dataframes["routeFreq"]
+    route_freq_df['freq'] = route_freq_df['freq'].values
+    route_freq_df['freq'] = route_freq_df['freq'].apply(to_int)
+    # only keep the routes in route_freq
+    merged_df = pd.merge(
+        route_freq_df, 
+        route_df, 
+        on=['from', 'to', 'transportresource'], 
+        how='inner'
+    )
+
+    merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
+    print(f"Total costs for model: {merged_df['total_cost'].sum()}")
+
 
 def processModel(modelIndex):
     global check_clingcon_multibatching, compute_costs_var
@@ -433,7 +451,7 @@ def showModelAtoms(s, dataName, symbolFilter, columns, index):
     filteredSymbols = list(filter(symbolFilter, s))
     arguments = list(map(lambda s: s.arguments, filteredSymbols))
     df = pd.DataFrame(data=arguments, columns=columns)
-    all_data_frames[dataName] = df
+    all_dataframes[dataName] = df
 
     df.to_csv(f"{outputfolder}/model_{index}/{dataName}.csv", index=False)
     if showDataframes:

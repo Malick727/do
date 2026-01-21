@@ -18,10 +18,13 @@ from multibatching.problem import (
 )
 
 import pandas as pd
+import os
+import csv
+import time 
 logger = logging.getLogger(__name__)
 
 
-cap_size_divide = 1
+cap_size_divide = 10000
 # Logic Program Content
 ASP_MODEL_CONTENT = """
 root(eARFullFuselage). 
@@ -49,6 +52,7 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
 &sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
+
 :- &sum{flow_out(P,From)}!=V, offer(P,From,V), V!=0.
 :- &sum{flow_in(P,To)}!= V, demand(P,To,V), V!=0.
 :- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
@@ -60,31 +64,23 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 
 % Balance Constraint
 % when demandOffer is 0, then flow_in and flow_out need to be the same
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = 0 :- demandOffer(P,L,0).
-% when demandOffer is <0 (i.e. there is demand), then in-out needs to be -1*V  
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = -1*V :- demandOffer(P,L,V), V<0.
-% when demandOffer is > 0 (i.e. there is supply), then the out-in needs to be V
-&sum { flow_out(P,L); -1 * flow_in(P,L)} = V :- demandOffer(P,L,V), V>0.
 
-#const maxFreq = 30.
-&dom {0..maxFreq} = estimated_freq(From,To,TR) :- possibleFlow(From, To, TR, _).
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
 
-&sum {C * estimated_freq(From, To, TR);
-   -1 * S * load(From, To, TR, P) : productSize(P, S), possibleFlow(From, To, TR, P)
-} >= 0 :- possibleFlow(From, To, TR, _), transportCapacity(TR, C).
+activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
+#minimize{1, From,To, TR: activeFlow(From,To,TR)}.
 
-% it cannot be the case that there is a load > 0 and no estimated freq for this trajectory
-:- &sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P)}>0, estimated_freq(From, To, TR)=0, possibleFlow(From, To, TR, P).
+freq(1..8).
+1{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
 
-&sum {load(From, To, TR, P) : possibleFlow(From, To, TR, P); -1* estimated_freq(From, To, TR)} >= 0 :- possibleFlow(From, To, TR, _).
+% upper bound
+&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
+routeFreq(F, T, TR, Freq, TotalCap).
+% lower bound
+&sum {S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)
+} > Minus1 :- routeFreq(F, T, TR, Freq, TotalCap), Minus1 = TotalCap- Cap, transportCapacity(TR,Cap).
 
-#const limit = 1000000000.
-&dom { 0..limit } = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_).
-&sum {  C * estimated_freq(From,To,TR)} = route_cost_total(From, To, TR) :- possibleFlow(From, To, TR,_),route(_, From, To, TR, _, C).
-
-&minimize{ route_cost_total(From, To, TR):route(_, From, To, TR, _, C) }.
-&minimize{ load(From, To, TR, P):possibleFlow(From, To, TR, P) }.
-
+#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C) }.
 
 """
 
@@ -93,12 +89,32 @@ class ClingconMultibatchingSolver(SolverDO):
     problem: MultibatchingProblem
 
     all_dataframes = {}
+    modelIndex = 0
+    start_solving = 0
 
-    modelAggregateTemplates = [ {'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['product' ,'location', 'amount']},
+    modelAtomTemplates = [
+        {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
+        {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
+        {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
+        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'total']},
+        {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+        {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
+        {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
+        {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
+        {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
+        {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
+        {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+        {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
+    ]
+
+    modelAggregateTemplates = [ 
+                            {'name':'route_freq_cap','filter':lambda s: s.name=='route_freq_cap', 'columns':['from', 'to', 'transportresource','freq', 'total']},
+                             {'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['product' ,'location', 'amount']},
                             {'name':'flow_in', 'filter':lambda s: s.name=='flow_in', 'columns':['product' ,'location', 'amount']},
                             {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['product' ,'location', 'amount']},
                             {'name':'route_cost_total', 'filter':lambda s: s.name=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
-                            {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']}
+                            {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']},
+                            {'name':'active_flow', 'filter':lambda s: s.name=='active_flow', 'columns':['from' ,'to', 'transportresource','val']}
                             ]
 
     def __init__(
@@ -114,6 +130,24 @@ class ClingconMultibatchingSolver(SolverDO):
         self.name_to_transport_type: Dict[str, Any] = {}
         self.name_to_product: Dict[str, Any] = {}
         self.route_key_to_link: Dict[tuple, TransportLink] = {}
+
+
+    def processModelAtoms(self, model: clingo.Model):
+        path_symbols = []
+        for name in [next(iter(d.values())) for d in self.modelAtomTemplates]:
+            path_symbols += list(filter(lambda s: s.name == name, model.symbols(atoms=True)))
+        
+        for modelAtomTemplate in self.modelAtomTemplates:
+            dataName = modelAtomTemplate['name']
+            filteredSymbols = list(filter(modelAtomTemplate['filter'], path_symbols))
+            arguments = list(map(lambda s: s.arguments, filteredSymbols))
+            df = pd.DataFrame(data=arguments, columns= modelAtomTemplate['columns'])
+            self.all_dataframes[dataName] = df
+
+            output_dir = f"output/model_{self.modelIndex}"
+            os.makedirs(output_dir, exist_ok=True)
+            df.to_csv(f"{output_dir}/{dataName}.csv", index=False)
+
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
@@ -133,13 +167,19 @@ class ClingconMultibatchingSolver(SolverDO):
 
             # Generate and parse facts
             facts_str = self._generate_facts()
+            with open("facts.lp", 'w') as file_out:
+                file_out.writelines(facts_str)
             logger.debug("Generated ASP Facts:\n" + facts_str)
             parse_string(facts_str, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
         # 3. Ground
+
+        start_time_grounding = time.process_time()
         logger.info("Grounding logic program...")
         self.ctl.ground([("base", [])])
-
+        end_time_grounding = time.process_time()
+        logger.info(f"Grounding done ({round((end_time_grounding - start_time_grounding) / 60, 2)} minutes).")
+    
         # 4. Prepare theory (must happen after grounding)
         self.theory.prepare(self.ctl)
 
@@ -159,20 +199,30 @@ class ClingconMultibatchingSolver(SolverDO):
         res = self.create_result_storage()
 
         def on_model_wrapper(model: clingo.Model):
+            self.modelIndex += 1
+            logger.info(f"[{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
+        
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
+
             res.append((sol, fit))
+            self.processModelAtoms(model)
+            self.compute_costs()
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
             print("stopping", stopping)
+            
             return not stopping
+        
 
         logger.info("Starting Clingcon solve...")
 
         # Timeout handling via async handle
+        self.start_solving = time.process_time()
         if time_limit is None:
             self.ctl.solve(on_model=on_model_wrapper)
         else:
             with self.ctl.solve(on_model=on_model_wrapper, async_=True) as handle:
+                
                 finished = handle.wait(time_limit)
                 if not finished:
                     logger.info(f"Time limit of {time_limit}s reached.")
@@ -191,14 +241,12 @@ class ClingconMultibatchingSolver(SolverDO):
         logger.info(f"Optimality proven : {model.optimality_proven}")
         assignment = list(self.theory.assignment(model.thread_id))
         flows_aggregation = defaultdict(lambda: defaultdict(int))
-        #print([f'{key}={val}' for key, val in assignment if val!=0])
+        #print([f'{key}={val}' for key, val in assignment if key.name == "active_flow" and val != 0])
         for template in self.modelAggregateTemplates:
             df = pd.DataFrame(data={}, columns=template["columns"])
             self.all_dataframes[template["name"]] = df
 
-
         for name, value in assignment:
-
             if name.name == "load" and value > 0:
                 try:
                     args = name.arguments
@@ -211,8 +259,12 @@ class ClingconMultibatchingSolver(SolverDO):
                     if link and product:
                         flows_aggregation[link][product] += value
                         df = self.all_dataframes["load"]
-                        df.loc[len(df)]  = {"from": from_name, "to":to_name , "transportresource": tr_name, "product":product, "amount":value}
+                        df.loc[len(df)]  = {"from": from_name, "to":to_name , "transportresource": tr_name, "product":p_name, "amount":value}
                         
+                    output_dir = f"output/model_{self.modelIndex}"
+                    os.makedirs(output_dir, exist_ok=True)
+                    df.to_csv(f"{output_dir}/load.csv", index=False)
+
                 except Exception as e:
                     logger.error(f"Error parsing variable {name}: {e}")
             
@@ -243,10 +295,6 @@ class ClingconMultibatchingSolver(SolverDO):
                 p_name, loc_name  = map(str, args)
                 df.loc[len(df)] = {"product": p_name, "location":loc_name, "amount":value}
 
-        route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
->>>>>>> f66ca6e4842c6ec462a791ba3f82edb5348855fd
-
         list_flows = []
         for link, product_quantities in flows_aggregation.items():
             packing = {p: q for p, q in product_quantities.items() if q > 0}
@@ -256,14 +304,49 @@ class ClingconMultibatchingSolver(SolverDO):
         #print("aggreg", self.aggreg_from_sol(sol))
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
-
-<<<<<<< HEAD
-=======
     def compute_costs(self):
-        route_cost_total_df = self.all_dataframes["route_cost_total"]
-        logger.info(f"Total costs for model: {route_cost_total_df['cost'].sum()}")
->>>>>>> f66ca6e4842c6ec462a791ba3f82edb5348855fd
+        
+        active_flows_df = self.all_dataframes["activeFlow"]
+        logger.info(f"Total active flows for model: {active_flows_df.shape[0]}")
+        
+        route_df = self.all_dataframes["route"]
+        route_df['cost'] = route_df['cost'].values
+        route_freq_df = self.all_dataframes["routeFreq"]
+        route_freq_df['freq'] = route_freq_df['freq'].values
+        
+        merge_cols = ['from', 'to', 'transportresource']
     
+        for df in [route_df, route_freq_df]:
+            for col in merge_cols:
+                # Convert to string and strip whitespace to ensure matching
+                df[col] = df[col].astype(str).str.strip()
+
+        merged_df = pd.merge(
+        route_freq_df, 
+        route_df, 
+        on=['from', 'to', 'transportresource'], 
+        how='inner'
+        )
+
+        def extract_clingo_number(val):
+            # Case A: It's a Clingo Symbol (has .number attribute)
+            if hasattr(val, 'number'): 
+                return val.number
+            # Case B: It's already a Python int or float
+            if isinstance(val, (int, float)):
+                return val
+            # Case C: It's a string that looks like a number ("6")
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return 0  # Default fallback if data is bad
+
+        merged_df['freq'] = merged_dzf['freq'].apply(extract_clingo_number)
+        merged_df['cost'] = merged_df['cost'].apply(extract_clingo_number)
+
+        merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
+        logger.info(f"Total costs for model: {merged_df['total_cost'].sum()}")
+        
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
         facts = []
@@ -274,6 +357,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
         def sanitize_num(val) -> int:
             return max(1, int(val))
+        
 
 
         # Locations
