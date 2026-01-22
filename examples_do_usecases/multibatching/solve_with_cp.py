@@ -17,12 +17,12 @@ from multibatching.utils import plot_solution_graph, generate_multibatching_prob
 # logging.basicConfig(level=logging.INFO)
 def run():
     problem = init_instance()
-    # problem = generate_multibatching_problem(num_locations=20,
-    #                                          num_transport_types=2,
-    #                                          num_products=3,
-    #                                          min_dist=1,
-    #                                          max_dist=5,
-    #                                          seed=51)
+    problem = generate_multibatching_problem(num_locations=20,
+                                              num_transport_types=2,
+                                              num_products=3,
+                                              min_dist=1,
+                                              max_dist=5,
+                                              seed=51)
     solver = CpsatMultibatchingSolver(problem)
     solver.init_model(modeling=ModelingMultiBatch.UNIT_FLOW)
     p = ParametersCp.default_cpsat()

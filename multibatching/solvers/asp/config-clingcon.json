@@ -1,5 +1,5 @@
 [
-{   "program_folder": "airbus",
+{   "program_folder": "ex4",
     "run_clingcon": true,
     "timeout": 600,
     "max_nr_models": 0,

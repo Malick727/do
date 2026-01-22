@@ -2,7 +2,7 @@ from multibatching.solvers.asp import ClingconMultibatchingSolver
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver
 from multibatching.utils import generate_multibatching_problem
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 import os
 import json
 from multibatching.parse_config_data import parse_json_to_problem
@@ -23,12 +23,12 @@ def parse_problem(fix_problem: bool = False):
 def script():
     # 1. Generate the problem instance
     
-    problem = generate_multibatching_problem(num_locations=20,
+    problem = generate_multibatching_problem(num_locations=3,
                                              num_transport_types=2,
-                                             num_products=3,
+                                             num_products=1,
                                              min_dist=1,
                                              max_dist=5,
-                                             seed=51)
+                                             seed=2)
     
     #problem = parse_problem()
     # 2. Initialize the solver

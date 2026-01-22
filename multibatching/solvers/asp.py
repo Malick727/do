@@ -46,7 +46,7 @@ requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), produc
 &dom { N..N } = req(P,L) :- requiredNet(P, L, N).
 
 %%%
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>1, Cost>0.
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>0, Cost>0.
 
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
@@ -60,6 +60,28 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 
 :- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
+
+% Balance Constraint
+% when demandOffer is 0, then flow_in and flow_out need to be the same
+
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
+
+activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
+% might conflict with constraint of reducing costs
+#minimize{1, From,To, TR: activeFlow(From,To,TR)}.
+
+freq(1..15).
+
+%1{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
+%:-  activeFlow(From,To,TR), not routeFreq(From, To, TR, _,_).
+{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) } :- activeFlow(From,To,TR).
+:-  activeFlow(From,To,TR), not routeFreq(From, To, TR, _,_).
+
+% upper bound
+&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
+routeFreq(F, T, TR, Freq, TotalCap).
+
+#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C) }.
 
 """
 
