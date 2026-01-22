@@ -52,7 +52,6 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
 &sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
-
 :- &sum{flow_out(P,From)}!=V, offer(P,From,V), V!=0.
 :- &sum{flow_in(P,To)}!= V, demand(P,To,V), V!=0.
 :- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
@@ -61,26 +60,6 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 
 :- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
-
-% Balance Constraint
-% when demandOffer is 0, then flow_in and flow_out need to be the same
-
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
-
-activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
-#minimize{1, From,To, TR: activeFlow(From,To,TR)}.
-
-freq(1..8).
-1{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
-
-% upper bound
-&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
-routeFreq(F, T, TR, Freq, TotalCap).
-% lower bound
-&sum {S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)
-} > Minus1 :- routeFreq(F, T, TR, Freq, TotalCap), Minus1 = TotalCap- Cap, transportCapacity(TR,Cap).
-
-#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C) }.
 
 """
 
@@ -200,7 +179,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
         def on_model_wrapper(model: clingo.Model):
             self.modelIndex += 1
-            logger.info(f"[{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
+            logger.info(f"Model [{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
         
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
@@ -327,7 +306,7 @@ class ClingconMultibatchingSolver(SolverDO):
         on=['from', 'to', 'transportresource'], 
         how='inner'
         )
-
+        print("finished merged_df")
         def extract_clingo_number(val):
             # Case A: It's a Clingo Symbol (has .number attribute)
             if hasattr(val, 'number'): 
@@ -341,10 +320,11 @@ class ClingconMultibatchingSolver(SolverDO):
             except (ValueError, TypeError):
                 return 0  # Default fallback if data is bad
 
-        merged_df['freq'] = merged_dzf['freq'].apply(extract_clingo_number)
+        merged_df['freq'] = merged_df['freq'].apply(extract_clingo_number)
         merged_df['cost'] = merged_df['cost'].apply(extract_clingo_number)
 
         merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
+        
         logger.info(f"Total costs for model: {merged_df['total_cost'].sum()}")
         
     def _generate_facts(self) -> str:

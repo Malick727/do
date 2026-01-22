@@ -342,6 +342,9 @@ def check_clingcon_load_freq(modelIndex):
             sys.exit('exit')
     print(f"Model {modelIndex}: Frequencies, and Capacities seem consistent.")
 
+def check_clingcon_freq(modelIndex):
+    print("check clingcon frequencies")
+
 def check_clingcon_load(modelIndex):
 
     """
@@ -432,6 +435,7 @@ def compute_costs(self):
 
     merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
     print(f"Total costs for model: {merged_df['total_cost'].sum()}")
+
 
 
 def processModel(modelIndex):

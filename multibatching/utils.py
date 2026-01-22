@@ -1059,7 +1059,11 @@ def generate_multibatching_problem(
         transport_links=transport_links_list
     )
 
+    print(problem_instance)
+    print(problem_instance.products)
     return problem_instance
+
+
 
 
 def basic_sanity_check(problem: MultibatchingProblem):

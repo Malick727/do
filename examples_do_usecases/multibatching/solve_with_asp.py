@@ -30,7 +30,7 @@ def script():
                                              max_dist=5,
                                              seed=51)
     
-    problem = parse_problem()
+    #problem = parse_problem()
     # 2. Initialize the solver
     solver = ClingconMultibatchingSolver(problem)
     solver.init_model()  # Initialize the ASP/Clingcon model
