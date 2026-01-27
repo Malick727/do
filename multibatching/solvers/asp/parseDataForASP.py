@@ -120,9 +120,7 @@ def json2asp(file_out):
             product_name = reformulate(products_data.get(product).get("name"))
             supply_demand_dict = product_dict.get("netSupplyDemand")
             demandOffers += list(map(lambda x: f"demandOffer({product_name},{location_name_id_mapping.get(x)},{supply_demand_dict.get(x)}).\n", supply_demand_dict))
-            check_on_balance =  list(map(lambda x: supply_demand_dict.get(x), supply_demand_dict))
-            #print("check_on_balance", product_name, sum(check_on_balance))
-        
+            
         text_to_be_written = "% ----------------------- locations -----------------------\n" + "".join(locations) \
                              + "\n% ----------------------- transport resources -----------------------\n" \
                              + "".join(tr_names) + "\n" +  "".join(tr_co2) + "\n" + "".join(tr_costs) + "\n" + "".join(tr_capacities) + "\n" \

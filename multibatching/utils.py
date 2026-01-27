@@ -979,7 +979,6 @@ def generate_multibatching_problem(
         )
         products_list.append(prod)
 
-    print("products_list", products_list)
     # 3. Generate Location instances with balanced net_supply
     locations_list = []
     product_global_demands = defaultdict(int)  # To keep track of total supply/demand for each product
@@ -1060,8 +1059,6 @@ def generate_multibatching_problem(
         transport_links=transport_links_list
     )
 
-    print(problem_instance)
-    print(problem_instance.products)
     return problem_instance
 
 

@@ -27,64 +27,60 @@ logger = logging.getLogger(__name__)
 cap_size_divide = 10000
 # Logic Program Content
 ASP_MODEL_CONTENT = """
-root(eARFullFuselage). 
+% ----------------------- harbors -----------------------
+harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).
+ship(kugelbake;feederContainerShip;truckGeneralCargo;oversizedTianjinRoRoShip;truckonRoRoShip;smallContainerShip;airbusMobileExpressRoRoShip;oversizedRiverTransport;seaLargeContainerShip;oversizedUnderDeckRoRoShip).
 
-totalSupply(P, S) :- S = #sum {V : demandOffer(P,_,V), V > 0;-1* V : demandOffer(P,_,V), V < 0 }, product(P).
-#show totalSupply/2.
+totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : demandOffer(P,_,V), V < 0}, product(P).
 
-hasDemand(P, L) :- demandOffer(P, L, V), V < 0.
-hasOffer(P, L)  :- demandOffer(P, L, V), V > 0.
+validFromNode(L,P) :- demandOffer(P, L, V), V > 0.
+validToNode(L,P) :- demandOffer(P, L, V), V < 0.
+validFromNode(L,P) :- intermediate(L), product(P).
+validToNode(L,P) :- intermediate(L), product(P).
 
-demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
-demand(P, L, 0)        :- product(P), location(L), not hasDemand(P, L).
+% for use case
+intermediate(L) :- harbor(L).
+% for generic use case
+%intermediate(L) :- location(L), not demandOffer(_,L,_), not harbor(L).
+#show intermediate/1.
 
-offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
-offer(P, L, 0)   :- product(P), location(L), not hasOffer(P, L).
 
-requiredNet(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
-requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), product(P).
-&dom { N..N } = req(P,L) :- requiredNet(P, L, N).
+noShipBetweenHarbors(From, To, TR) :- 
+    harbor(From), 
+    harbor(To), 
+    not ship(TR), transportResource(TR).
 
-%%%
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR), not root(P), transportCapacity(TR, Cap), Cap>0, Cost>0.
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR),  transportCapacity(TR, Cap), Cap>0, Cost>0, 
+    validFromNode(From,P),
+    validToNode(To,P),
+    not noShipBetweenHarbors(From, To, TR).
 
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
 &sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
-:- &sum{flow_out(P,From)}!=V, offer(P,From,V), V!=0.
-:- &sum{flow_in(P,To)}!= V, demand(P,To,V), V!=0.
-:- &sum{flow_in(P,From)} !=0, offer(P,From,V), V!=0.
-:- &sum{flow_out(P,From)} !=0, demand(P,From,V), V!=0.
-:- &sum{flow_in(P,L); -1*flow_out(P,L)} !=0, not demandOffer(P,L,_),  location(L), product(P).
+&sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- not demandOffer(P,L,_),  location(L), product(P).
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = -Net  :- demandOffer(P, L, Net).
 
-:- &sum{flow_out(P,From)} > Total_flow_out, Total_flow_out=#sum{V: offer(P,_,V)}, possibleFlow(From, _, _,P).
-:- &sum{flow_in(P,To)} > Total_flow_in, Total_flow_in=#sum{V: demand(P,_,V)}, possibleFlow(_,To, _,P).
-
-% Balance Constraint
-% when demandOffer is 0, then flow_in and flow_out need to be the same
-
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
+:- &sum{flow_out(P,From)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
+:- &sum{flow_in(P,To)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
 
 activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
-% might conflict with constraint of reducing costs
-#minimize{1, From,To, TR: activeFlow(From,To,TR)}.
 
 freq(1..15).
-
-%1{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
-%:-  activeFlow(From,To,TR), not routeFreq(From, To, TR, _,_).
 { routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) } :- activeFlow(From,To,TR).
 :-  activeFlow(From,To,TR), not routeFreq(From, To, TR, _,_).
 
 % upper bound
 &sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
 routeFreq(F, T, TR, Freq, TotalCap).
+% lower bound
+&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} > Minus1:-
+routeFreq(F, T, TR, Freq, TotalCap), transportCapacity(TR,C), Minus1=TotalCap-C, Freq>1.
 
-#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C) }.
+#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C);1, From,To, TR: activeFlow(From,To,TR)}.
 
 """
-
 
 class ClingconMultibatchingSolver(SolverDO):
     problem: MultibatchingProblem
@@ -97,7 +93,7 @@ class ClingconMultibatchingSolver(SolverDO):
         {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
         {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
         {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
-        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'total']},
+        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'totalcapacity']},
         {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
         {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
         {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
@@ -207,6 +203,7 @@ class ClingconMultibatchingSolver(SolverDO):
             fit = self.aggreg_from_sol(sol)
 
             res.append((sol, fit))
+
             self.processModelAtoms(model)
             self.compute_costs()
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
@@ -328,7 +325,6 @@ class ClingconMultibatchingSolver(SolverDO):
         on=['from', 'to', 'transportresource'], 
         how='inner'
         )
-        print("finished merged_df")
         def extract_clingo_number(val):
             # Case A: It's a Clingo Symbol (has .number attribute)
             if hasattr(val, 'number'): 

@@ -52,21 +52,21 @@ costs = []
 
 modelAggregateTemplates = [{'name':'flow_out', 'filter':lambda s: s.name=='flow_out', 'columns':['product' ,'location', 'amount']},
                            {'name':'flow_in', 'filter':lambda s: s.name=='flow_in', 'columns':['product' ,'location', 'amount']},
-                           {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['product' ,'location', 'amount']},
+                         {'name':'req', 'filter':lambda s: s.name=='req', 'columns':['product' ,'location', 'amount']},
                           {'name':'route_cost_total', 'filter':lambda s: s.ame=='route_cost_total', 'columns':['from' ,'to', 'transportresource', 'cost']},
-                        {'name':'route_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'freq']},
+                        {'name':'route_freq', 'filter':lambda s: s.name=='estimated_freq', 'columns':['from' ,'to', 'transportresource', 'freq', 'totalcapacity']},
                         {'name':'load', 'filter':lambda s: s.name=='load', 'columns':['from' ,'to', 'transportresource', 'product', 'amount']},
-                        {'name':'total_weight_per_product', 'filter':lambda s: s.name=='total_weight_per_product', 'columns':['from' ,'to', 'transportresource', 'product', 'weight']}
+                        {'name':'total_weight', 'filter':lambda s: s.name=='total_weight', 'columns':['from' ,'to', 'transportresource', 'weight']}
 ]
  
 modelAtomTemplates = [
         {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
         {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
         {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
-        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'total']},
+        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq','maxcapacity']}, #,'maxcapacity', 'minus1'
         {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
         {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
-        {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
+        #{'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
         {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
         {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
         {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
@@ -166,7 +166,10 @@ def check_productTR(modelIndex):
         sys.exit()
     
 def check_clingcon_flow(modelIndex):
-    demand_supply_df = all_dataframes["req"]
+    demand_supply_df = all_dataframes["demandOffer"]
+    req_df = demand_supply_df.copy()
+    req_df["amount"] = req_df["amount"].apply(to_int) * -1
+
     flow_in = all_dataframes["flow_in"]
     flow_out = all_dataframes["flow_out"]
 
@@ -180,7 +183,7 @@ def check_clingcon_flow(modelIndex):
 
     final_merged_df = pd.merge(
     in_and_out, 
-    demand_supply_df, 
+    req_df, 
     on=['product', 'location'], 
     how='outer', 
     suffixes=('_merged', '_net_req')
@@ -208,149 +211,16 @@ def check_clingcon_flow(modelIndex):
     else:
         print(f"Model {modelIndex}: Flow seems consistent.")
 
-def check_clingcon_load_freq(modelIndex):
-
-    """
-    Verifies that:
-    1. Aggregated loads (from/to) match the net requirements at each location.
-    2. Loads are consistent with estimated frequencies (e.g., no load without frequency).
-    """
-    demand_supply_df = all_dataframes["req"]
-
-    estimated_freq_df = all_dataframes["estimated_freq"]
-    load_df = all_dataframes["load"]
-    product_size_df = all_dataframes["productSize"]
-    transport_capacity_df = all_dataframes["transportCapacity"]
-
-    # 1. Aggregate loads entering locations (Group by product, To)
-    load_in_agg = load_df.groupby(['product', 'to'])['amount'].sum().reset_index()
-    load_in_agg.rename(columns={'to': 'location', 'amount': 'amount_in_calc'}, inplace=True)
-
-    # 2. Aggregate loads leaving locations (Group by product, From)
-    load_out_agg = load_df.groupby(['product', 'from'])['amount'].sum().reset_index()
-    load_out_agg.rename(columns={'from': 'location', 'amount': 'amount_out_calc'}, inplace=True)
-
-    # 3. Merge In and Out aggregates
-    flow_calc = pd.merge(
-        load_in_agg, 
-        load_out_agg, 
-        on=['product', 'location'], 
-        how='outer'
-    ).fillna(0)
-
-    # 4. Calculate Net Flow (In - Out) derived purely from loads
-    flow_calc['net_flow_calc'] = flow_calc['amount_in_calc'] - flow_calc['amount_out_calc']
-
-    # 5. Merge with Requirements (Demand/Supply)
-    # We use suffixes to distinguish the req amount from our calculated flow
-    check_df = pd.merge(
-        flow_calc,
-        demand_supply_df,
-        on=['product', 'location'],
-        how='outer',
-        suffixes=('_calc', '_req')
-    ).fillna(0)
-    
-    # 6. Verify: Remaining Req should be 0 (Req - NetFlow == 0)
-    # Note: Depending on your sign convention in ASP:
-    # If Req = Demand (Pos) - Offer (Pos), then Net Flow (In - Out) should equal Req.
-    check_df['balance_check'] = check_df['amount'] - check_df['net_flow_calc']
-
-    is_flow_consistent = np.all(np.isclose(check_df['balance_check'], 0))
-
-    if not is_flow_consistent:
-        print(f"{YELLOW}========== Model {modelIndex}: Load Aggregation Mismatch =========={RESET}")
-        inconsistent = check_df[~np.isclose(check_df['balance_check'], 0)]
-        print("Inconsistent Location/product (Load vs Req):")
-        # Displaying relevant columns for debugging
-        print(inconsistent[['product', 'location', 'amount', 'net_flow_calc', 'balance_check']])
-        #sys.exit('exit')
-    
-    # 1. Prepare Load Data
-    # Sum total load amount per edge. 
-    # Result has columns: ['from', 'to', 'transportresource', 'amount']
-    total_load_per_edge = load_df.groupby(['from', 'to', 'transportresource'])['amount'].sum().reset_index()
-    
-    # Explicitly rename 'amount' to 'amount_load' to avoid ambiguity
-    total_load_per_edge.rename(columns={'amount': 'amount_load'}, inplace=True)
-    
-    freq_for_merge = estimated_freq_df.copy()
-    freq_for_merge.rename(columns={'freq': 'amount_freq'}, inplace=True)
-
-    # 3. Merge
-    # Now we are merging explicit 'amount_load' and 'amount_freq' columns.
-    edge_consistency = pd.merge(
-        total_load_per_edge,
-        freq_for_merge,
-        on=['from', 'to', 'transportresource'],
-        how='outer'
-    ).fillna(0)
-
-    # Debug print to confirm structure
-    # print("Columns after merge:", edge_consistency.columns)
-
-    # Check 1: Has Load but No Freq
-    orphan_loads = edge_consistency[
-        (edge_consistency['amount_load'] > 0) & 
-        (edge_consistency['amount_freq'] == 0)
-    ]
-    
-    if not orphan_loads.empty:
-        print(f"{YELLOW}========== Model {modelIndex}: Load without Frequency =========={RESET}")
-        print(orphan_loads)
-        sys.exit('exit')
-
-    if product_size_df is not None and transport_capacity_df is not None:
-        
-        
-        product_size_df["size"] = product_size_df["size"].apply(to_int)
-        load_df["amount"] = load_df["amount"].apply(to_int)
-        estimated_freq_df["freq"] =  estimated_freq_df["freq"].apply(to_int)
-        transport_capacity_df["capacity"] = transport_capacity_df["capacity"].apply(to_int)
-
-        # 1. Calculate Required Capacity (Load * productSize)
-        # Merge load with productSize. Assumes productSize columns are ['product', 'size'] (or similar value column)
-        load_with_size = pd.merge(load_df, product_size_df, on='product', how='left')
-        
-        # Calculate total volume for this specific load entry
-        load_with_size['required_vol'] = load_with_size['amount'] * load_with_size["size"]
-        
-        # Aggregate required volume by Edge (From, To, TR)
-        req_vol_per_edge = load_with_size.groupby(['from', 'to', 'transportresource'])['required_vol'].sum().reset_index()
-
-        # 2. Calculate Available Capacity (Freq * TR_Capacity)
-        freq_with_cap = pd.merge(estimated_freq_df, transport_capacity_df, on='transportresource', how='left')
-        freq_with_cap['available_vol'] = freq_with_cap['freq'] * freq_with_cap["capacity"]
-
-        # 3. Compare Required vs Available
-        cap_check = pd.merge(
-            req_vol_per_edge,
-            freq_with_cap[['from', 'to', 'transportresource', 'available_vol', 'freq']], 
-            on=['from', 'to', 'transportresource'],
-            how='outer'
-        ).fillna(0)
-
-        # Check violation: Required > Available
-        violations = cap_check[cap_check['required_vol'] > cap_check['available_vol']]
-
-        if not violations.empty:
-            print(f"{YELLOW}========== Model {modelIndex}: Capacity Violation =========={RESET}")
-            print(f"Violation: Total product Size > (Frequency * TR Capacity)")
-            # Renaming for clear print output
-            violations = violations.rename(columns={'amount': 'freq'})
-            print(violations[['from', 'to', 'transportresource', 'freq', 'available_vol', 'required_vol']])
-            sys.exit('exit')
-    print(f"Model {modelIndex}: Frequencies, and Capacities seem consistent.")
-
-def check_clingcon_freq(modelIndex):
-    print("check clingcon frequencies")
-
 def check_clingcon_load(modelIndex):
 
     """
     Verifies that aggregated loads (from/to) match the net requirements at each location.
     """
-    demand_supply_df = all_dataframes["req"]
+    
+    demand_supply_df = all_dataframes["demandOffer"]
+    req_df = demand_supply_df.copy()
+    req_df["amount"] = req_df["amount"].apply(to_int) * -1
+    
     load_df = all_dataframes["load"]
 
     # 1. Aggregate loads entering locations (Group by product, To)
@@ -376,7 +246,7 @@ def check_clingcon_load(modelIndex):
     # We use suffixes to distinguish the req amount from our calculated flow
     check_df = pd.merge(
         flow_calc,
-        demand_supply_df,
+        req_df,
         on=['product', 'location'],
         how='outer',
         suffixes=('_calc', '_req')
@@ -396,9 +266,132 @@ def check_clingcon_load(modelIndex):
         # Displaying relevant columns for debugging
         print(inconsistent[['product', 'location', 'amount', 'net_flow_calc', 'balance_check']])
         #sys.exit('exit')
-    
-    print(f"Model {modelIndex}: Loads seem consistent.")
+    else:
+        print(f"Model {modelIndex}: Loads seem consistent.")
 
+def check_routeFreq(modelIndex):
+    """
+    Checks coherence between route capacities and actual loads.
+    """
+
+    load_df = all_dataframes["load"]
+    routeFreq_df = all_dataframes["routeFreq"]
+    routeFreq_df['freq'] = routeFreq_df['freq'].apply(to_int)
+    productSize_df = all_dataframes["productSize"]
+    productSize_df['size'] = productSize_df['size'].apply(to_int)
+    transportCapacity_df = all_dataframes["transportCapacity"]
+    transportCapacity_df['capacity'] = transportCapacity_df['capacity'].apply(to_int)
+    
+    load_enriched = pd.merge(
+        load_df,
+        productSize_df,
+        on='product',
+        how='left'
+    )
+    
+    load_enriched['calculated_load'] = load_enriched['amount'] * load_enriched['size']
+
+    # 1. Aggregate the load_df to get total weight per route
+    # We group by the route keys and sum the 'amount'
+    load_agg = load_enriched.groupby(['from', 'to', 'transportresource'])['calculated_load'].sum().reset_index()
+    load_agg.rename(columns={'calculated_load': 'total_load'}, inplace=True)
+    
+    # 2. Merge the aggregated load with the route frequency dataframe
+    # We use 'left' merge to ensure we keep all routes defined in route_freq_df
+    merged_df = pd.merge(
+        routeFreq_df, 
+        load_agg, 
+        on=['from', 'to', 'transportresource'], 
+        how='left'
+    )
+    
+    # Fill NaN values in 'total_load' with 0 (for routes that have no products assigned)
+    merged_df['total_load'] = merged_df['total_load'].fillna(0)
+    
+    route_full = pd.merge(
+        routeFreq_df,
+        transportCapacity_df,
+        on='transportresource',
+        how='left'
+    )
+    
+    # Clean types
+    route_full['freq'] = route_full['freq'].apply(to_int)
+    route_full['capacity'] = route_full['capacity'].fillna(0)
+    
+    # Calculate Total Capacity for the route
+    route_full['totalcapacity'] = route_full['freq'] * route_full['capacity']
+
+    merged_df = pd.merge(
+        route_full, 
+        load_agg, 
+        on=['from', 'to', 'transportresource'], 
+        how='left'
+    )
+    # 3. Check Upper Bound (Constraint: Load <= Total Capacity)
+    merged_df['upper_bound_ok'] = merged_df['total_load'] <= merged_df['totalcapacity']
+    
+    # 4. Check Lower Bound (Optimality: Is freq the lowest needed?)
+    # Logic: Calculate Unit Capacity (Capacity per trip) -> Calculate Required Freq -> Compare
+    
+    # Avoid division by zero if freq is 0
+    # We create a mask where freq > 0 to perform calculations
+    mask_active = merged_df['freq'] > 0
+    
+    # Initialize columns
+    merged_df['unit_capacity'] = 0.0
+    merged_df['optimal_freq'] = 0.0
+    
+    # Calculate Unit Capacity (Total Capacity / Frequency)
+    merged_df.loc[mask_active, 'unit_capacity'] = (
+        merged_df.loc[mask_active, 'totalcapacity'] / merged_df.loc[mask_active, 'freq']
+    )
+    
+    # Calculate Optimal Frequency: ceil(Total Load / Unit Capacity)
+    # We use np.ceil to round up to the nearest whole trip required
+    # Note: If unit_capacity is 0 (which shouldn't happen if freq > 0 and totalcapacity > 0), handle carefully.
+    # Assuming totalcapacity > 0 if freq > 0.
+    merged_df.loc[mask_active, 'optimal_freq'] = np.ceil(
+        merged_df.loc[mask_active, 'total_load'] / merged_df.loc[mask_active, 'unit_capacity']
+    )
+    
+    merged_df["optimal_freq"] = merged_df["optimal_freq"].astype(int)
+
+    # If freq was 0, optimal freq is 0 (assuming load is 0, otherwise it's impossible)
+    
+    # The Check: Does the actual frequency match the calculated optimal frequency?
+    merged_df['lower_bound_ok'] = merged_df['freq'] == merged_df['optimal_freq']
+    merged_df.loc[merged_df['freq'] == 0, 'lower_bound_ok'] = merged_df.loc[merged_df['freq'] == 0, 'total_load'] == 0
+
+
+    # 5. Filter for Errors
+    # We keep rows where EITHER bound is violated
+    error_mask = (~merged_df['upper_bound_ok']) | (~merged_df['lower_bound_ok'])
+    error_report = merged_df[error_mask].copy()
+    
+    # 6. Label the Error Type
+    # If Upper Bound failed -> 'Overloaded' (Critical)
+    # If Upper Bound OK but Lower Bound failed -> 'Inefficient' (Wasted Capacity)
+    conditions = [
+        ~error_report['upper_bound_ok'], 
+        (error_report['upper_bound_ok']) & (~error_report['lower_bound_ok'])
+    ]
+    choices = ['Overloaded (Critical)', 'Inefficient (Excess Freq)']
+    
+    error_report['issue_type'] = np.select(conditions, choices, default='Unknown')
+    
+    # Select clean columns for output
+    cols_to_show = [
+        'from', 'to', 'transportresource', 
+        'issue_type', 
+        'freq', 'optimal_freq', 
+        'total_load', 'totalcapacity'
+    ]
+    
+    if error_report[cols_to_show].empty:
+        print(f"Model {modelIndex}: Upper bound and lower bound satisfied: No overload, no inefficiency. ")
+    else:
+        print(f"Model {modelIndex}: {error_report[cols_to_show]}.")
 
 def to_int(val):
     # If it's a Clingo Symbol (has 'number' attribute), extract it
@@ -407,18 +400,11 @@ def to_int(val):
     # If it's already an int or float, return as is
     return val
 
-def compute_costs_active_flow(modelIndex):
-    routeCostTotal_df = all_dataframes["routeCostTotal"]
-    #print("routeCostTotal_df", routeCostTotal_df)
-    routeCostTotal_df["cost"] = routeCostTotal_df["cost"].apply(to_int)
-    print(f"Model {modelIndex}: Total costs are {routeCostTotal_df["cost"].sum()}.")
-
-
-def compute_costs(self):
+def compute_costs(modelIndex):
     global all_dataframes
         
     active_flows_df = all_dataframes["activeFlow"]
-    print(f"Total active flows for model: {active_flows_df.shape[0]}")
+    print(f"Model {modelIndex}: Total active flows: {active_flows_df.shape[0]}")
     route_df = all_dataframes["route"]
     route_df['cost'] = route_df['cost'].values
     route_df['cost'] = route_df['cost'].apply(to_int)
@@ -434,7 +420,7 @@ def compute_costs(self):
     )
 
     merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
-    print(f"Total costs for model: {merged_df['total_cost'].sum()}")
+    print(f"Model {modelIndex}: Total costs are {merged_df['total_cost'].sum()}")
 
 
 
@@ -445,6 +431,7 @@ def processModel(modelIndex):
         check_clingcon_flow(modelIndex)
         check_clingcon_load(modelIndex)
         check_productTR(modelIndex)
+        check_routeFreq(modelIndex)
     if compute_costs_var == True:   
         compute_costs(modelIndex)
         cprint(f"Model {modelIndex}: Done. ")
@@ -614,3 +601,153 @@ if __name__ == "__main__":
 #            break
 #
 #    print(f"Final Optimum Cost: {current_best}")
+
+
+
+
+
+
+def check_clingcon_load_freq(modelIndex):
+
+    """
+    Verifies that:
+    1. Aggregated loads (from/to) match the net requirements at each location.
+    2. Loads are consistent with estimated frequencies (e.g., no load without frequency).
+    """
+    demand_supply_df = all_dataframes["demandOffer"]
+    demand_supply_df["amount"] = demand_supply_df["amount"].apply(to_int) * -1
+
+    estimated_freq_df = all_dataframes["estimated_freq"]
+    load_df = all_dataframes["load"]
+    product_size_df = all_dataframes["productSize"]
+    transport_capacity_df = all_dataframes["transportCapacity"]
+
+    load_enriched['size'] = load_enriched['size'].fillna(0)
+
+    # Calculate the total physical load for each row
+    load_enriched['calculated_load'] = load_enriched['amount'] * load_enriched['size']
+
+    # Group by route keys and sum the NEW 'calculated_load' column
+    load_agg = load_enriched.groupby(['from', 'to', 'transportresource'])['calculated_load'].sum().reset_index()
+    load_agg.rename(columns={'calculated_load': 'total_load'}, inplace=True)
+    
+
+    # 1. Aggregate loads entering locations (Group by product, To)
+    load_in_agg = load_df.groupby(['product', 'to'])['amount'].sum().reset_index()
+    load_in_agg.rename(columns={'to': 'location', 'amount': 'amount_in_calc'}, inplace=True)
+
+    # 2. Aggregate loads leaving locations (Group by product, From)
+    load_out_agg = load_df.groupby(['product', 'from'])['amount'].sum().reset_index()
+    load_out_agg.rename(columns={'from': 'location', 'amount': 'amount_out_calc'}, inplace=True)
+
+    # 3. Merge In and Out aggregates
+    flow_calc = pd.merge(
+        load_in_agg, 
+        load_out_agg, 
+        on=['product', 'location'], 
+        how='outer'
+    ).fillna(0)
+
+    # 4. Calculate Net Flow (In - Out) derived purely from loads
+    flow_calc['net_flow_calc'] = flow_calc['amount_in_calc'] - flow_calc['amount_out_calc']
+
+    # 5. Merge with Requirements (Demand/Supply)
+    # We use suffixes to distinguish the req amount from our calculated flow
+    check_df = pd.merge(
+        flow_calc,
+        demand_supply_df,
+        on=['product', 'location'],
+        how='outer',
+        suffixes=('_calc', '_req')
+    ).fillna(0)
+    
+    # 6. Verify: Remaining Req should be 0 (Req - NetFlow == 0)
+    # Note: Depending on your sign convention in ASP:
+    # If Req = Demand (Pos) - Offer (Pos), then Net Flow (In - Out) should equal Req.
+    check_df['balance_check'] = check_df['amount'] - check_df['net_flow_calc']
+
+    is_flow_consistent = np.all(np.isclose(check_df['balance_check'], 0))
+
+    if not is_flow_consistent:
+        print(f"{YELLOW}========== Model {modelIndex}: Load Aggregation Mismatch =========={RESET}")
+        inconsistent = check_df[~np.isclose(check_df['balance_check'], 0)]
+        print("Inconsistent Location/product (Load vs Req):")
+        # Displaying relevant columns for debugging
+        print(inconsistent[['product', 'location', 'amount', 'net_flow_calc', 'balance_check']])
+        #sys.exit('exit')
+    
+    # 1. Prepare Load Data
+    # Sum total load amount per edge. 
+    # Result has columns: ['from', 'to', 'transportresource', 'amount']
+    total_load_per_edge = load_df.groupby(['from', 'to', 'transportresource'])['amount'].sum().reset_index()
+    
+    # Explicitly rename 'amount' to 'amount_load' to avoid ambiguity
+    total_load_per_edge.rename(columns={'amount': 'amount_load'}, inplace=True)
+    
+    freq_for_merge = estimated_freq_df.copy()
+    freq_for_merge.rename(columns={'freq': 'amount_freq'}, inplace=True)
+
+    # 3. Merge
+    # Now we are merging explicit 'amount_load' and 'amount_freq' columns.
+    edge_consistency = pd.merge(
+        total_load_per_edge,
+        freq_for_merge,
+        on=['from', 'to', 'transportresource'],
+        how='outer'
+    ).fillna(0)
+
+    # Debug print to confirm structure
+    # print("Columns after merge:", edge_consistency.columns)
+
+    # Check 1: Has Load but No Freq
+    orphan_loads = edge_consistency[
+        (edge_consistency['amount_load'] > 0) & 
+        (edge_consistency['amount_freq'] == 0)
+    ]
+    
+    if not orphan_loads.empty:
+        print(f"{YELLOW}========== Model {modelIndex}: Load without Frequency =========={RESET}")
+        print(orphan_loads)
+        sys.exit('exit')
+
+    if product_size_df is not None and transport_capacity_df is not None:
+        
+        
+        product_size_df["size"] = product_size_df["size"].apply(to_int)
+        load_df["amount"] = load_df["amount"].apply(to_int)
+        estimated_freq_df["freq"] =  estimated_freq_df["freq"].apply(to_int)
+        transport_capacity_df["capacity"] = transport_capacity_df["capacity"].apply(to_int)
+
+        # 1. Calculate Required Capacity (Load * productSize)
+        # Merge load with productSize. Assumes productSize columns are ['product', 'size'] (or similar value column)
+        load_with_size = pd.merge(load_df, product_size_df, on='product', how='left')
+        
+        # Calculate total volume for this specific load entry
+        load_with_size['required_vol'] = load_with_size['amount'] * load_with_size["size"]
+        
+        # Aggregate required volume by Edge (From, To, TR)
+        req_vol_per_edge = load_with_size.groupby(['from', 'to', 'transportresource'])['required_vol'].sum().reset_index()
+
+        # 2. Calculate Available Capacity (Freq * TR_Capacity)
+        freq_with_cap = pd.merge(estimated_freq_df, transport_capacity_df, on='transportresource', how='left')
+        freq_with_cap['available_vol'] = freq_with_cap['freq'] * freq_with_cap["capacity"]
+
+        # 3. Compare Required vs Available
+        cap_check = pd.merge(
+            req_vol_per_edge,
+            freq_with_cap[['from', 'to', 'transportresource', 'available_vol', 'freq']], 
+            on=['from', 'to', 'transportresource'],
+            how='outer'
+        ).fillna(0)
+
+        # Check violation: Required > Available
+        violations = cap_check[cap_check['required_vol'] > cap_check['available_vol']]
+
+        if not violations.empty:
+            print(f"{YELLOW}========== Model {modelIndex}: Capacity Violation =========={RESET}")
+            print(f"Violation: Total product Size > (Frequency * TR Capacity)")
+            # Renaming for clear print output
+            violations = violations.rename(columns={'amount': 'freq'})
+            print(violations[['from', 'to', 'transportresource', 'freq', 'available_vol', 'required_vol']])
+            sys.exit('exit')
+    print(f"Model {modelIndex}: Frequencies, and Capacities seem consistent.")
