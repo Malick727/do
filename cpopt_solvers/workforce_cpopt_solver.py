@@ -1,13 +1,10 @@
 from collections import defaultdict
-
 import numpy as np
 from docplex.cp.expression import CpoIntervalVar, CpoIntVar
 from docplex.cp.modeler import if_then, min_of
 from functools import reduce
-
 from docplex.cp.solution import CpoSolveResult, CpoIntervalVarSolution
 from typing import Any, Optional, Iterable
-
 from discrete_optimization.generic_tools.do_problem import Solution, ParamsObjectiveFunction
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.workforce.scheduling.problem import AllocSchedulingSolution, AllocSchedulingProblem

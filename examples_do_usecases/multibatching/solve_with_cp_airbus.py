@@ -64,6 +64,43 @@ def run_flow():
 
     #plot_solution_graph(problem=problem, solution=res[-1][0])
 
+def run_flow_optal():
+    from multibatching.solvers.optal import OptalMultibatchingSolver, cp
+    problem = main_parse()
+    # problem = generate_multibatching_problem(num_locations=20,
+    #                                          num_transport_types=2,
+    #                                          num_products=3,
+    #                                          min_dist=1,
+    #                                          max_dist=5,
+    #                                          seed=51)
+    solver = OptalMultibatchingSolver(problem, scaling_factor=10**3)
+    solver.init_model(modeling=ModelingMultiBatch.FLOW,
+                      detailed_capacity_constraint=False)
+    p = ParametersCp.default_cpsat()
+    p.nb_process = 16
+    fds_worker = cp.WorkerParameters(
+        searchType="FDS",
+        noOverlapPropagationLevel=4,
+    )
+    fdslb_worker = cp.WorkerParameters(
+        searchType="FDSLB",
+        noOverlapPropagationLevel=4
+    )
+    res = solver.solve(parameters_cp=p,
+                       time_limit=60,
+                       workers=[fds_worker, fdslb_worker],)
+    sol = res[-1][0]
+    print(problem.evaluate(sol), problem.satisfy(sol))
+    for product in problem.products:
+        fig = plotly_solution_graph(problem=problem,
+                                    solution=res[-1][0],
+                                    products_to_plot=[product],
+                                    explode_flows=True,
+                                    use_logical_layout=False,
+                                    png_path=f"flow_{product.id}.png")
+
+    #plot_solution_graph(problem=problem, solution=res[-1][0])
+
 
 def run_flow_postpro():
     problem = main_parse()
@@ -109,4 +146,4 @@ def run_benders():
 
 
 if __name__ == "__main__":
-    run_flow()
+    run_flow_optal()

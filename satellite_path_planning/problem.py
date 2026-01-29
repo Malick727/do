@@ -10,8 +10,9 @@ from discrete_optimization.generic_tools.do_problem import (
     EncodingRegister,
     ObjectiveRegister,
     Problem,
-    Solution, ModeOptim, ObjectiveHandling, ObjectiveDoc, TypeObjective, TypeAttribute
+    Solution, ModeOptim, ObjectiveHandling, ObjectiveDoc, TypeObjective
 )
+from discrete_optimization.generic_tools.encoding_register import EncodingRegister, ListInteger
 
 
 class SppSolution(Solution):
@@ -55,7 +56,6 @@ class SppProblem(Problem):
         return pred
 
 
-
     def compute_transitive_closure_graph(self):
         graph = nx.transitive_closure_dag(self.graph,
                                           topo_order=sorted(list(self.graph.nodes)))
@@ -77,10 +77,7 @@ class SppProblem(Problem):
     def get_attribute_register(self) -> EncodingRegister:
         return EncodingRegister(
             dict_attribute_to_type={
-                "chosen": {
-                    "name": "solution_path",
-                    "type": [TypeAttribute.LIST_INTEGER],
-                }
+                "solution_path": ListInteger(length=self.nb_nodes)
             }
         )
 

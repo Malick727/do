@@ -26,6 +26,8 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
     current_bound: int|float|None=None
     current_obj: int|float|None=None
     status_solver: StatusSolver = None
+    use_warm_start: bool = False
+    warm_start_solution: Optional[Solution] = None
 
     def get_current_best_internal_objective_bound(self) -> Optional[float]:
         return self.current_bound
@@ -66,12 +68,22 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
         solver = cp.Solver()
         callback_optal = OptalSolutionCallback(do_solver=self, optal_solver=solver,
                                                callback=callback_do)
+        callback_do.on_solve_start(self)
         solver.on_solution = callback_optal.on_solution
         solver.on_bound = callback_optal.on_bound
         kw = {"timeLimit": time_limit,
               "nbWorkers": parameters_cp.nb_process}
         kw.update(args)
-        result = await solver.solve(model=self.cp_model, params=cp.Parameters(**kw))
+        import inspect
+        kwparams = {key: kw[key] for key in kw
+                    if key not in {"lower_bound_method"}
+                    and key in inspect.signature(cp.Parameters).parameters
+                    }
+        if self.use_warm_start and self.warm_start_solution is not None:
+            result = await solver.solve(model=self.cp_model, params=cp.Parameters(**kwparams),
+                                        warm_start=self.warm_start_solution)
+        else:
+            result = await solver.solve(model=self.cp_model, params=cp.Parameters(**kwparams))
         if result.solution is not None:
             if result.proof:
                 self.status_solver = StatusSolver.OPTIMAL
@@ -82,6 +94,7 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
                 self.status_solver = StatusSolver.UNSATISFIABLE
             else:
                 self.status_solver = StatusSolver.UNKNOWN
+        callback_do.on_solve_end(callback_optal.res, self)
         return callback_optal.res
 
 
@@ -116,7 +129,7 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
             expr = var < value
         if sign == SignEnum.EQUAL:
             expr = (var == value)
-        self.cp_model += expr
+        self.cp_model.enforce(expr)
         return  [expr]
 
     @abstractmethod
@@ -153,21 +166,25 @@ class OptalSolutionCallback:
         self.res.append((sol, fit))
         self.nb_solutions += 1
         # end of step callback: stopping?
-        logger.info(f"Solution #{self.nb_solutions} = {fit}")
-        logger.info(f"Obj = {solution.solution.get_objective()}")
+        #logger.info(f"Solution #{self.nb_solutions} = {fit}")
+        #logger.info(f"Obj = {solution.solution.get_objective()}")
         try:
             stopping = self.callback.on_step_end(
-                step=self.nb_solutions, res=self.res, solver=self.do_solver
+                step=self.nb_solutions,
+                res=self.res,
+                solver=self.do_solver
             )
         except Exception as e:
             self.do_solver.early_stopping_exception = e
             stopping = True
+            print("should stop")
         else:
             if stopping:
                 self.do_solver.early_stopping_exception = SolveEarlyStop(
                     f"{self.do_solver.__class__.__name__}.solve() stopped by user callback."
                 )
         if stopping:
+            print("stopping")
             self.optal_solver.stop("stopped by usr callback")
 
     def on_bound(self, event: cp.ObjectiveBoundEntry) -> None:

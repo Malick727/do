@@ -12,10 +12,12 @@ from discrete_optimization.generic_tools.do_problem import (
     ObjectiveRegister,
     Problem,
     Solution,
-    TypeAttribute,
     TypeObjective,
 )
-
+from discrete_optimization.generic_tools.encoding_register import (
+    EncodingRegister,
+    ListInteger
+)
 
 class OvenSchedulingSolution(Solution):
     """
@@ -40,6 +42,7 @@ class OvenSchedulingSolution(Solution):
                 - The **middle list** is the ordered sequence of batches on that machine.
                 - The **inner list** contains the job_ids for a single batch.
         """
+        super().__init__(problem)
         self.problem = problem
         self.batches_per_machine = batches_per_machine
         self.timed_schedule: Dict[Tuple[int, int], Dict] = {}  # Cache for computed timings
@@ -94,6 +97,17 @@ class OvenSchedulingProblem(Problem):
         self.machine_capacities = machine_capacities
         self.initial_states = initial_states
         self.availability_intervals = availability_interval
+        fixed = []
+        for m in range(len(self.availability_intervals)):
+            fixed_m = [self.availability_intervals[m][0]]
+            for slot in self.availability_intervals[m][1:]:
+                if slot[0] == fixed_m[-1][1]:
+                    fixed_m[-1] = (fixed_m[-1][0], slot[1])
+                else:
+                    fixed_m.append(slot)
+            fixed.append(fixed_m)
+        self.availability_intervals = fixed
+
         self.setup_costs = setup_costs
         self.setup_times = setup_times
 
@@ -130,9 +144,7 @@ class OvenSchedulingProblem(Problem):
 
     def get_attribute_register(self) -> EncodingRegister:
         """Defines the solution's encoding."""
-        return EncodingRegister(dict_attribute_to_type={
-            "batches_per_machine": {"type": [TypeAttribute.VRP_PATHS]}
-        })
+        return EncodingRegister(dict_attribute_to_type={})
 
     def satisfy(self, variable: OvenSchedulingSolution) -> bool:
         """
@@ -217,7 +229,9 @@ class OvenSchedulingProblem(Problem):
                 batch_attr = self.job_attributes[batch[0]]
                 expected_setup_time = self.setup_times[last_attribute][batch_attr]
                 if start_time < last_completion_time + expected_setup_time:
-                    print("Setup machine ", m_idx, "batch", b_idx)
+                    print("Setup machine ", m_idx, "batch", b_idx, start_time,
+                          last_completion_time,
+                          expected_setup_time)
                     print("setup time not respected")
                     return False
 
@@ -227,6 +241,7 @@ class OvenSchedulingProblem(Problem):
                     for avail_start, avail_end in self.availability_intervals[m_idx]
                 )
                 if not is_in_valid_window:
+                    print(start_time, completion_time, self.availability_intervals[m_idx])
                     print("calendar not respected")
                     return False
 
@@ -242,6 +257,7 @@ class OvenSchedulingProblem(Problem):
             timed_details = self.compute_and_get_details(variable, use_cache=True)
 
             processing_time = sum(details['processing_time'] for details in timed_details.values())
+            print(timed_details)
             sc = sum(details['setup_cost'] for details in timed_details.values())
 
             tardy_jobs = 0

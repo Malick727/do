@@ -81,6 +81,49 @@ def run_oe():
     print(sum(problem.evaluate(sol).values()))
     print(problem.evaluate(sol), problem.satisfy(sol))
 
+def run_cpoptal_2steps():
+    # problem = parse_problem()
+    # problem = init_instance()
+    from multibatching.solvers.optal import OptalMultibatchingSolver, cp
+    problem: MultibatchingProblem = parse_problem()
+    solver = OptalMultibatchingSolver(problem=problem,
+                                      scaling_factor=1/100000)
+    solver.init_model(modeling=ModelingMultiBatch.FLOW,
+                      detailed_capacity_constraint=True)
+    p = ParametersCp.default_cpsat()
+    p.nb_process = 16
+    fds_worker = cp.WorkerParameters(
+        searchType="FDS",
+        noOverlapPropagationLevel=4,
+    )
+    fdslb_worker = cp.WorkerParameters(
+        searchType="FDSLB",
+        noOverlapPropagationLevel=4
+    )
+    result = solver.solve(callbacks=[],
+                          time_limit=100,
+                          parameters_cp=p,
+                          workers=[fds_worker, fdslb_worker])
+    subsolver = CpsatPackingSubproblem(problem=problem, scaling_factor=1)
+    subsolver.init_from_solution(solution=result[-1][0])
+    subsolver.init_model(solution=result[-1][0])
+    res_ = subsolver.solve(parameters_cp=p,
+                           time_limit=10,
+                           ortools_cpsat_solver_kwargs={"log_search_progress": True})
+    sol = res_[-1][0]
+
+    #print(problem.evaluate(sol))
+    #print(sum(problem.evaluate(sol).values()))
+    #print(problem.evaluate(sol), problem.satisfy(sol))
+    # plot_solution_graph(problem=problem, solution=sol)
+    #for i in range(len(problem.products)):
+    #    plotly_solution_graph(solution=sol,
+    #                          problem=problem,
+    #                          use_logical_layout=False,
+    #                          products_to_plot=[problem.products[i]],
+    #                          explode_flows=True)
+
+
 
 def run_cp_2steps():
     # problem = parse_problem()
@@ -538,6 +581,7 @@ def run_cp_debug_flows():
 
 
 if __name__ == "__main__":
+    # run_cpoptal_2steps()
     run_cp_2steps()
     # run_milp_2step()
     # run_milp_lazy()
@@ -556,21 +600,4 @@ if __name__ == "__main__":
     # run_oe()
     # run_cpmpy()
     # run_explanation()
-    #run_cp_2steps()
-    # 2637923900.2783985
-    # 2686538384.2949004
-    # run_cp_2steps()
-    # 2,637,923,900.2783985
-    # 2,686,538,384.2949004
-    # Greedy : 2676972529 2647669849.170104
-    # Binpacking : 2,637,614,464.8357964 2653396240.1278048 2693366369.0273995
-    # 2695909540.234205, 2643758582.8569036
-    # GlobalPack : 2677042356.087301
-    # TotalBinpacking :
-
-    # run_cp_benders()
-    # run_cp_2steps()
-    # run_cp_benders()
-    # run_networkx()
-    # run_cp_benders()
 
