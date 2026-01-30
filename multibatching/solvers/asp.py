@@ -27,33 +27,17 @@ logger = logging.getLogger(__name__)
 cap_size_divide = 10000
 # Logic Program Content
 ASP_MODEL_CONTENT = """
-% ----------------------- harbors -----------------------
 harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).
 ship(kugelbake;feederContainerShip;truckGeneralCargo;oversizedTianjinRoRoShip;truckonRoRoShip;smallContainerShip;airbusMobileExpressRoRoShip;oversizedRiverTransport;seaLargeContainerShip;oversizedUnderDeckRoRoShip).
 
 totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : demandOffer(P,_,V), V < 0}, product(P).
 
-validFromNode(L,P) :- demandOffer(P, L, V), V > 0.
-validToNode(L,P) :- demandOffer(P, L, V), V < 0.
-validFromNode(L,P) :- intermediate(L), product(P).
-validToNode(L,P) :- intermediate(L), product(P).
+validNode(L) :- demandOffer(_, L, _).
+validNode(L) :- harbor(L).
+noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), transportResource(TR).
 
-% for use case
-intermediate(L) :- harbor(L).
-% for generic use case
-%intermediate(L) :- location(L), not demandOffer(_,L,_), not harbor(L).
-#show intermediate/1.
-
-
-noShipBetweenHarbors(From, To, TR) :- 
-    harbor(From), 
-    harbor(To), 
-    not ship(TR), transportResource(TR).
-
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR),  transportCapacity(TR, Cap), Cap>0, Cost>0, 
-    validFromNode(From,P),
-    validToNode(To,P),
-    not noShipBetweenHarbors(From, To, TR).
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), validNode(From), validNode(To),  
+not noShipBetweenHarbors(From, To, TR), productTR(P,TR),  transportCapacity(TR, Cap).
 
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
@@ -62,14 +46,18 @@ possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost),  productTR(P,TR
 &sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- not demandOffer(P,L,_),  location(L), product(P).
 &sum { flow_in(P,L); -1 * flow_out(P,L)} = -Net  :- demandOffer(P, L, Net).
 
+:- &sum{flow_in(P,L)} > M, demandOffer(P,L,N), N<0, M=N * -1.
+:- &sum{flow_out(P,L)} > N, demandOffer(P,L,N), N>0.
+:- &sum{flow_in(P,L)} !=0, demandOffer(P,L,N), N>0.
+:- &sum{flow_out(P,L)} !=0, demandOffer(P,L,N), N<0.
+
 :- &sum{flow_out(P,From)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
 
 activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
 
-freq(1..15).
-{ routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) } :- activeFlow(From,To,TR).
-:-  activeFlow(From,To,TR), not routeFreq(From, To, TR, _,_).
+freq(1..20).
+1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
 
 % upper bound
 &sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
@@ -78,7 +66,7 @@ routeFreq(F, T, TR, Freq, TotalCap).
 &sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} > Minus1:-
 routeFreq(F, T, TR, Freq, TotalCap), transportCapacity(TR,C), Minus1=TotalCap-C, Freq>1.
 
-#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C);1, From,To, TR: activeFlow(From,To,TR)}.
+#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
 
 """
 
@@ -164,8 +152,6 @@ class ClingconMultibatchingSolver(SolverDO):
 
             # Generate and parse facts
             facts_str = self._generate_facts()
-            with open("facts.lp", 'w') as file_out:
-                file_out.writelines(facts_str)
             logger.debug("Generated ASP Facts:\n" + facts_str)
             parse_string(facts_str, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
