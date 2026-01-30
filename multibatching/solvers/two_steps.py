@@ -1,5 +1,6 @@
 from typing import Any
 
+from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.do_solver import SolverDO
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrickHyperparameter, SubBrick
 from discrete_optimization.knapsack.solvers.greedy import GreedyBestKnapsackSolver
@@ -30,7 +31,9 @@ class TwoStepMultibatchingSolver(SolverDO):
     def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
         super().__init__(problem, **kwargs)
 
-    def solve(self, **args):
+    def solve(self, callbacks: list[Callback], **args):
+        cb = CallbackList(callbacks)
+        cb.on_solve_start(self)
         args = self.complete_with_default_hyperparameters(args)
         sub_brick_flow: SubBrick = args["flow_solver"]
         sub_brick_pack: SubBrick = args["packing_solver"]
@@ -41,6 +44,7 @@ class TwoStepMultibatchingSolver(SolverDO):
         solver_pack: PackingSubproblemSolver = sub_brick_pack.cls(problem=self.problem)
         solver_pack.init_from_solution(res[-1][0])
         res_ = solver_pack.solve(**sub_brick_pack.kwargs)
+        cb.on_solve_end(res_, self)
         return res_
 
 
