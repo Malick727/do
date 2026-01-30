@@ -163,6 +163,21 @@ def run_astar_based():
     print(problem.evaluate(sol))
     print(cb.stats)
 
+def run_optal():
+    from satellite_path_planning.solver.optal import OptalSppSolver
+    from discrete_optimization.generic_tools.cp_tools import ParametersCp
+    file = [f for f in get_instances_path()
+            if "eosp_80acqr_22ramp_13greedy_aZZKEGng.json" in f][0]
+    problem = parse_spp_problem(file)
+    solver = OptalSppSolver(problem)
+    solver.init_model()
+    res = solver.solve(time_limit=100,
+                       parameters_cp=ParametersCp.default_cpsat())
+    sol: SppSolution = res[-1][0]
+    print(problem.solution)
+    print(sol.solution_path)
+    print(problem.satisfy(sol))
+    print(problem.evaluate(sol))
 
 if __name__ == "__main__":
-    run_dp()
+    run_optal()

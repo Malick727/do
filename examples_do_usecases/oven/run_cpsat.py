@@ -65,8 +65,7 @@ def run():
     solver = CpsatOvenSolver(problem, known_ub=additional_data["ub"])
     solver.init_model(objectives=[OvenObjectivesEnum.PROCESSING_TIME,
                                   OvenObjectivesEnum.TARDINESS,
-                                  OvenObjectivesEnum.SETUP_COST
-                                  ],
+                                  OvenObjectivesEnum.SETUP_COST],
                       weights=[additional_data["weight_processing"],
                                additional_data["weight_tardiness"],
                                additional_data["weight_setup_cost"]
@@ -131,4 +130,4 @@ def run_ws():
 
 
 if __name__ == "__main__":
-    run_ws()
+    run()

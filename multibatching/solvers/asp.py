@@ -286,6 +286,10 @@ class ClingconMultibatchingSolver(SolverDO):
                 list_flows.append(PackingTransport(link, packing, 1))
         #sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
         #print("aggreg", self.aggreg_from_sol(sol))
+        sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
+        aggreg_sol = self.aggreg_from_sol(sol)
+        kpis = self.problem.evaluate(sol)
+        logger.info(f"cost of current sol : {aggreg_sol}, kpis={kpis}")
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
     def compute_costs(self):
