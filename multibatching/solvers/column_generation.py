@@ -5,6 +5,8 @@ from gurobipy import GRB
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver
 from multibatching.problem import MultibatchingProblem, MultibatchingSolution, PackingTransport, TransportLink
 from multibatching.solvers import MultibatchingSolver
+from ortools.sat.python.cp_model import CpModel, CpSolver
+
 
 class ColumnGenerationSolver(MultibatchingSolver):
 
@@ -85,11 +87,21 @@ class ColumnGenerationSolver(MultibatchingSolver):
         print('Variables created')
 
         ##################################### Constraints
+        # for l in self.problem.locations:
+        #     for p in self.problem.products:
+        #         if p in l.net_supply.keys():
+        #             demand_p = -l.net_supply[p]
+        #             model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  demand_p, name=f"demand_{l.id}_p{p.id}")
+        #         else:
+        #             model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  0, name=f"demand_{l.id}_p{p.id}")
         for l in self.problem.locations:
             for p in self.problem.products:
                 if p in l.net_supply.keys():
                     demand_p = -l.net_supply[p]
-                    model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  demand_p, name=f"demand_{l.id}_p{p.id}")
+                    if demand_p > 0:
+                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  demand_p, name=f"demand_{l.id}_p{p.id}")
+                    else:
+                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  demand_p, name=f"demand_{l.id}_p{p.id}")
                 else:
                     model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) ==  0, name=f"demand_{l.id}_p{p.id}")
 
@@ -128,7 +140,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
         model.Params.LogToConsole = 0
         y={}
         for p in self.products_on_links[transport_link]:
-            y[p] = model.addVar(lb=0,ub=100, vtype=GRB.INTEGER, name=f"y_{p.id}")
+            y[p] = model.addVar(lb=0,ub=1000, vtype=GRB.INTEGER, name=f"y_{p.id}")
         
         model.addConstr(gp.quicksum(y[p]*p.size for p in self.products_on_links[transport_link]) <= transport_link.transport_type.capacity)
         model.setObjective((transport_link.transport_type.cost+transport_link.transport_type.emissions)*transport_link.distance-gp.quicksum(y[p]*(self.dual_values[transport_link.location_l2][p]-self.dual_values[transport_link.location_l1][p]) for p in self.products_on_links[transport_link]))
@@ -139,11 +151,16 @@ class ColumnGenerationSolver(MultibatchingSolver):
             new_column[p] = model.getVarByName(f"y_{p.id}").X
         reduced_cost = model.ObjVal
         return new_column, reduced_cost
+    
+
+
+    
 
     def solveSubproblems(self, list_links): 
         new_columns = {}
         nb_suproblems = len(list_links)
         i=0
+        
 
         for transport_link in list_links:
             # Solve pricing problem
@@ -153,7 +170,11 @@ class ColumnGenerationSolver(MultibatchingSolver):
             i+=1
         print("------------ Nb subproblems", nb_suproblems)
 
+
         return new_columns
+    
+
+    
 
     def addColumns(self, new_columns):
         for transport_link in new_columns.keys():
