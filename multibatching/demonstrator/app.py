@@ -280,7 +280,7 @@ with tab1:
 
             # Shared Parameters
             p = ParametersCp.default_cpsat()
-            p.nb_process = 16
+            p.nb_process = 8
             kwargs = {"log_search_progress": True} 
 
             # --- CALL DISPATCHER ---
