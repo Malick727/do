@@ -22,7 +22,7 @@ def parse_problem(fix_problem: bool = False):
 
 def script():
     # 1. Generate the problem instance
-    
+    from discrete_optimization.generic_tools.callbacks.stats_retrievers import BasicStatsCallback
     problem = generate_multibatching_problem(num_locations=20,
                                              num_transport_types=5,
                                              num_products=3,
@@ -39,7 +39,8 @@ def script():
 
     time_limit=6000
     print(f"Starting solve with {time_limit}s timeout...")
-    result_storage = solver.solve(time_limit=time_limit)
+    result_storage = solver.solve(callbacks=[BasicStatsCallback()],
+                                  time_limit=time_limit)
 
     # 4. Retrieve and display results
     solution, fitness = result_storage.get_best_solution_fit()

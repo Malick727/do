@@ -70,7 +70,7 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
                                                callback=callback_do)
         callback_do.on_solve_start(self)
         solver.on_solution = callback_optal.on_solution
-        solver.on_bound = callback_optal.on_bound
+        solver.on_objective_bound = callback_optal.on_bound
         kw = {"timeLimit": time_limit,
               "nbWorkers": parameters_cp.nb_process}
         kw.update(args)
@@ -105,6 +105,8 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
         parameters_cp: Optional[ParametersCp] = None,
         **args: Any,
     ) -> ResultStorage:
+        if self.cp_model is None:
+            self.init_model(**args)
         return run_async_synchronously(
             self._solve_async(
                 callbacks=callbacks,
@@ -189,19 +191,5 @@ class OptalSolutionCallback:
 
     def on_bound(self, event: cp.ObjectiveBoundEntry) -> None:
         self.do_solver.current_bound = event.value
-        try:
-            stopping = self.callback.on_step_end(
-                step=self.nb_solutions, res=self.res, solver=self.do_solver
-            )
-        except Exception as e:
-            self.do_solver.early_stopping_exception = e
-            stopping = True
-        else:
-            if stopping:
-                self.do_solver.early_stopping_exception = SolveEarlyStop(
-                    f"{self.do_solver.__class__.__name__}.solve() stopped by user callback."
-                )
-        if stopping:
-            self.optal_solver.stop("stopped by usr callback")
 
 

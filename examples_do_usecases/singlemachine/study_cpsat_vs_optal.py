@@ -1,4 +1,5 @@
 import config.env
+from optalcp import WorkerParameters
 from copy import copy
 import logging
 import os
@@ -11,8 +12,6 @@ from discrete_optimization.generic_tools.callbacks.stats_retrievers import (
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from discrete_optimization.generic_tools.do_solver import StatusSolver
 from discrete_optimization.generic_tools.hub_solver.optal.generic_optal import OptalBasicCallback
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
-from discrete_optimization.generic_tools.lp_tools import ParametersMilp
 from discrete_optimization.generic_tools.sequential_metasolver import SequentialMetasolver
 from discrete_optimization.generic_tools.study import (
     Experiment,
@@ -21,84 +20,45 @@ from discrete_optimization.generic_tools.study import (
 )
 from discrete_optimization.singlemachine.parser import get_data_available, parse_file
 from discrete_optimization.singlemachine.solvers.cpsat import CpsatWTSolver
-from discrete_optimization.singlemachine.solvers.dp import DpWTSolver
-from discrete_optimization.singlemachine.solvers.greedy import GreedySingleMachineSolver
-from hexaly_solvers.singlemachine.hexaly_singlemachine_solver import HexalySingleMachineSolver
 from cpopt_solvers.singlemachine_cpopt_solver import CPOptSolverSingleMachine
-from discrete_optimization.singlemachine.solvers.optal import OptalSingleMachineSolver
-from discrete_optimization.singlemachine.solvers.lp import MathOptSingleMachineSolver, mathopt
+from optal_py_solvers.optal_singlemachine import OptalSingleMachineSolver
 from discrete_optimization.generic_tools.callbacks.early_stoppers import ObjectiveGapStopper
-import didppy as dp
 logging.basicConfig(level=logging.INFO)
 
-study_name = "sm-study-with-seq"
+study_name = "sm-study-cp-competition"
 overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 time_limit = 30
 
 def create_configs():
     solver_configs = dict()
-    proc = 16
+    proc = 8
     p = ParametersCp.default_cpsat()
     p.nb_process = proc
+    fds_worker = WorkerParameters(
+            searchType="FDS",
+            noOverlapPropagationLevel=4,
+            cumulPropagationLevel=3,
+            reservoirPropagationLevel=2)
+    fdslb_worker = WorkerParameters(
+            searchType="FDSDual",
+            noOverlapPropagationLevel=4,
+            cumulPropagationLevel=3,
+            reservoirPropagationLevel=2)
+    workers = [fds_worker, fdslb_worker]
+    p_optal = ParametersCp.default_cpsat()
+    p_optal.nb_process = 8
     solver_configs["optal"] = SolverConfig(OptalSingleMachineSolver,
-                                           {"time_limit": time_limit,
-                                            "parameters_cp": p,
-                                            "worker0-1.searchType": "fds",
-                                            "worker0-1.noOverlapPropagationLevel": 4,
-                                            "worker0-1.cumulPropagationLevel": 3})
-    solver_configs["lp-highs"] = SolverConfig(MathOptSingleMachineSolver,
-                                              {'time_limit': time_limit,
-                                               "parameters_milp": ParametersMilp.default(),
-                                               "mathopt_solver_type": mathopt.SolverType.HIGHS,
-                                               })
-    solver_configs["lp-cpsat"] = SolverConfig(MathOptSingleMachineSolver,
-                                              {'time_limit': time_limit,
-                                               "parameters_milp": ParametersMilp.default(),
-                                               "mathopt_solver_type": mathopt.SolverType.CP_SAT,
-                                               "mathopt_additional_solve_parameters":
-                                                   mathopt.SolveParameters(threads=proc)
-                                               })
-    solver_configs["dp-lnbs"] = SolverConfig(DpWTSolver, {"time_limit": time_limit,
-                                                          "threads": proc,
-                                                          "add_dominated_transition": False,
-                                                          "solver": "LNBS"})
-
-    solver_configs["dp-cabs-True"] = SolverConfig(DpWTSolver, {"time_limit": time_limit,
-                                                               "threads": proc,
-                                                               "add_dominated_transition": True,
-                                                               "solver": "CABS"})
-    solver_configs["dp-cabs-False"] = SolverConfig(DpWTSolver, {"time_limit": time_limit,
-                                                                "threads": proc,
-                                                                "add_dominated_transition": False,
-                                                                "solver": "CABS"})
-
-    bricks = [SubBrick(GreedySingleMachineSolver, {})]
-    subbrick_seq = [SubBrick(CpsatWTSolver,
-                             dict(time_limit=time_limit/10,
-                                  parameters_cp=p,
-                                  ortools_cpsat_solver_kwargs={"log_search_progress": False})),
-                    SubBrick(DpWTSolver,
-                             dict(add_dominated_transition=False,
-                                  time_limit=time_limit/10,
-                                  threads=proc,
-                                  solver="LNBS"))]
-    for i in range(5):
-        bricks.extend(subbrick_seq)
-    solver_configs["seq"] = SolverConfig(SequentialMetasolver, {"list_subbricks": bricks})
-
+                                           dict(time_limit=time_limit,
+                                                parameters_cp=p,
+                                                workers=workers))
     solver_configs[f"cpsat-proc-{proc}"] = SolverConfig(cls=CpsatWTSolver,
                                                         kwargs={"time_limit": time_limit,
                                                                 "ortools_cpsat_solver_kwargs":
-                                                                {"log_search_progress": False},
+                                                                {"log_search_progress": True},
                                                                 "parameters_cp": p})
-    solver_configs["hexaly"] = SolverConfig(HexalySingleMachineSolver,
-                                            {"time_limit": time_limit,
-                                             "nb_threads": proc})
     solver_configs["cpopt"] = SolverConfig(CPOptSolverSingleMachine,
                                            {"time_limit": time_limit,
                                             "parameters_cp": p})
-
-
     return solver_configs
 
 
@@ -126,22 +86,13 @@ for instance in problems:
             solver.init_model(**solver_config.kwargs)
             # solve
             transformed_kwargs = copy(solver_config.kwargs)
-            if solver_config.cls in {DpWTSolver, SequentialMetasolver}:
-                stats_cb = BasicStatsCallback()
-                callbacks = [stats_cb, NbIterationTracker(step_verbosity_level=logging.INFO)]
-            elif solver_config.cls == OptalSingleMachineSolver:
-                callbacks = [NbIterationTracker()]
-            else:
-                callbacks = [stats_cb,
-                             NbIterationTracker(step_verbosity_level=logging.INFO),
-                             ObjectiveGapStopper(objective_gap_rel=0, objective_gap_abs=0)]
+            callbacks = [stats_cb,
+                         NbIterationTracker(step_verbosity_level=logging.INFO),
+                         ObjectiveGapStopper(objective_gap_rel=0, objective_gap_abs=0)]
             result_store = solver.solve(
                 callbacks=callbacks,
                 **transformed_kwargs,
             )
-            if solver_config.cls == OptalSingleMachineSolver:
-                solver: OptalSingleMachineSolver
-                stats_cb = OptalBasicCallback(stats=solver.get_output_stats())
         except Exception as e:
             # failed experiment
             metrics = pd.DataFrame([])

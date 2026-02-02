@@ -7,7 +7,7 @@ from docplex.cp.solution import (SOLVE_STATUS_UNKNOWN, SOLVE_STATUS_INFEASIBLE,
 from docplex.cp.solver.cpo_callback import EVENT_SOLUTION, EVENT_OBJ_BOUND,  CpoCallback
 from typing import Optional, List, Any
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
-from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, StatusSolver
+from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, StatusSolver, SignEnum
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.do_solver import BoundsProviderMixin
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
@@ -34,6 +34,21 @@ class CPOSolver(CpSolver, BoundsProviderMixin):
 
     cp_model: Optional[CpoModel] = None
     early_stopping_exception: Optional[Exception] = None
+
+    def add_bound_constraint(self, var: Any, sign: SignEnum, value: int) -> list[Any]:
+        if sign == SignEnum.UP:
+            self.cp_model.add(var > value)
+        if sign == SignEnum.UEQ:
+            self.cp_model.add(var >= value)
+        if sign == SignEnum.LEQ:
+            self.cp_model.add(var <= value)
+        if sign == SignEnum.LESS:
+            self.cp_model.add(var < value)
+        if sign == SignEnum.EQUAL:
+            self.cp_model.add(var == value)
+
+    def minimize_variable(self, var: Any) -> None:
+        self.cp_model.minimize(var)
 
     def get_current_best_internal_objective_bound(self) -> Optional[float]:
         if self.callback.current_cpo_solve_result is not None:

@@ -62,9 +62,9 @@ def sanitize_solution_data(solution):
     Fixes NoneType names and empty locations to prevent plotting crashes.
     """
     coords_map = {}
-    path_folder = "multibatching/datalocal"
-    path_file = os.path.join(path_folder, "coordinates.json")
 
+    path_folder = "multibatching/datalocal"
+    path_file = os.path.join(root_dir, path_folder, "coordinates.json")
     if os.path.exists(path_file):
         try:
             with open(path_file, "r") as f:
@@ -302,7 +302,7 @@ with tab1:
                 sol = res[-1][0]
                 kpis = problem.evaluate(sol)
                 is_valid = problem.satisfy(sol)
-
+                print("is valid ", is_valid)
                 # History Record
                 run_record = {
                     "Strategy": strategy,

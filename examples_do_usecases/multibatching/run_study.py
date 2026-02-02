@@ -35,8 +35,8 @@ from examples_do_usecases.multibatching.solve_industrial_use_case import parse_p
 
 logging.basicConfig(level=logging.INFO)
 
-study_name = "multibatching-study"
-problem = parse_problem(False)
+study_name = "multibatching-study-harbor"
+problem = parse_problem(False, True)
 
 def create_configs():
     solver_configs = {}
@@ -219,12 +219,12 @@ def config_sequential_milp():
                                       SubBrick(cls=TwoStepMultibatchingSolver,
                                                kwargs={"flow_solver":
                                                        SubBrick(cls=GurobiMultibatchingSolver,
-                                                                kwargs={"time_limit": 200}),
+                                                                kwargs={"time_limit": 10}),
                                                        "packing_solver":
                                                        SubBrick(cls=GreedyPackingForMultibatching,
                                                                 kwargs={})}),
                                       SubBrick(GurobiMultibatchingSolverUnitFlow,
-                                               dict(time_limit=200,
+                                               dict(time_limit=10,
                                                     delta_to_solution=2),
                                                kwargs_from_solution={"solution": lambda sol: sol}
                                                )]
@@ -249,7 +249,7 @@ for k in range(5): # 5 tries
         solver = solver_config.cls(problem, **solver_config.kwargs)
         solver.init_model(**solver_config.kwargs)
         # solve
-        stats_cb = StatsWithBoundsCallback()
+        stats_cb = BasicStatsCallback()
         result_store = solver.solve(
             callbacks=[stats_cb],
             **solver_config.kwargs)

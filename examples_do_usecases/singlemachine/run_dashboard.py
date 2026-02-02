@@ -3,6 +3,7 @@ from discrete_optimization.generic_tools.study import Hdf5Database
 
 study_name = "sm-study"
 study_name = "sm-study-with-seq"
+study_name = "sm-study-cp-competition-"
 
 # retrieve data
 with Hdf5Database(f"{study_name}.h5") as database:
@@ -14,9 +15,9 @@ with Hdf5Database(f"{study_name}.h5") as database:
             l.append(r)
     results = l
 
-with Hdf5Database(f"sm-study-with-ls-and-greedy.h5") as database:
-    results_2 = database.load_results()
-    results.extend(results_2)
+#with Hdf5Database(f"sm-study-with-ls-and-greedy.h5") as database:
+#    results_2 = database.load_results()
+#    results.extend(results_2)
 
 
 
