@@ -21,7 +21,7 @@ def parse_problem(fix_problem: bool = False):
     config_file = os.path.join(this_folder,
                                "../../multibatching/datalocal/config-local.json")
     d = json.load(open(config_file, "r"))
-    problem = parse_json_to_problem(d)
+    problem = parse_json_to_problem(d, harbor_constraint=True)
 
     # Temporary fix = section2 transportable by any means..
     if fix_problem:

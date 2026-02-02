@@ -153,7 +153,7 @@ from multibatching.problem import (MultibatchingProblem,
 
 
 
-def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
+def parse_json_to_problem(json_data: dict, harbor_constraint = False) -> MultibatchingProblem:
     """
     Parses a JSON dictionary into a MultibatchingProblem object.
     """
@@ -230,7 +230,7 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
         for tr_id, tr_data in data["transportResources"].items():
             transport_type = transport_types_map[tr_id]
             distance = tr_data["distance"]
-            if not(is_harbor) or (transport_type.name in ships):
+            if not(is_harbor) or (transport_type.name in ships) or not(harbor_constraint):
                 transport_links_list.append(
                     TransportLink(
                         id = _id+"tr*id"+tr_id,
