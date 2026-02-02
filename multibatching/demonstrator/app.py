@@ -65,11 +65,14 @@ def sanitize_solution_data(solution):
 
     path_folder = "multibatching/datalocal"
     path_file = os.path.join(root_dir, path_folder, "coordinates.json")
+    print(path_file)
     if os.path.exists(path_file):
+        print(path_file, " exists")
         try:
             with open(path_file, "r") as f:
                 coords_map = json.load(f)
         except:
+            print("error reading coordinates.json")
             coords_map = {}
 
     if solution.list_flows:
@@ -82,6 +85,8 @@ def sanitize_solution_data(solution):
                 tt.name = "Standard_Transport" 
 
             for loc in [link.location_l1, link.location_l2]:
+                print("Loc name", loc.name)
+                print(coords_map.keys())
                 if not loc.name:
                     loc.name = f"Location_{loc.id}"
                 
@@ -93,7 +98,6 @@ def sanitize_solution_data(solution):
                     
                     offset = numeric_id * 0.1
                     coords_map[loc.name] = [48.0 + offset, 10.0 + offset]
-
     os.makedirs(path_folder, exist_ok=True)
     with open(path_file, "w") as f:
         json.dump(coords_map, f)

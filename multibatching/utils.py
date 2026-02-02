@@ -394,7 +394,8 @@ def plot_solution_on_map_by_transport(solution: MultibatchingSolution):
     """
     # 1. Extract data, now including the transport type for each flow
     locations_data = {}
-    with open("multibatching/datalocal/coordinates.json", "r") as f:
+    this_dir = os.path.dirname(os.path.realpath(__file__))
+    with open(os.path.join(this_dir, "datalocal/coordinates.json"), "r") as f:
         coordinates = json.load(f)
 
     flows = []
