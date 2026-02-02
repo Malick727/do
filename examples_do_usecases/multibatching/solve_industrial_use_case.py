@@ -36,12 +36,13 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-def parse_problem(fix_problem: bool = False):
+def parse_problem(fix_problem: bool = False,
+                  harbor_constraint: bool = False):
     this_folder = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(this_folder,
                                "../../multibatching/datalocal/config-local.json")
     d = json.load(open(config_file, "r"))
-    problem = parse_json_to_problem(d)
+    problem = parse_json_to_problem(d, harbor_constraint=harbor_constraint)
 
     # Temporary fix = section2 transportable by any means..
     if fix_problem:
