@@ -79,26 +79,19 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         Provides a warm start for the UNIT_FLOW modeling by hinting individual trip contents.
         """
         self.cp_model.ClearHints()
-
         # Group all trips by transport link
         trips_per_link = defaultdict(list)
         for flow in solution.list_flows:
             # "Unroll" the aggregated solution: if nb_packing is 5, add the packing 5 times
             for _ in range(flow.nb_packing):
                 trips_per_link[flow.transport_link].append(flow.product_packing)
-
-        # Hint all trip variables to 0 first to clear previous states
-        #for tl_idx in self.variables["used_trips"]:
-        #    for trip_idx in self.variables["used_trips"][tl_idx]:
-        ##        self.cp_model.AddHint(self.variables["used_trips"][tl_idx][trip_idx], 0)
-        #        for p_idx in self.variables["trips_variables"][tl_idx][trip_idx]:
-        #            self.cp_model.AddHint(self.variables["trips_variables"][tl_idx][trip_idx][p_idx], 0)
-
         # Now, assign the actual trips from the solution to the model variables
+        done_link_idx = set()
         for link, trips in trips_per_link.items():
+            sum_per_product = defaultdict(lambda: 0)
             link_idx = self.problem.transport_links_to_index[link]
             max_trips_for_link = len(self.variables["used_trips"][link_idx])
-
+            done_link_idx.add(link_idx)
             # Iterate through the unrolled trips and assign them one by one
             for trip_idx, packing_content in enumerate(trips):
                 if trip_idx >= max_trips_for_link:
@@ -106,20 +99,34 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                    f"than available in the model ({max_trips_for_link}). "
                                    f"Hint will be truncated.")
                     break
-
-                # Hint that this trip is used
                 self.cp_model.AddHint(self.variables["used_trips"][link_idx][trip_idx], 1)
-
-                # Hint the content of this specific trip
                 for product, units in packing_content.items():
                     product_idx = self.problem.product_to_index[product]
                     if product_idx in self.variables["trips_variables"][link_idx][trip_idx]:
                         content_var = self.variables["trips_variables"][link_idx][trip_idx][product_idx]
                         self.cp_model.AddHint(content_var, int(units))
+                        sum_per_product[product_idx] += int(units)
+                for p in self.variables["trips_variables"][link_idx][trip_idx]:
+                    if self.problem.products[p] not in packing_content:
+                        self.cp_model.AddHint(self.variables["trips_variables"][link_idx][trip_idx][p],
+                                              0)
+            for product in self.variables["flows"][link_idx]:
+                self.cp_model.AddHint(self.variables["flows"][link_idx][product], sum_per_product[product])
+            self.cp_model.AddHint(self.variables["nb_trips"][link_idx], len(trips))
             for k in range(len(trips), max_trips_for_link):
                 self.cp_model.AddHint(self.variables["used_trips"][link_idx][k], 0)
                 for product_idx in self.variables["trips_variables"][link_idx][k]:
                     self.cp_model.AddHint(self.variables["trips_variables"][link_idx][k][product_idx], 0)
+        for index_link in self.variables["used_trips"]:
+            if index_link not in done_link_idx:
+                max_trips_for_link = len(self.variables["used_trips"][index_link])
+                self.cp_model.AddHint(self.variables["nb_trips"][index_link], 0)
+                for prod in self.variables["flows"][index_link]:
+                    self.cp_model.AddHint(self.variables["flows"][index_link][prod], 0)
+                for k in range(max_trips_for_link):
+                    self.cp_model.AddHint(self.variables["used_trips"][index_link][k], 0)
+                    for product_idx in self.variables["trips_variables"][index_link][k]:
+                        self.cp_model.AddHint(self.variables["trips_variables"][index_link][k][product_idx], 0)
         logger.info('Warm start hints added for UNIT_FLOW model.')
 
     def set_warm_start_flow(self, solution: MultibatchingSolution) -> None:
@@ -510,7 +517,6 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         self.variables["nb_trips"] = nb_trips_per_link
         self.variables["nb_trips_per_link_per_product"] = nb_trips_per_link_per_product
 
-
     def compute_nb_trips_min(self,
                              product: Product,
                              demand_of_product: int):
@@ -656,13 +662,17 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                                   "capital": sum(estimated_compound)}
 
     def init_model_detailed_trips(self, **args: Any) -> None:
+        sol: MultibatchingSolution = args.get("solution", None)
+        delta: int = args.get("delta_to_solution", 1)
+        max_nb_trips_per_link = args.get("max_trips", 50)
+        max_nb_trip_per_transport_link = None
+        if sol is not None:
+            max_nb_trip_per_transport_link = defaultdict(lambda: delta)
+            for pt in sol.list_flows:
+                id_tl = self.problem.transport_links_to_index[pt.transport_link]
+                max_nb_trip_per_transport_link[id_tl] += pt.nb_packing
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
-        demand_per_product = {p: self.problem.get_total_demand(p) for p in self.problem.products}
         total_size_per_product = {p: p.size * supply_per_product[p] for p in self.problem.products}
-        total_size_in_problem = sum(total_size_per_product.values())
-        # TODO : this is not totally correct, but fine.
-        max_nb_trip = int(total_size_in_problem / min([tt.capacity for tt in self.problem.transport_types
-                                                       if tt.capacity > 0]))
         model = cp_model.CpModel()
         transport_links = self.problem.transport_links
         flows_variables = {}
@@ -671,7 +681,6 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
         nb_trips_per_link = {}
         keys_inflow_location_product = dict()
         keys_outflow_location_product = dict()
-        max_nb_trips_per_link = args.get("max_trips", 50)
         for index_tl in range(self.problem.nb_transport_links):
             flows_variables[index_tl] = {}
             trips_variables[index_tl] = {}
@@ -687,6 +696,8 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
             max_trips_for_this_link = tl.max_trips
             if max_trips_for_this_link is None:
                 max_trips_for_this_link = max_nb_trips_per_link
+            if max_nb_trip_per_transport_link is not None:
+                max_trips_for_this_link = max_nb_trip_per_transport_link[index_tl]
             nb_trips_per_link[index_tl] = model.NewIntVar(lb=0, ub=max_trips_for_this_link,
                                                           name=f'num_trips_{index_tl}')
             list_var_weight = []
@@ -722,14 +733,12 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver, WarmstartMixin):
                 model.Add(sum([trips_variables[index_tl][i][p]
                               for p in trips_variables[index_tl][i]]) > 0).OnlyEnforceIf(
                     used_trips_variables[index_tl][i])
-
                 model.Add(sum([trips_variables[index_tl][i][p]
                               for p in trips_variables[index_tl][i]]) == 0).OnlyEnforceIf(
                     used_trips_variables[index_tl][i].Not())
                 (model.Add(sum([trips_variables[index_tl][i][p]*int(self.problem.products[p].size)
                                 for p in trips_variables[index_tl][i]]) <= tl.transport_type.capacity)
                  .OnlyEnforceIf(used_trips_variables[index_tl][i]))
-
             # Global capacity constraint
             model.Add(cp_model.LinearExpr.weighted_sum([x[0] for x in list_var_weight],
                                                        [x[1] for x in list_var_weight])

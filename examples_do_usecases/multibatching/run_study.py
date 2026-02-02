@@ -29,107 +29,109 @@ from multibatching.solvers.packing_subproblem import (PackingViaBinPacking,
                                                       GreedyPackingForMultibatching,
                                                       CpsatPackingSubproblem)
 from multibatching.solvers.two_steps import TwoStepMultibatchingSolver
-
-
+from discrete_optimization.generic_tools.sequential_metasolver import SequentialMetasolver
+from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
 
 logging.basicConfig(level=logging.INFO)
 
 study_name = "multibatching-study"
-overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 problem = parse_problem(False)
 
 def create_configs():
     solver_configs = {}
-    params_cp_16 = ParametersCp.default_cpsat()
-    params_cp_16.nb_process = 16
-    params_cp_8 = ParametersCp.default_cpsat()
-    params_cp_8.nb_process = 8
     # CpsatPackingSubproblem, GreedyPackingForMultibatching, PackingViaBinPacking
-    for i in [1, 8, 16]:
-        params_cp = ParametersCp.default_cpsat()
-        params_cp.nb_process = i
-        solver_configs[f"two_steps_cpsat{i}_pack_binpackcp"] = SolverConfig(cls=TwoStepMultibatchingSolver,
-                                                             kwargs=
-                                                             {"flow_solver":
-                                                                  SubBrick(cls=CpsatMultibatchingSolver,
-                                                                           kwargs={"modeling": ModelingMultiBatch.FLOW,
-                                                                                   "time_limit": 100,
-                                                                                   "ortools_cpsat_solver_kwargs":
-                                                                                       {"log_search_progress": True},
-                                                                                   "parameters_cp": params_cp}),
-                                                              "packing_solver":
-                                                                  SubBrick(cls=PackingViaBinPacking,
-                                                                           kwargs={"bin_packing_solver":
-                                                                                       SubBrick(cls=CpSatBinPackSolver,
-                                                                                                kwargs=dict(
-                                                                                                    modeling=ModelingBinPack.SCHEDULING,
-                                                                                                    parameters_cp=ParametersCp.default_cpsat())),
-                                                                                   "time_limit_per_link": 1}
-                                                                           )
-                                                              })
-        solver_configs[f"two_steps_cpsat{i}_pack_greedy"] = SolverConfig(cls=TwoStepMultibatchingSolver,
-                                                                            kwargs=
-                                                                            {"flow_solver":
-                                                                                 SubBrick(cls=CpsatMultibatchingSolver,
-                                                                                          kwargs={
-                                                                                              "modeling": ModelingMultiBatch.FLOW,
-                                                                                              "time_limit": 100,
-                                                                                              "ortools_cpsat_solver_kwargs":
-                                                                                              {"log_search_progress": True},
-                                                                                              "parameters_cp": params_cp}),
-                                                                             "packing_solver":
-                                                                                 SubBrick(cls=GreedyPackingForMultibatching,
-                                                                                          kwargs={}
-                                                                                          )
-                                                                             })
-        solver_configs[f"two_steps_cpsat{i}_pack_cpfull"] = SolverConfig(cls=TwoStepMultibatchingSolver,
-                                                                         kwargs=
-                                                                         {"flow_solver":
-                                                                              SubBrick(cls=CpsatMultibatchingSolver,
-                                                                                       kwargs={
-                                                                                           "modeling": ModelingMultiBatch.FLOW,
-                                                                                           "time_limit": 100,
-                                                                                           "ortools_cpsat_solver_kwargs":
-                                                                                            {"log_search_progress": True},
-                                                                                           "parameters_cp": params_cp}),
-                                                                          "packing_solver":
-                                                                              SubBrick(
-                                                                                  cls=CpsatPackingSubproblem,
-                                                                                  kwargs={"time_limit": 100,
-                                                                                          "parameters_cp": params_cp}
+    for j in range(1, 10):
+        for i in [4, 8, 16]:
+            params_cp = ParametersCp.default_cpsat()
+            params_cp.nb_process = i
+            solver_configs[f"2steps_cpsat{i}_pack_binpackcp{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                                                kwargs=
+                                                                                {"best_n_flow_solution": j,
+                                                                                 "flow_solver":
+                                                                                     SubBrick(cls=CpsatMultibatchingSolver,
+                                                                                              kwargs={"modeling": ModelingMultiBatch.FLOW,
+                                                                                                      "time_limit": 100,
+                                                                                                      "ortools_cpsat_solver_kwargs":
+                                                                                                          {"log_search_progress": True},
+                                                                                                      "parameters_cp": params_cp}),
+                                                                                 "packing_solver":
+                                                                                     SubBrick(cls=PackingViaBinPacking,
+                                                                                              kwargs={"bin_packing_solver":
+                                                                                                          SubBrick(cls=CpSatBinPackSolver,
+                                                                                                                   kwargs=dict(
+                                                                                                                       modeling=ModelingBinPack.SCHEDULING,
+                                                                                                                       parameters_cp=ParametersCp.default_cpsat())),
+                                                                                                      "time_limit_per_link": 1}
+                                                                                              )
+                                                                                 })
+            solver_configs[f"2steps_cpsat{i}_pack_greedy{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                                             kwargs=
+                                                                             {"best_n_flow_solution": j,
+                                                                              "flow_solver":
+                                                                                  SubBrick(cls=CpsatMultibatchingSolver,
+                                                                                           kwargs={
+                                                                                               "modeling": ModelingMultiBatch.FLOW,
+                                                                                               "time_limit": 100,
+                                                                                               "ortools_cpsat_solver_kwargs":
+                                                                                                   {"log_search_progress": True},
+                                                                                               "parameters_cp": params_cp}),
+                                                                              "packing_solver":
+                                                                                  SubBrick(cls=GreedyPackingForMultibatching,
+                                                                                           kwargs={}
+                                                                                           )
+                                                                              })
+            solver_configs[f"2steps_cpsat{i}_pack_cpfull{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                                             kwargs=
+                                                                             {"best_n_flow_solution": j,
+                                                                              "flow_solver":
+                                                                                  SubBrick(cls=CpsatMultibatchingSolver,
+                                                                                           kwargs={
+                                                                                               "modeling": ModelingMultiBatch.FLOW,
+                                                                                               "time_limit": 100,
+                                                                                               "ortools_cpsat_solver_kwargs":
+                                                                                                   {"log_search_progress": True},
+                                                                                               "parameters_cp": params_cp}),
+                                                                              "packing_solver":
+                                                                                  SubBrick(
+                                                                                      cls=CpsatPackingSubproblem,
+                                                                                      kwargs={"time_limit": 100,
+                                                                                              "parameters_cp": params_cp}
                                                                                   )
-                                                                          })
-    solver_configs[f"two_steps_gurobi{i}_pack_binpackcp"] = SolverConfig(cls=TwoStepMultibatchingSolver,
-                                                          kwargs=
-                                                          {"flow_solver":
-                                                               SubBrick(cls=GurobiMultibatchingSolver,
-                                                                        kwargs={"time_limit": 100}),
-                                                           "packing_solver":
-                                                               SubBrick(cls=PackingViaBinPacking,
-                                                                        kwargs={"bin_packing_solver":
-                                                                                    SubBrick(cls=CpSatBinPackSolver,
-                                                                                             kwargs=dict(
-                                                                                                 modeling=ModelingBinPack.SCHEDULING,
-                                                                                                 parameters_cp=ParametersCp.default_cpsat())),
-                                                                               "time_limit_per_link": 1}
-                                                                       )
-                                                          })
-    solver_configs[f"two_steps_gurobi_pack_greedy"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                                              })
+        solver_configs[f"2steps_guro_pack_binpackcp{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                                        kwargs=
+                                                                        {"best_n_flow_solution": j,
+                                                                         "flow_solver":
+                                                                             SubBrick(cls=GurobiMultibatchingSolver,
+                                                                                      kwargs={"time_limit": 100}),
+                                                                         "packing_solver":
+                                                                             SubBrick(cls=PackingViaBinPacking,
+                                                                                      kwargs={"bin_packing_solver":
+                                                                                                  SubBrick(cls=CpSatBinPackSolver,
+                                                                                                           kwargs=dict(
+                                                                                                               modeling=ModelingBinPack.SCHEDULING,
+                                                                                                               parameters_cp=ParametersCp.default_cpsat())),
+                                                                                              "time_limit_per_link": 1}
+                                                                                      )
+                                                                         })
+        solver_configs[f"2steps_guro_pack_greedy{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
                                                                      kwargs=
-                                                                     {"flow_solver":
-                                                                      SubBrick(cls=GurobiMultibatchingSolver,
-                                                                               kwargs={"time_limit": 100}),
+                                                                     {"best_n_flow_solution": j,
+                                                                      "flow_solver":
+                                                                          SubBrick(cls=GurobiMultibatchingSolver,
+                                                                                   kwargs={"time_limit": 100}),
                                                                       "packing_solver":
                                                                           SubBrick(cls=GreedyPackingForMultibatching,
                                                                                    kwargs={}
                                                                                    )
                                                                       })
-    solver_configs[f"two_steps_gurobi_pack_cpfull"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+        solver_configs[f"2steps_guro_pack_cpfull{j}"] = SolverConfig(cls=TwoStepMultibatchingSolver,
                                                                      kwargs=
-                                                                     {"flow_solver":
-                                                                      SubBrick(cls=GurobiMultibatchingSolver,
-                                                                               kwargs={"time_limit": 100}),
+                                                                     {"best_n_flow_solution": j,
+                                                                      "flow_solver":
+                                                                          SubBrick(cls=GurobiMultibatchingSolver,
+                                                                                   kwargs={"time_limit": 100}),
                                                                       "packing_solver":
                                                                           SubBrick(
                                                                               cls=CpsatPackingSubproblem,
@@ -142,7 +144,97 @@ def create_configs():
     return solver_configs
 
 
-solver_configs = create_configs()
+def configs_asp_binpack():
+    params_cp = ParametersCp.default_cpsat()
+    params_cp.nb_process = 8
+    configs = {}
+    configs[f"2steps_cpsat{8}_pack_binpackasp"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                               kwargs=
+                                                               {"best_n_flow_solution": 1,
+                                                                "flow_solver":
+                                                                    SubBrick(cls=CpsatMultibatchingSolver,
+                                                                             kwargs={"modeling": ModelingMultiBatch.FLOW,
+                                                                                     "time_limit": 100,
+                                                                                     "ortools_cpsat_solver_kwargs":
+                                                                                         {"log_search_progress": True},
+                                                                                     "parameters_cp": params_cp}),
+                                                                "packing_solver":
+                                                                    SubBrick(cls=PackingViaBinPacking,
+                                                                             kwargs={"bin_packing_solver":
+                                                                                         SubBrick(cls=AspBinPackingSolver,
+                                                                                                  kwargs={}),
+                                                                                     "time_limit_per_link": 1})
+                                                                })
+    configs[f"2steps_guro_pack_binpackasp"] = SolverConfig(cls=TwoStepMultibatchingSolver,
+                                                           kwargs=
+                                                           {"best_n_flow_solution": 0,
+                                                            "flow_solver":
+                                                                SubBrick(cls=GurobiMultibatchingSolver,
+                                                                         kwargs={"time_limit": 100}),
+                                                            "packing_solver":
+                                                                SubBrick(cls=PackingViaBinPacking,
+                                                                         kwargs={"bin_packing_solver":
+                                                                             SubBrick(
+                                                                                 cls=AspBinPackingSolver,
+                                                                                 kwargs={}),
+                                                                             "time_limit_per_link": 1}
+                                                                         )
+                                                            })
+    return configs
+
+def config_sequential():
+    params_cp = ParametersCp.default_cpsat()
+    params_cp.nb_process = 10
+    configs = {}
+    configs["seq10"] = SolverConfig(cls=SequentialMetasolver,
+                                  kwargs=dict(list_subbricks=[
+                                      SubBrick(cls=TwoStepMultibatchingSolver,
+                                               kwargs={"flow_solver":
+                                                           SubBrick(cls=CpsatMultibatchingSolver,
+                                                                    kwargs=
+                                                                    {"modeling": ModelingMultiBatch.FLOW,
+                                                                     "time_limit": 200,
+                                                                     "ortools_cpsat_solver_kwargs":
+                                                                     {"log_search_progress": True},
+                                                                     "parameters_cp": params_cp}),
+                                                       "packing_solver":
+                                                           SubBrick(cls=GreedyPackingForMultibatching,
+                                                                    kwargs={})}),
+                                      SubBrick(CpsatMultibatchingSolver,
+                                               dict(modeling=ModelingMultiBatch.UNIT_FLOW,
+                                                    time_limit=200,
+                                                    ortools_cpsat_solver_kwargs=dict(log_search_progress=True),
+                                                    parameters_cp=params_cp,
+                                                    delta_to_solution=2),
+                                               kwargs_from_solution={"solution": lambda sol: sol}
+                                               )]
+                                  )
+                                  )
+    return configs
+
+def config_sequential_milp():
+    configs = {}
+    configs["seqmilp"] = SolverConfig(cls=SequentialMetasolver,
+                                      kwargs=dict(list_subbricks=[
+                                      SubBrick(cls=TwoStepMultibatchingSolver,
+                                               kwargs={"flow_solver":
+                                                       SubBrick(cls=GurobiMultibatchingSolver,
+                                                                kwargs={"time_limit": 200}),
+                                                       "packing_solver":
+                                                       SubBrick(cls=GreedyPackingForMultibatching,
+                                                                kwargs={})}),
+                                      SubBrick(GurobiMultibatchingSolverUnitFlow,
+                                               dict(time_limit=200,
+                                                    delta_to_solution=2),
+                                               kwargs_from_solution={"solution": lambda sol: sol}
+                                               )]
+                                  )
+                                  )
+    return configs
+
+
+overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
+solver_configs = config_sequential_milp()
 database_filepath = f"{study_name}.h5"
 if overwrite:
     try:
@@ -151,28 +243,27 @@ if overwrite:
         pass
 
 # loop over instances x configs
-for config_name, solver_config in solver_configs.items():
-    logging.info(f"###### Running config {config_name} ######\n\n")
-    solver = solver_config.cls(problem, **solver_config.kwargs)
-    solver.init_model(**solver_config.kwargs)
-            # solve
-    stats_cb = BasicStatsCallback()
-    result_store = solver.solve(
-                callbacks=[stats_cb,
-                           NbIterationTracker(step_verbosity_level=logging.INFO),
-                           ObjectiveGapStopper(objective_gap_rel=0, objective_gap_abs=0)],
-                **solver_config.kwargs)
-    # get metrics and solver status
-    status = solver.status_solver
-    metrics = stats_cb.get_df_metrics()
-    reason = ""
-    # store corresponding experiment
-    with Hdf5Database(
-           database_filepath
-    ) as database:  # ensure closing the database at the end of computation (even if error)
-        xp_id = database.get_new_experiment_id()
-        xp = Experiment.from_solver_config(
-               xp_id=xp_id,
+for k in range(5): # 5 tries
+    for config_name, solver_config in solver_configs.items():
+        logging.info(f"###### Running config {config_name} ######\n\n")
+        solver = solver_config.cls(problem, **solver_config.kwargs)
+        solver.init_model(**solver_config.kwargs)
+        # solve
+        stats_cb = StatsWithBoundsCallback()
+        result_store = solver.solve(
+            callbacks=[stats_cb],
+            **solver_config.kwargs)
+        # get metrics and solver status
+        status = solver.status_solver
+        metrics = stats_cb.get_df_metrics()
+        reason = ""
+        # store corresponding experiment
+        with Hdf5Database(
+                database_filepath
+        ) as database:  # ensure closing the database at the end of computation (even if error)
+            xp_id = database.get_new_experiment_id()
+            xp = Experiment.from_solver_config(
+                xp_id=xp_id,
                 instance="main_instance",
                 config_name=config_name,
                 solver_config=SolverConfig(solver_config.cls,
@@ -181,4 +272,4 @@ for config_name, solver_config in solver_configs.items():
                 status=status,
                 reason=reason,
             )
-        database.store(xp)
+            database.store(xp)

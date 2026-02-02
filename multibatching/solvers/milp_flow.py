@@ -10,7 +10,7 @@ from discrete_optimization.generic_tools.callbacks.callback import Callback, Cal
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver, ParametersMilp
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-
+from discrete_optimization.generic_tools.do_solver import WarmstartMixin
 from multibatching.problem import (
     MultibatchingProblem,
     MultibatchingSolution,
@@ -299,13 +299,20 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         """
         logger.info("Initializing Gurobi model (Unit Flow)...")
         model = gurobipy.Model("multibatching-unit-flow")
-
-        # --- Decision Variables ---
-        # `used_trips[link_idx][trip_idx]` is a binary var, 1 if the trip is used
+        sol: MultibatchingSolution = kwargs.get("solution", None)
+        delta: int = kwargs.get("delta_to_solution", 1)
+        max_nb_trip_per_transport_link = {i: max_trips_per_link
+                                          for i in range(self.problem.nb_transport_links)}
+        if sol is not None:
+            max_nb_trip_per_transport_link = defaultdict(lambda: delta)
+            for pt in sol.list_flows:
+                id_tl = self.problem.transport_links_to_index[pt.transport_link]
+                max_nb_trip_per_transport_link[id_tl] += pt.nb_packing
         used_trips = {
             i: {
-                j: model.addVar(vtype=gurobipy.GRB.BINARY, name=f"used_{i}_{j}")
-                for j in range(max_trips_per_link)
+                j: model.addVar(vtype=gurobipy.GRB.BINARY,
+                                name=f"used_{i}_{j}")
+                for j in range(max_nb_trip_per_transport_link[i])
             } for i in range(self.problem.nb_transport_links)
         }
 
@@ -320,7 +327,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
                     )
                     for p_idx, p in enumerate(self.problem.products)
                     if tl.transport_type in p.valid_transports and tl.transport_type.capacity > p.size
-                } for j in range(max_trips_per_link)
+                } for j in range(max_nb_trip_per_transport_link[i])
             } for i, tl in enumerate(self.problem.transport_links)
         }
 
@@ -329,8 +336,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
             # Symmetry breaking: force trips to be used in order (trip j+1 can be used only if trip j is)
             #for j in range(max_trips_per_link - 1):
             #    model.addLConstr(used_trips[i][j+1] <= used_trips[i][j])
-
-            for j in range(max_trips_per_link):
+            for j in range(max_nb_trip_per_transport_link[i]):
                 # Capacity constraint for each individual trip
                 trip_volume = gurobipy.quicksum(
                     trip_contents[i][j][p_idx] * p.size
@@ -356,7 +362,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         total_flows = {
             i: {
                 p_idx: gurobipy.quicksum(
-                    trip_contents[i][j][p_idx] for j in range(max_trips_per_link)
+                    trip_contents[i][j][p_idx] for j in range(max_nb_trip_per_transport_link[i])
                 )
                 for p_idx, p in enumerate(self.problem.products) if p_idx in trip_contents[i][0]
             } for i in range(self.problem.nb_transport_links)
@@ -377,7 +383,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
 
         # --- Objective Function ---
         nb_trips_per_link = {
-            i: gurobipy.quicksum(used_trips[i][j] for j in range(max_trips_per_link))
+            i: gurobipy.quicksum(used_trips[i][j] for j in range(max_nb_trip_per_transport_link[i]))
             for i in range(self.problem.nb_transport_links)
         }
         transport_cost = gurobipy.quicksum(
@@ -395,7 +401,8 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
                 trip_contents[i][j][p_idx] * p.value
                 for p_idx, p in enumerate(self.problem.products) if p_idx in trip_contents[i][j]
             ) * ((1 + self.problem.capital_factor)**(tl.distance / tl.transport_type.speed) - 1) * self.scaling_factor
-            for i, tl in enumerate(self.problem.transport_links) for j in range(max_trips_per_link)
+            for i, tl in enumerate(self.problem.transport_links)
+            for j in range(max_nb_trip_per_transport_link[i])
         )
         model.setObjective(transport_cost + emission_cost + capital_cost, sense=gurobipy.GRB.MINIMIZE)
 
@@ -404,6 +411,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
             "used_trips": used_trips,
             "trip_contents": trip_contents,
         }
+        self.model.update()
 
     def retrieve_current_solution(
         self,
@@ -441,10 +449,41 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
     def convert_to_variable_values(self, solution: MultibatchingSolution) -> Dict[gurobipy.Var, float]:
-        # Implementation for warm start would be complex and is omitted for brevity,
-        # but would involve un-grouping packings and assigning them to trip variables.
-        logger.warning("Warm start for the Unit Flow Gurobi model is not yet implemented.")
-        return {}
+        used_trips = self.variables["used_trips"]
+        trip_contents = self.variables["trip_contents"]
+        trips_per_link = defaultdict(list)
+        dict_vars = {}
+        for flow in solution.list_flows:
+            index_tl = self.problem.transport_links_to_index[flow.transport_link]
+            for _ in range(flow.nb_packing):
+                trips_per_link[index_tl].append(flow.product_packing)
+        for index_tl in trips_per_link:
+            nb_trips = len(trips_per_link[index_tl])
+            for i in range(nb_trips):
+                dict_vars[used_trips[index_tl][i]] = 1
+            for i in used_trips[index_tl]:
+                if i >= nb_trips:
+                    dict_vars[used_trips[index_tl][i]] = 0
+            for i in range(nb_trips):
+                pack = trips_per_link[index_tl][i]
+                for p_index in trip_contents[index_tl][i]:
+                    p = self.problem.products[p_index]
+                    if p in pack:
+                        dict_vars[trip_contents[index_tl][i][p_index]] = pack[p]
+                    else:
+                        dict_vars[trip_contents[index_tl][i][p_index]] = 0
+            for i in trip_contents[index_tl]:
+                if i >= nb_trips:
+                    for p_index in trip_contents[index_tl][i]:
+                        dict_vars[trip_contents[index_tl][i][p_index]] = 0
+        for index_tl in used_trips:
+            if index_tl not in trips_per_link:
+                for i in used_trips[index_tl]:
+                    dict_vars[used_trips[index_tl][i]] = 0
+                for i in trip_contents[index_tl]:
+                    for p_index in trip_contents[index_tl][i]:
+                        dict_vars[trip_contents[index_tl][i][p_index]] = 0
+        return dict_vars
 
 class GurobiMultibatchingSolverWithLazyConstraint(GurobiMultibatchingSolver):
     """

@@ -206,12 +206,10 @@ class ClingconMultibatchingSolver(SolverDO):
             self.ctl.solve(on_model=on_model_wrapper)
         else:
             with self.ctl.solve(on_model=on_model_wrapper, async_=True) as handle:
-                
                 finished = handle.wait(time_limit)
                 if not finished:
                     logger.info(f"Time limit of {time_limit}s reached.")
                     handle.cancel()
-
         if len(res) > 0:
             self.status_solver = StatusSolver.SATISFIED
         else:
