@@ -204,24 +204,42 @@ def parse_json_to_problem(json_data: dict) -> MultibatchingProblem:
 
     locations_list = list(locations_map.values())
     # 4. Parse Transport Links
+    ships = ["Kugelbake", "Feeder Container Ship", "Truck General Cargo", "Oversized Tianjin RoRo Ship", "Truck on RoRo Ship", "Small Container Ship", "Airbus Mobile Express RoRo Ship", "Oversized River Transport", "Sea Large Container Ship", "Oversized Under Deck RoRo Ship" ]
     transport_links_list = []
     for _id, data in json_data["routes"].items():
         loc1 = locations_map[data["from"]]
         loc2 = locations_map[data["to"]]
 
+        list_loc1_name = loc1.name.split(" ")
+        is_harbor_1 = False
+        if len(list_loc1_name)>1:
+            last1 = list_loc1_name[-1]
+            if last1 == "Harbor":
+                is_harbor_1 = True
+
+        list_loc2_name = loc2.name.split(" ")
+        is_harbor_2 = False
+        if len(list_loc2_name)>1:
+            last2 = list_loc2_name[-1]
+            if last1 == "Harbor":
+                is_harbor_2 = True
+        is_harbor = is_harbor_1 or is_harbor_2
+        
+
+        
         for tr_id, tr_data in data["transportResources"].items():
             transport_type = transport_types_map[tr_id]
             distance = tr_data["distance"]
-
-            transport_links_list.append(
-                TransportLink(
-                    id = _id+"tr_id"+tr_id,
-                    location_l1=loc1,
-                    location_l2=loc2,
-                    distance=distance,
-                    transport_type=transport_type
+            if not(is_harbor) or (transport_type.name in ships):
+                transport_links_list.append(
+                    TransportLink(
+                        id = _id+"tr*id"+tr_id,
+                        location_l1=loc1,
+                        location_l2=loc2,
+                        distance=distance,
+                        transport_type=transport_type
+                    )
                 )
-            )
 
     # 5. Extract settings
     settings = json_data["settings"]

@@ -38,7 +38,7 @@ class Location:
 
 @dataclass(frozen=True)
 class TransportLink:
-    id : int
+    id : str
     location_l1: Location
     location_l2: Location
     distance: int
@@ -100,6 +100,18 @@ class MultibatchingProblem(Problem):
                                                          for tl in self.transport_links}
         
         self.transport_links_id_to_object = {transport_link.id : transport_link for transport_link in transport_links}
+        self.locations_pos_demand = {}
+        self.locations_neg_demand = {}
+        for p in self.products:
+            self.locations_pos_demand[p] = []
+            self.locations_neg_demand[p] = []
+            for l in self.locations:
+                if p in l.net_supply.keys():
+                    if l.net_supply[p]<0:
+                        self.locations_pos_demand[p].append(l)
+                    else:
+                        self.locations_neg_demand[p].append(l)
+                        
 
 
     def evaluate(self, variable: "MultibatchingSolution") -> dict[str, float]:

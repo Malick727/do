@@ -288,7 +288,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         self.variables: Dict[str, Any] = {}
         self.scaling_factor = kwargs.get("scaling_factor", 1)
 
-    def init_model(self, max_trips_per_link: int = 30, **kwargs: Any) -> None:
+    def init_model(self, max_trips_per_link: int = 15, **kwargs: Any) -> None:
         """
         Builds the Gurobi model based on a detailed, per-trip ("unit flow") formulation.
 
@@ -396,15 +396,16 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         )
 
         # Capital cost is quadratic (binary * integer). Gurobi handles this.
-        capital_cost = gurobipy.quicksum(
-            used_trips[i][j] * gurobipy.quicksum(
-                trip_contents[i][j][p_idx] * p.value
-                for p_idx, p in enumerate(self.problem.products) if p_idx in trip_contents[i][j]
-            ) * ((1 + self.problem.capital_factor)**(tl.distance / tl.transport_type.speed) - 1) * self.scaling_factor
-            for i, tl in enumerate(self.problem.transport_links)
-            for j in range(max_nb_trip_per_transport_link[i])
-        )
-        model.setObjective(transport_cost + emission_cost + capital_cost, sense=gurobipy.GRB.MINIMIZE)
+        # capital_cost = gurobipy.quicksum(
+        #     used_trips[i][j] * gurobipy.quicksum(
+        #         trip_contents[i][j][p_idx] * p.value
+        #         for p_idx, p in enumerate(self.problem.products) if p_idx in trip_contents[i][j]
+        #     ) * ((1 + self.problem.capital_factor)**(tl.distance / tl.transport_type.speed) - 1) * self.scaling_factor
+        #     for i, tl in enumerate(self.problem.transport_links) for j in range(max_trips_per_link)
+        # )
+
+        # model.setObjective(transport_cost + emission_cost + capital_cost, sense=gurobipy.GRB.MINIMIZE)
+        model.setObjective(transport_cost + emission_cost, sense=gurobipy.GRB.MINIMIZE)
 
         self.model = model
         self.variables = {

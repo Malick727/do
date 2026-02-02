@@ -60,7 +60,7 @@ class MilpSolver(GurobiMilpSolver):
             y[tl]={}
             products_on_links[tl]=[]
             for p in self.problem.products:
-                y[tl][p] = model.addVar(lb=0,name=f"y_{tl.id}_{p.name}")
+                y[tl][p] = model.addVar(lb=0, vtype= GRB.INTEGER, name=f"y_{tl.id}_{p.name}")
                 if tl.transport_type in p.valid_transports:
                     products_on_links[tl].append(p)
                 else:
