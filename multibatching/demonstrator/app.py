@@ -40,7 +40,7 @@ except ImportError as e:
 data = None
 
 def parse_problem(fix_problem: bool = False):
-    config_file = os.path.join(root_dir, "examples_do_usecases/multibatching/datalocal/config-local.json")
+    config_file = os.path.join(root_dir, "multibatching/datalocal/config-local.json")
     d = json.load(open(config_file, "r"))
     problem = parse_json_to_problem(d)
     if fix_problem:
