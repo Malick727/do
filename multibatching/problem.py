@@ -293,6 +293,9 @@ class MultibatchingProblem(Problem):
 
             # Check 2: Packing Capacity
             if current_packing_volume > link.transport_type.capacity + epsilon:
+                print("packing", flow_item.product_packing)
+                print("capa", link.transport_type.capacity)
+                print("trying to load : ", [(p.name, p.size) for p in flow_item.product_packing])
                 print(f"Validation Error: Packing volume {current_packing_volume} exceeds capacity {link.transport_type.capacity} for link {link.location_l1.id}->{link.location_l2.id}")
                 return False
 

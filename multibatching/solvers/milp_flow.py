@@ -6,7 +6,10 @@ from collections import defaultdict, Counter
 from typing import Any, Callable, Dict
 
 import gurobipy
+
+from discrete_optimization.binpack.solvers.cpsat import ModelingBinPack
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
+from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver, ParametersMilp
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
@@ -57,11 +60,13 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
             self._init_model_flows_single_batching(**kwargs)
         else:
             self._init_model_flows_multi_batching(**kwargs)
+        self.model.update()
 
     def _init_model_flows_multi_batching(self, **kwargs: Any) -> None:
         """Builds the standard flow model where multiple products can share a transport."""
         logger.info("Initializing Gurobi model (Multi-Batching Flow)...")
-        model = gurobipy.Model("multibatching-flow")
+        #env = gurobipy.Env()
+        model = gurobipy.Model("multibatching-flow") #, env=env)
 
         # --- Pre-computation ---
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
@@ -540,6 +545,117 @@ class GurobiMultibatchingSolverWithLazyConstraint(GurobiMultibatchingSolver):
 
         return res
 
+class GurobiMultibatchingSolverWithLC(GurobiMultibatchingSolver):
+    """
+    A Gurobi solver for the multi-batching problem that uses lazy constraints
+    to iteratively refine the packing model.
+    """
+    def init_model(self, **kwargs: Any) -> None:
+        """
+        Initializes the standard multi-batching flow model and enables lazy constraints.
+        """
+        # We only apply this logic to the multi-batching case
+        super().init_model(single_batching=False, **kwargs)
+        #self.add_one_hot_variables()
+        #self.add_binary_expansion_variables()
+        # Tell Gurobi to enable lazy constraints
+        self.model.setParam("LazyConstraints", 1)
+        logger.info("Gurobi model with Lazy Constraints enabled.")
+
+    def add_one_hot_variables(self):
+        flows = self.variables["flows"]
+        supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
+        flows_one_hot = {
+            i: {
+                p_idx: {k: self.model.addVar(vtype=gurobipy.GRB.BINARY,
+                                             name=f"flow_{i}_{p_idx}_{k}")
+                for k in range(supply_per_product[p]+1)}
+                for p_idx, p in enumerate(self.problem.products)
+                if tl.transport_type in p.valid_transports and tl.transport_type.capacity >= p.size
+            }
+            for i, tl in enumerate(self.problem.transport_links)
+        }
+
+        for i in flows_one_hot:
+            for p_idx in flows_one_hot[i]:
+                self.add_linear_constraint(gurobipy.quicksum([flows_one_hot[i][p_idx][k]*k
+                                                              for k in flows_one_hot[i][p_idx]])==flows[i][p_idx],
+                                           name=f"one_hot_{i}_{p_idx}")
+                #self.model.addSOS(gurobipy.GRB.SOS_TYPE1, [flows_one_hot[i][p_idx][k]
+                #                                           for k in flows_one_hot[i][p_idx]])
+                self.add_linear_constraint(gurobipy.quicksum([flows_one_hot[i][p_idx][k]
+                                                              for k in flows_one_hot[i][p_idx]]) == 1,
+                                           name=f"one_hot_{i}_{p_idx}_")
+        self.variables["flows_one_hot"] = flows_one_hot
+
+    def add_binary_expansion_variables(self):
+        flows = self.variables["flows"]
+        self.variables["flows_binary_bits"] = {}
+
+        for i, tl in enumerate(self.problem.transport_links):
+            self.variables["flows_binary_bits"][i] = {}
+            for p_idx, p in enumerate(self.problem.products):
+                if p_idx not in flows[i]:
+                    continue
+
+                # Number of bits needed to represent max supply
+                max_val = self.problem.get_total_supply(p)
+                n_bits = max_val.bit_length()
+
+                # Create binary variables for the bits
+                bits = [self.model.addVar(vtype=gurobipy.GRB.BINARY,
+                                          name=f"bit_{i}_{p_idx}_{b}")
+                        for b in range(n_bits)]
+
+                self.variables["flows_binary_bits"][i][p_idx] = bits
+
+                # Link integer flow to binary expansion: flow = sum(2^b * bit_b)
+                self.model.addLConstr(
+                    gurobipy.quicksum((2 ** b) * bits[b] for b in range(n_bits)) == flows[i][p_idx],
+                    name=f"link_binary_{i}_{p_idx}"
+                )
+
+    def solve(
+            self,
+            callbacks: list[Callback] = None,
+            parameters_milp: ParametersMilp = None,
+            time_limit: float = 30,
+            **kwargs: Any,
+    ) -> ResultStorage:
+        """
+        Overrides the default solve method to use a custom callback for generating
+        lazy constraints.
+        """
+        self.early_stopping_exception = None
+        self._current_internal_objective_best_value = None
+        self._current_internal_objective_best_bound = None
+
+        callbacks_list = CallbackList(callbacks=callbacks)
+        callbacks_list.on_solve_start(solver=self)
+
+        # Use our specialized callback for lazy constraints
+        # gurobi_lazy_callback = GurobiLC_BinaryExpansion(do_solver=self, callback=callbacks_list)
+        gurobi_lazy_callback = GurobiLazyCallback(do_solver=self, callback=callbacks_list)
+        # gurobi_lazy_callback = GurobiLC(do_solver=self, callback=callbacks_list)
+
+
+
+        self.optimize_model(
+            parameters_milp=parameters_milp,
+            time_limit=time_limit,
+            gurobi_callback=gurobi_lazy_callback,
+            **kwargs,
+        )
+
+        if hasattr(self.model, "ObjVal"):
+            self._current_internal_objective_best_value = self.model.ObjVal
+        if hasattr(self.model, "ObjBound"):
+            self._current_internal_objective_best_bound = self.model.ObjBound
+
+        res = gurobi_lazy_callback.res
+        callbacks_list.on_solve_end(res=res, solver=self)
+
+        return res
 
 
 class GurobiLazyCallback:
@@ -615,6 +731,19 @@ class GurobiLazyCallback:
                         cut_coefficient = greedy_trip_count / candidate_volume
                         model.cbLazy(nb_trips_var >= cut_coefficient * total_volume_var)
 
+                        other_link = [index_link for index_link in range(self.do_solver.problem.nb_transport_links)
+                                      if self.do_solver.problem.transport_links[index_link].transport_type ==
+                                      link.transport_type]
+                        print(other_link)
+                        for ot in other_link:
+                            total_volume_var = gurobipy.quicksum(
+                                p.size * self.do_solver.variables["flows"][ot][p_idx]
+                                for p_idx, p in enumerate(self.do_solver.problem.products)
+                                if p_idx in self.do_solver.variables["flows"][ot]
+                            )
+                            nb_trips_var = self.do_solver.variables["nb_trips"][ot]
+                            model.cbLazy(nb_trips_var >= cut_coefficient * total_volume_var)
+
                         logger.info(f"CUT #{self.nb_cuts_added} on link {link.id}: "
                                     f"MILP trips={milp_trip_count}, Greedy trips={greedy_trip_count}, Volume={candidate_volume:.2f}. "
                                     f"Adding lazy cut.")
@@ -635,3 +764,223 @@ class GurobiLazyCallback:
                 logger.error(f"Error in Gurobi lazy callback: {e}", exc_info=True)
                 self.do_solver.early_stopping_exception = e
                 model.terminate()
+
+class GurobiLC:
+    """
+    Custom Gurobi callback to generate valid, flow-dependent cuts for the multibatching problem.
+    """
+
+    def __init__(self, do_solver: GurobiMultibatchingSolver, callback: Callback):
+        self.do_solver = do_solver
+        self.callback = callback
+        self.res = do_solver.create_result_storage()
+        self.nb_solutions = 0
+        self.nb_cuts_added = 0
+
+    def __call__(self, model: gurobipy.Model, where: int) -> None:
+        if where == gurobipy.GRB.Callback.MIPSOL:
+            try:
+                # 1. Retrieve the candidate solution from the MILP
+                candidate_solution: MultibatchingSolution = self.do_solver.retrieve_current_solution(
+                    get_var_value_for_current_solution=model.cbGetSolution,
+                    get_obj_value_for_current_solution=lambda: model.cbGet(gurobipy.GRB.Callback.MIPSOL_OBJ),
+                )
+
+                # 2. Run the greedy packing subproblem to get the "true" number of trips
+                packer = GreedyPackingForMultibatching(problem=self.do_solver.problem)
+                packer.init_from_solution(solution=candidate_solution)
+                packing_result = packer.solve()
+                if len(packing_result) == 0:
+                    return
+                packed_solution: MultibatchingSolution = packing_result.get_best_solution_fit()[0]
+                print("Solution quality of the greedy : ", packing_result.get_best_solution_fit()[1])
+                # 3. Check for violations and add valid, flow-dependent lazy constraints
+                milp_trips = defaultdict(int)
+                for flow in candidate_solution.list_flows:
+                    milp_trips[flow.transport_link] += flow.nb_packing
+                greedy_trips = defaultdict(int)
+                for flow in packed_solution.list_flows:
+                    greedy_trips[flow.transport_link] += flow.nb_packing
+                violation_found = False
+                for link, milp_trip_count_float in milp_trips.items():
+                    milp_trip_count = round(milp_trip_count_float)
+                    greedy_trip_count = greedy_trips.get(link, 0)
+                    flows_product_in_this_link = {}
+                    for flow in candidate_solution.list_flows:
+                        if flow.transport_link == link:
+                            for p in flow.product_packing:
+                                if p not in flows_product_in_this_link:
+                                    flows_product_in_this_link[p] = 0
+                                flows_product_in_this_link[p] += round(flow.product_packing[p]*flow.nb_packing)
+
+                    if greedy_trip_count > milp_trip_count:
+                        violation_found = True
+                        self.nb_cuts_added += 1
+                        link_idx = self.do_solver.problem.transport_links_to_index[link]
+                        nb_trips_var = self.do_solver.variables["nb_trips"][link_idx]
+                        flows_vars = self.do_solver.variables["flows_one_hot"][link_idx]
+
+                        flows_vars_ = [flows_vars[self.do_solver.problem.product_to_index[p]][flows_product_in_this_link[p]]
+                                       for p in flows_product_in_this_link] # values 1 for each product
+                        # for p in flows_product_in_this_link:
+                        #     index = self.do_solver.problem.product_to_index[p]
+                        #     print("flows product in this link = ", flows_product_in_this_link[p])
+                        #     for k in flows_vars[index]:
+                        #         print(k, " : ", model.cbGetSolution(flows_vars[index][k]))
+                        print([model.cbGetSolution(x) for x in flows_vars_])
+                        #len_flows_vars = len(flows_vars_)
+                        model.cbLazy(50*gurobipy.quicksum([1-x for x in flows_vars_])+nb_trips_var >= greedy_trip_count)
+
+
+                        flows_vars_ = [
+                            gurobipy.quicksum([flows_vars[self.do_solver.problem.product_to_index[p]][quantity]
+                                               for quantity in range(flows_product_in_this_link[p],
+                                                                     max(flows_vars[self.do_solver.problem.product_to_index[p]])+1)])
+
+                            for p in flows_product_in_this_link]  # values 1 for each product
+                        # for p in flows_product_in_this_link:
+                        #     index = self.do_solver.problem.product_to_index[p]
+                        #     print("flows product in this link = ", flows_product_in_this_link[p])
+                        #     for k in flows_vars[index]:
+                        #         print(k, " : ", model.cbGetSolution(flows_vars[index][k]))
+                        # len_flows_vars = len(flows_vars_)
+                        model.cbLazy(
+                            50 * gurobipy.quicksum([1 - x for x in flows_vars_]) + nb_trips_var >= greedy_trip_count)
+
+                        # Generalize to other link with same transport type.
+                        other_links = [i_link for i_link in range(self.do_solver.problem.nb_transport_links)
+                                       if self.do_solver.problem.transport_links[i_link].transport_type == link.transport_type]
+                        if True:
+                            for ol in other_links:
+                                flows_vars_ol = self.do_solver.variables["flows_one_hot"][ol]
+                                flows_vars_ol_ = [flows_vars_ol[self.do_solver.problem.product_to_index[p]][flows_product_in_this_link[p]]
+                                                  for p in flows_product_in_this_link]  # values 1 for each product
+                                # len_flows_vars = len(flows_vars_)
+
+                                model.cbLazy(50 * gurobipy.quicksum([1 - x for x in flows_vars_ol_])
+                                             + self.do_solver.variables["nb_trips"][ol] >= greedy_trip_count)
+
+                                flows_vars_ol_ = [
+                                    gurobipy.quicksum([flows_vars_ol[self.do_solver.problem.product_to_index[p]][quantity]
+                                                       for quantity in range(flows_product_in_this_link[p],
+                                                                             max(flows_vars_ol[
+                                                                                     self.do_solver.problem.product_to_index[
+                                                                                         p]]) + 1)])
+
+                                    for p in flows_product_in_this_link]  # values 1 for each product
+                                model.cbLazy(50 * gurobipy.quicksum([1 - x for x in flows_vars_ol_])
+                                             + self.do_solver.variables["nb_trips"][ol] >= greedy_trip_count)
+
+
+                        logger.info(f"CUT #{self.nb_cuts_added} on link {link.id}: "+
+                                    f"MILP trips={milp_trip_count}, Greedy trips={greedy_trip_count},"+
+                                    f"Adding lazy cut.")
+                # 4. If no violation was found, the solution is valid from a packing perspective.
+                if not violation_found:
+                    fit = self.do_solver.aggreg_from_sol(packed_solution)
+                    self.res.append((packed_solution, fit))
+                    self.nb_solutions += 1
+                    stopping = self.callback.on_step_end(
+                        step=self.nb_solutions, res=self.res, solver=self.do_solver
+                    )
+                    if stopping:
+                        model.terminate()
+            except Exception as e:
+                logger.error(f"Error in Gurobi lazy callback: {e}", exc_info=True)
+                self.do_solver.early_stopping_exception = e
+                model.terminate()
+
+from multibatching.solvers.packing_subproblem import PackingViaBinPacking, CpSatBinPackSolver, SubBrick
+class GurobiLC_BinaryExpansion:
+    def __init__(self, do_solver: GurobiMultibatchingSolver, callback: Callback):
+        self.do_solver = do_solver
+        self.callback = callback
+        self.res = do_solver.create_result_storage()
+        self.nb_cuts_added = 0
+
+    def __call__(self, model: gurobipy.Model, where: int) -> None:
+        if where == gurobipy.GRB.Callback.MIPSOL:
+            # 1. Retrieve candidate solution
+            candidate_sol: MultibatchingSolution = self.do_solver.retrieve_current_solution(
+                get_var_value_for_current_solution=model.cbGetSolution,
+                get_obj_value_for_current_solution=lambda: model.cbGet(gurobipy.GRB.Callback.MIPSOL_OBJ)
+            )
+            # 2. Run packing subproblem
+            packer = GreedyPackingForMultibatching(problem=self.do_solver.problem)
+            packer.init_from_solution(solution=candidate_sol)
+            packing_result = packer.solve()
+            #packer = PackingViaBinPacking(problem=self.do_solver.problem)
+            #packer.init_from_solution(candidate_sol)
+            #packing_result = packer.solve(time_limit_per_link=1,
+            #                              bin_packing_solver=SubBrick(CpSatBinPackSolver,
+            #                                                          kwargs={'parameters_cp': ParametersCp.default_cpsat(),
+            #                                                                  "modeling": ModelingBinPack.SCHEDULING}))
+            if not packing_result: return
+
+            packed_sol: MultibatchingSolution = packing_result.get_best_solution_fit()[0]
+
+            # 3. Check and generate cuts
+            violation_found = False
+            for link_idx, tl in enumerate(self.do_solver.problem.transport_links):
+                # Count trips from MILP vs Greedy
+                milp_trips = sum(f.nb_packing for f in candidate_sol.list_flows if f.transport_link == tl)
+                greedy_trips = sum(f.nb_packing for f in packed_sol.list_flows if f.transport_link == tl)
+
+                if greedy_trips > round(milp_trips):
+                    print(greedy_trips, " vs ", milp_trips)
+                    violation_found = True
+                    self.nb_cuts_added += 1
+                    # Get bits for all products on this link
+                    nb_trips_var = self.do_solver.variables["nb_trips"][link_idx]
+                    bits_to_fix = []
+                    for p_idx, p in enumerate(self.do_solver.problem.products):
+                        if p_idx not in self.do_solver.variables["flows_binary_bits"][link_idx]:
+                            continue
+
+                        current_flow = round(model.cbGetSolution(self.do_solver.variables["flows"][link_idx][p_idx]))
+                        bits = self.do_solver.variables["flows_binary_bits"][link_idx][p_idx]
+
+                        # Identify which bits are 1 and which are 0 in the current solution
+                        for b, bit_var in enumerate(bits):
+                            is_one = (current_flow >> b) & 1
+                            if is_one:
+                                bits_to_fix.append(1 - bit_var)  # Penalty if it flips to 0
+                            else:
+                                bits_to_fix.append(bit_var)  # Penalty if it flips to 1
+
+                    # No-Good Cut: if the flow combination remains the same, nb_trips must increase
+                    # M * sum(flipped_bits) + nb_trips >= greedy_trips
+                    M = 100
+                    model.cbLazy(M * gurobipy.quicksum(bits_to_fix) + nb_trips_var >= greedy_trips)
+
+                    other_link = [i_link for i_link in range(self.do_solver.problem.nb_transport_links)
+                                  if self.do_solver.problem.transport_links[i_link].transport_type == tl.transport_type
+                                  and i_link != link_idx]
+                    for index_link in other_link:
+                        nb_trips_var = self.do_solver.variables["nb_trips"][index_link]
+                        bits_to_fix = []
+                        for p_idx, p in enumerate(self.do_solver.problem.products):
+                            if p_idx not in self.do_solver.variables["flows_binary_bits"][index_link]:
+                                continue
+
+                            current_flow = round(model.cbGetSolution(self.do_solver.variables["flows"][link_idx][p_idx]))
+                            bits = self.do_solver.variables["flows_binary_bits"][index_link][p_idx]
+
+                            # Identify which bits are 1 and which are 0 in the current solution
+                            for b, bit_var in enumerate(bits):
+                                is_one = (current_flow >> b) & 1
+                                if is_one:
+                                    bits_to_fix.append(1 - bit_var)  # Penalty if it flips to 0
+                                else:
+                                    bits_to_fix.append(bit_var)  # Penalty if it flips to 1
+                        # No-Good Cut: if the flow combination remains the same, nb_trips must increase
+                        # M * sum(flipped_bits) + nb_trips >= greedy_trips
+                        M = 100
+                        model.cbLazy(M * gurobipy.quicksum(bits_to_fix) + nb_trips_var >= greedy_trips)
+
+
+            # 4. Success logic
+            if not violation_found:
+                fit = self.do_solver.aggreg_from_sol(packed_sol)
+                self.res.append((packed_sol, fit))
+                self.callback.on_step_end(step=len(self.res), res=self.res, solver=self.do_solver)

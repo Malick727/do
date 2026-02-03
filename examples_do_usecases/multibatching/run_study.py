@@ -1,7 +1,10 @@
 import logging
 import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../'))
+os.environ["GRB_CURLVERBOSE"] = "1"
+os.environ["GRB_NO_REVOKE"] = "1"
 import pandas as pd
-
 from discrete_optimization.binpack.solvers.cpsat import ModelingBinPack, CpSatBinPackSolver
 from discrete_optimization.generic_tools.callbacks.loggers import NbIterationTracker
 from discrete_optimization.generic_tools.callbacks.stats_retrievers import (
@@ -24,7 +27,8 @@ from multibatching.solvers.cpsat import (CpsatMultibatchingSolver,
 from multibatching.solvers.asp import ClingconMultibatchingSolver
 from multibatching.solvers.milp_flow import (GurobiMultibatchingSolver,
                                              GurobiMultibatchingSolverUnitFlow,
-                                             GurobiMultibatchingSolverWithLazyConstraint)
+                                             GurobiMultibatchingSolverWithLazyConstraint,
+                                             GurobiMultibatchingSolverWithLC)
 from multibatching.solvers.packing_subproblem import (PackingViaBinPacking,
                                                       GreedyPackingForMultibatching,
                                                       CpsatPackingSubproblem)
@@ -32,6 +36,8 @@ from multibatching.solvers.two_steps import TwoStepMultibatchingSolver
 from discrete_optimization.generic_tools.sequential_metasolver import SequentialMetasolver
 from discrete_optimization.binpack.solvers.asp import AspBinPackingSolver
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
+
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -232,9 +238,32 @@ def config_sequential_milp():
                                   )
     return configs
 
+def config_gurobi_lazy():
+    configs = {}
+    configs["gurobilazy"] = SolverConfig(cls=GurobiMultibatchingSolverWithLC,
+                                         kwargs=dict(time_limit=500))
+    return configs
+
+
+def config_gurobi_lazy_seq():
+    configs = {}
+    configs["seqmilplazy"] = SolverConfig(cls=SequentialMetasolver,
+                                      kwargs=dict(list_subbricks=[
+                                          SubBrick(cls=TwoStepMultibatchingSolver,
+                                                   kwargs={"flow_solver":
+                                                               SubBrick(cls=GurobiMultibatchingSolver,
+                                                                        kwargs={"time_limit": 10}),
+                                                           "packing_solver":
+                                                               SubBrick(cls=GreedyPackingForMultibatching,
+                                                                        kwargs={})}),
+                                          SubBrick(GurobiMultibatchingSolverWithLC,
+                                                   dict(time_limit=1000))]
+                                      )
+                                      )
+    return configs
 
 overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-solver_configs = config_sequential_milp()
+solver_configs = config_gurobi_lazy()
 database_filepath = f"{study_name}.h5"
 if overwrite:
     try:
@@ -243,7 +272,7 @@ if overwrite:
         pass
 
 # loop over instances x configs
-for k in range(5): # 5 tries
+for k in range(1): # 5 tries
     for config_name, solver_config in solver_configs.items():
         logging.info(f"###### Running config {config_name} ######\n\n")
         solver = solver_config.cls(problem, **solver_config.kwargs)

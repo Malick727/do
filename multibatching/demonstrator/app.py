@@ -65,7 +65,6 @@ def sanitize_solution_data(solution):
 
     path_folder = "multibatching/datalocal"
     path_file = os.path.join(root_dir, path_folder, "coordinates.json")
-    print(path_file)
     if os.path.exists(path_file):
         print(path_file, " exists")
         try:
@@ -85,8 +84,6 @@ def sanitize_solution_data(solution):
                 tt.name = "Standard_Transport" 
 
             for loc in [link.location_l1, link.location_l2]:
-                print("Loc name", loc.name)
-                print(coords_map.keys())
                 if not loc.name:
                     loc.name = f"Location_{loc.id}"
                 

@@ -48,6 +48,12 @@ def parse_problem(fix_problem: bool = False,
     if fix_problem:
         problem.products[3].valid_transports = set(problem.transport_types)
 
+
+    for product in problem.products:
+        size = product.size
+        product.valid_transports = set({t for t in product.valid_transports
+                                        if t.capacity >= size})
+
     return problem
 
 def run_networkx():
