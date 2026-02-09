@@ -30,6 +30,7 @@ class TspOptalCpSolver(OptalCpSolver):
         self.variables["visits"] = visits
         seq = self.cp_model.sequence_var(visits)
         self.cp_model.enforce(self.cp_model.start(visits[self.problem.start_index])==0)
+        seq.no_overlap()
         self.cp_model.no_overlap(seq, [[int(self.distance_matrix[i][j])
                                         for j in range(self.problem.node_count)]
                                        for i in range(self.problem.node_count)])

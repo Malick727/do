@@ -225,12 +225,12 @@ def config_sequential_milp():
                                       SubBrick(cls=TwoStepMultibatchingSolver,
                                                kwargs={"flow_solver":
                                                        SubBrick(cls=GurobiMultibatchingSolver,
-                                                                kwargs={"time_limit": 10}),
+                                                                kwargs={"time_limit": 100}),
                                                        "packing_solver":
                                                        SubBrick(cls=GreedyPackingForMultibatching,
                                                                 kwargs={})}),
                                       SubBrick(GurobiMultibatchingSolverUnitFlow,
-                                               dict(time_limit=10,
+                                               dict(time_limit=1000,
                                                     delta_to_solution=2),
                                                kwargs_from_solution={"solution": lambda sol: sol}
                                                )]
@@ -241,7 +241,7 @@ def config_sequential_milp():
 def config_gurobi_lazy():
     configs = {}
     configs["gurobilazy"] = SolverConfig(cls=GurobiMultibatchingSolverWithLC,
-                                         kwargs=dict(time_limit=500))
+                                         kwargs=dict(time_limit=5000))
     return configs
 
 
@@ -263,7 +263,7 @@ def config_gurobi_lazy_seq():
     return configs
 
 overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-solver_configs = config_gurobi_lazy()
+solver_configs = config_sequential_milp()
 database_filepath = f"{study_name}.h5"
 if overwrite:
     try:
@@ -283,6 +283,8 @@ for k in range(1): # 5 tries
             callbacks=[stats_cb],
             **solver_config.kwargs)
         # get metrics and solver status
+        sol = result_store[-1][0]
+        print("satisfy", problem.satisfy(sol))
         status = solver.status_solver
         metrics = stats_cb.get_df_metrics()
         reason = ""

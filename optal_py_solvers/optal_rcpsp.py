@@ -85,6 +85,7 @@ class OptalRcpspSolver(OptalCpSolver, RcpspSolver):
                 for m in self.variables_dict["opt_intervals"][t]:
                     conso = self.problem.mode_details[t][m].get(res, 0)
                     if conso > 0:
+                        self.cp_model.step_at()
                         list_pulse.append(self.cp_model.pulse(interval=self.variables_dict["opt_intervals"][t][m],
                                                               height=conso))
             self.cp_model.enforce(self.cp_model.sum(list_pulse) <= capa)

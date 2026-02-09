@@ -195,6 +195,7 @@ class ClingconMultibatchingSolver(SolverDO):
             self.compute_costs()
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
             print('fit', fit)
+            print(self.problem.satisfy(sol))
             print('satisfy', self.problem.satisfy(sol))
             print("Check flows ", self.problem.check_flows(sol))
             print("stopping", stopping)

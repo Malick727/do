@@ -256,6 +256,9 @@ class PackingViaBinPacking(PackingSubproblemSolver):
                                                                kwargs=dict(modeling=ModelingBinPack.SCHEDULING,
                                                                            parameters_cp=ParametersCp.default_cpsat())))
                        ]
+    def __init__(self, problem: MultibatchingProblem, params_objective_function: ParamsObjectiveFunction=None, **args):
+        super().__init__(problem, params_objective_function, **args)
+        self.cache = dict()
 
     def solve(self, callbacks: Optional[list[Callback]] = None,
               time_limit_per_link=2,
@@ -289,29 +292,36 @@ class PackingViaBinPacking(PackingSubproblemSolver):
         all_packings = []
         for tl in aggregated_link_flow:
             capacity = tl.transport_type.capacity
+            key = (tl, frozenset([(p, aggregated_link_flow[tl][p])
+                      for p in aggregated_link_flow[tl]]))
             list_items = []
             index_to_product = []
             cur_index = 0
             for p in aggregated_link_flow[tl]:
-                list_items.extend([ItemBinPack(cur_index+j,
+                list_items.extend([ItemBinPack(cur_index + j,
                                                int(p.size))
                                    for j in range(aggregated_link_flow[tl][p])])
                 cur_index += aggregated_link_flow[tl][p]
                 index_to_product.extend([p for _ in range(aggregated_link_flow[tl][p])])
             if len(list_items) == 0:
                 continue
-            problem_bin_pack = BinPackProblem(list_items=list_items,
-                                              capacity_bin=int(capacity))
-            solver = bin_packing_solver.cls(problem=problem_bin_pack)
-            solver.init_model(**bin_packing_solver.kwargs)
-            res = solver.solve(time_limit=time_limit_per_link,
-                               **bin_packing_solver.kwargs)
-            #if solver.status_solver == StatusSolver.UNSATISFIABLE:
-            #    logger.info(f"One flow post process failed.")
-            #    print(list_items, int(capacity))
-            sol: BinPackSolution = res[-1][0]
-            nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
-            logger.info(f"Found {nb_bins} bins")
+            if key in self.cache:
+                logger.info(f"Found cached solution")
+                (sol, nb_bins) = self.cache[key]
+            else:
+                problem_bin_pack = BinPackProblem(list_items=list_items,
+                                                  capacity_bin=int(capacity))
+                solver = bin_packing_solver.cls(problem=problem_bin_pack)
+                solver.init_model(**bin_packing_solver.kwargs)
+                res = solver.solve(time_limit=time_limit_per_link,
+                                   **bin_packing_solver.kwargs)
+                #if solver.status_solver == StatusSolver.UNSATISFIABLE:
+                #    logger.info(f"One flow post process failed.")
+                #    print(list_items, int(capacity))
+                sol: BinPackSolution = res[-1][0]
+                nb_bins = problem_bin_pack.evaluate(sol)["nb_bins"]
+                self.cache[key] = (sol, nb_bins)
+                logger.info(f"Found {nb_bins} bins")
             # print("nb bins ", nb_bins)
             packings = [PackingTransport(transport_link=tl,
                                          product_packing=

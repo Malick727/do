@@ -1,4 +1,4 @@
-from multibatching.solvers.asp_gem import ClingconMultibatchingSolver
+from multibatching.solvers.asp import ClingconMultibatchingSolver
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver
 from multibatching.utils import generate_multibatching_problem
 import logging
@@ -35,7 +35,7 @@ def script():
                                              min_dist=1,
                                              max_dist=5,
                                              seed=51)
-    problem = parse_problem(harbor_constraint=False)
+    problem = parse_problem(harbor_constraint=False, filter_transport_types=True)
     # 2. Initialize the solver
     solver = ClingconMultibatchingSolver(problem)
     solver.init_model()  # Initialize the ASP/Clingcon model

@@ -1,5 +1,6 @@
 # Trying to solve the latest problem provided by EAD :
 import pickle
+import random
 
 import sys
 import os
@@ -53,7 +54,6 @@ def parse_problem(fix_problem: bool = False,
         size = product.size
         product.valid_transports = set({t for t in product.valid_transports
                                         if t.capacity >= size})
-
     return problem
 
 def run_networkx():
@@ -91,7 +91,8 @@ def run_oe():
 def run_cpoptal_2steps():
     # problem = parse_problem()
     # problem = init_instance()
-    from multibatching.solvers.optal import OptalMultibatchingSolver, cp
+    from multibatching.solvers.optal import OptalMultibatchingSolver
+    import optal_py_solvers as cp
     problem: MultibatchingProblem = parse_problem()
     solver = OptalMultibatchingSolver(problem=problem,
                                       scaling_factor=1/100000)
