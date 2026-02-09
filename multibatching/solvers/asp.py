@@ -35,7 +35,8 @@ totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : deman
 validNode(L) :- demandOffer(_, L, _).
 validNode(L) :- harbor(L).
 noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), transportResource(TR).
-
+% add this rule for example use cases
+% validNode(L) :- location(L).
 possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), validNode(From), validNode(To),  
 not noShipBetweenHarbors(From, To, TR), productTR(P,TR),  transportCapacity(TR, Cap).
 
