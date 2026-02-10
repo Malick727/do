@@ -962,7 +962,8 @@ def generate_multibatching_problem(
             cost=random.randint(min_tt_cost, max_tt_cost),
             speed=round(random.uniform(min_tt_speed, max_tt_speed), 1),
             emissions=random.randint(min_tt_emissions, max_tt_emissions),
-            capacity=random.randint(min_capacity, max_capacity)
+            capacity=random.randint(min_capacity, max_capacity),
+            name=f"transport_{i}"
         )
         transport_types_list.append(tt)
 
