@@ -12,8 +12,7 @@ file_name = 'config-local' # 'oneheart-kerosene-aircraft' #'config-local.json' #
 input_file = f'{file_name}.json'
 
 output_file = "factsASP.lp"
-
-cap_size_divde = 100000000
+cap_size_divde = 100000
 
 # only used for text and not 
 def reformulate(text):
@@ -100,14 +99,17 @@ def json2asp(file_out):
         
         alt_product_names_mapping = zip([reformulate(products_data.get(x)['name']) for x in products_data], [f"product{n}" for n in range(0, len(products_data))]) 
 
-
         products_tr = ""
         for product in products_data:
             product_dict = products_data.get(product)
             name = reformulate(product_dict.get("name"))
+            size = products_data.get(product).get('size')
             for tr in product_dict.get("validTR"):
-                 products_tr += f"productTR({name},{tr_name_id_mapping.get(str(tr))}).\n"
-
+                #if int(transportation_data.get(tr)['capacity']) > int(size):
+                products_tr += f"productTR({name},{tr_name_id_mapping.get(str(tr))}).\n"
+                #else:
+                #    print(tr_name_id_mapping.get(str(tr)), name)
+                #    print(f'{int(transportation_data.get(tr)['capacity'])} < {int(size)}')
  
         #products_names_for_mapping = list(map(lambda x: reformulate(products_data.get(x).get('name')), products_data))        
         #products_ids_for_mapping = list(map(lambda x: x, products_data))

@@ -24,7 +24,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-cap_size_divide = 10000
+cap_size_divide = 100000
 # Logic Program Content
 ASP_MODEL_CONTENT = """
 harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).
@@ -35,10 +35,17 @@ totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : deman
 validNode(L) :- demandOffer(_, L, _).
 validNode(L) :- harbor(L).
 noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), transportResource(TR).
-% add this rule for example use cases
-% validNode(L) :- location(L).
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), validNode(From), validNode(To),  
-not noShipBetweenHarbors(From, To, TR), productTR(P,TR),  transportCapacity(TR, Cap).
+
+possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), 
+%validNode(From), validNode(To),  
+not noShipBetweenHarbors(From, To, TR), 
+productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap. %, not invalidProductTR(P,TR).
+
+tRCapSmall(TR,Cap) :- transportCapacity(TR,Cap).
+productSizeSmall(P,S) :- productSize(P,S).
+
+%invalidProductTR(P, TR) :- tRCapSmall(TR, Cap), productSizeSmall(P,S), S>Cap, productTR(P,TR).
+%#show invalidProductTR/2.   
 
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
@@ -47,10 +54,10 @@ not noShipBetweenHarbors(From, To, TR), productTR(P,TR),  transportCapacity(TR, 
 &sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- not demandOffer(P,L,_),  location(L), product(P).
 &sum { flow_in(P,L); -1 * flow_out(P,L)} = -Net  :- demandOffer(P, L, Net).
 
-:- &sum{flow_in(P,L)} > M, demandOffer(P,L,N), N<0, M=N * -1.
-:- &sum{flow_out(P,L)} > N, demandOffer(P,L,N), N>0.
-:- &sum{flow_in(P,L)} !=0, demandOffer(P,L,N), N>0.
-:- &sum{flow_out(P,L)} !=0, demandOffer(P,L,N), N<0.
+%:- &sum{flow_in(P,L)} > M, demandOffer(P,L,N), N<0, M=N * -1.
+%:- &sum{flow_out(P,L)} > N, demandOffer(P,L,N), N>0.
+%:- &sum{flow_in(P,L)} !=0, demandOffer(P,L,N), N>0.
+%:- &sum{flow_out(P,L)} !=0, demandOffer(P,L,N), N<0.
 
 :- &sum{flow_out(P,From)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
@@ -58,17 +65,16 @@ not noShipBetweenHarbors(From, To, TR), productTR(P,TR),  transportCapacity(TR, 
 activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
 
 freq(1..20).
-1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), transportCapacity(TR,C) }1 :- activeFlow(From,To,TR).
+1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), tRCapSmall(TR,C) }1 :- activeFlow(From,To,TR).
 
 % upper bound
-&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} <= TotalCap :-
+&sum{S*load(F, T, TR, P) : possibleFlow(F, T, TR, P),productSizeSmall(P,S)} <= TotalCap :-
 routeFreq(F, T, TR, Freq, TotalCap).
 % lower bound
-&sum{S*load(F, T, TR, P) : productSize(P, S), possibleFlow(F, T, TR, P)} > Minus1:-
-routeFreq(F, T, TR, Freq, TotalCap), transportCapacity(TR,C), Minus1=TotalCap-C, Freq>1.
+&sum{S*load(F, T, TR, P) :possibleFlow(F, T, TR, P),productSizeSmall(P,S)} >= Minus1 :-
+routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C, Freq>1.
 
 #minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
-
 """
 
 class ClingconMultibatchingSolver(SolverDO):
@@ -87,9 +93,9 @@ class ClingconMultibatchingSolver(SolverDO):
         {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
         {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
         {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
-        {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
+        {'name':'productSize','filter':lambda s: s.name=='productSizeSmall', 'columns':['product', 'size']},
         {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
-        {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+        {'name':'transportCapacity','filter':lambda s: s.name=='tRCapSmall', 'columns':['transportresource', 'capacity']},
         {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
     ]
 
@@ -185,13 +191,12 @@ class ClingconMultibatchingSolver(SolverDO):
         def on_model_wrapper(model: clingo.Model):
             self.modelIndex += 1
             logger.info(f"Model [{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
-        
+
+            self.processModelAtoms(model)
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
 
             res.append((sol, fit))
-
-            self.processModelAtoms(model)
             self.compute_costs()
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
             print('fit', fit)
@@ -238,11 +243,9 @@ class ClingconMultibatchingSolver(SolverDO):
                 try:
                     args = name.arguments
                     from_name, to_name, tr_name, p_name = map(str, args)
-
                     route_key = (from_name, to_name, tr_name)
                     link = self.route_key_to_link.get(route_key)
                     product = self.name_to_product.get(p_name)
-
                     if link and product:
                         flows_aggregation[link][product] += value
                         df = self.all_dataframes["load"]
@@ -268,7 +271,7 @@ class ClingconMultibatchingSolver(SolverDO):
                 p_name, from_name = map(str, args)
                 product = self.name_to_product.get(p_name)
                 df.loc[len(df)] = {"product": p_name, "location":from_name, "amount":value}
-            
+
             if name.name == "route_cost_total" and value > 0:
                 df = self.all_dataframes["route_cost_total"]
                 args = name.arguments 
@@ -283,17 +286,27 @@ class ClingconMultibatchingSolver(SolverDO):
                 df.loc[len(df)] = {"product": p_name, "location":loc_name, "amount":value}
 
         list_flows = []
+
         for link, product_quantities in flows_aggregation.items():
+            print("link", link)
+            print(link.transport_type)
             packing = {p: q for p, q in product_quantities.items() if q > 0}
             if packing:
-                list_flows.append(PackingTransport(link, packing, 1))
-        #sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-        #print("aggreg", self.aggreg_from_sol(sol))
+                print("df", self.all_dataframes["routeFreq"])
+
+                freq_value = self.all_dataframes["routeFreq"].loc[
+                    (self.all_dataframes["routeFreq"]['from'] == link.location_1.name) & 
+                    (self.all_dataframes["routeFreq"]['to'] == link.location_2.name) & 
+                    (self.all_dataframes["routeFreq"]['transportresource'] == link.transport_type.name), 
+                    'freq'].values[0]
+                print("freq", freq_value)
+                list_flows.append(PackingTransport(link, packing, freq_value))
         sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-        aggreg_sol = self.aggreg_from_sol(sol)
-        kpis = self.problem.evaluate(sol)
+        #print("Sol", sol)
+        #print("flow", sol.list_flows)
+        #kpis = self.problem.evaluate(sol)
         logger.info(f"cost of current sol : {aggreg_sol}, kpis={kpis}")
-        return MultibatchingSolution(problem=self.problem, list_flows=list_flows)
+        return sol #MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
     def compute_costs(self):
         
@@ -400,4 +413,5 @@ class ClingconMultibatchingSolver(SolverDO):
                 if amount != 0:
                     p_s_name = sanitize(p.name if p.name else f"p{p.id}")
                     facts.append(f"demandOffer({p_s_name},{loc_s_name},{int(amount)}).")
+            
         return "\n".join(facts)

@@ -603,10 +603,6 @@ if __name__ == "__main__":
 #    print(f"Final Optimum Cost: {current_best}")
 
 
-
-
-
-
 def check_clingcon_load_freq(modelIndex):
 
     """

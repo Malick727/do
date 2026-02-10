@@ -2,7 +2,7 @@ from multibatching.solvers.asp import ClingconMultibatchingSolver
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver
 from multibatching.utils import generate_multibatching_problem
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 import os
 import json
 from multibatching.parse_config_data import parse_json_to_problem
@@ -22,8 +22,13 @@ def parse_problem(fix_problem: bool = False,
     if filter_transport_types:
         for product in problem.products:
             size = product.size
-            product.valid_transports = set({t for t in product.valid_transports
-                                            if t.capacity >= size})
+            #old_valid = product.valid_transports
+            #product.valid_transports = set({t for t in product.valid_transports
+            #                                if t.capacity >= size})
+            #print("product/ size", product, size)
+            #print("too big product",  set({t for t in product.valid_transports
+            #                               if t.capacity < size}))
+            #print("diff", old_valid ^ product.valid_transports )
     return problem
 
 def script():
@@ -35,7 +40,7 @@ def script():
                                              min_dist=1,
                                              max_dist=5,
                                              seed=51)
-    problem = parse_problem(harbor_constraint=False, filter_transport_types=True)
+    #problem = parse_problem(harbor_constraint=False, filter_transport_types=False)
     # 2. Initialize the solver
     solver = ClingconMultibatchingSolver(problem)
     solver.init_model()  # Initialize the ASP/Clingcon model
