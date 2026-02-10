@@ -288,24 +288,25 @@ class ClingconMultibatchingSolver(SolverDO):
         list_flows = []
 
         for link, product_quantities in flows_aggregation.items():
-            print("link", link)
-            print(link.transport_type)
+            #print("link", link)
             packing = {p: q for p, q in product_quantities.items() if q > 0}
             if packing:
-                print("df", self.all_dataframes["routeFreq"])
+                from_loc = str(link.location_l1.name).strip()
+                to_loc = str(link.location_l2.name).strip()
+                mode = str(link.transport_type.name).strip()
+                routeFreq_df = self.all_dataframes["routeFreq"]
+                mask = (routeFreq_df['from'].astype(str) == from_loc) & \
+                    (routeFreq_df['to'].astype(str) == to_loc) & \
+                    (routeFreq_df['transportresource'].astype(str) == mode)
+                freq = routeFreq_df.loc[mask, 'freq'].values[0]
+                list_flows.append(PackingTransport(link, packing, freq))
 
-                freq_value = self.all_dataframes["routeFreq"].loc[
-                    (self.all_dataframes["routeFreq"]['from'] == link.location_1.name) & 
-                    (self.all_dataframes["routeFreq"]['to'] == link.location_2.name) & 
-                    (self.all_dataframes["routeFreq"]['transportresource'] == link.transport_type.name), 
-                    'freq'].values[0]
-                print("freq", freq_value)
-                list_flows.append(PackingTransport(link, packing, freq_value))
         sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-        #print("Sol", sol)
-        #print("flow", sol.list_flows)
+        print("Sol", sol)
+
         #kpis = self.problem.evaluate(sol)
-        logger.info(f"cost of current sol : {aggreg_sol}, kpis={kpis}")
+        #print("kpis", kpis)
+        #logger.info(f"cost of current sol : kpis={kpis}")
         return sol #MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
     def compute_costs(self):
