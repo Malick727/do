@@ -21,10 +21,11 @@ import pandas as pd
 import os
 import csv
 import time 
+import math
 logger = logging.getLogger(__name__)
 
 
-cap_size_divide = 100000
+
 # Logic Program Content
 ASP_MODEL_CONTENT = """
 harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).
@@ -32,12 +33,27 @@ ship(kugelbake;feederContainerShip;truckGeneralCargo;oversizedTianjinRoRoShip;tr
 
 totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : demandOffer(P,_,V), V < 0}, product(P).
 
-validNode(L) :- demandOffer(_, L, _).
-validNode(L) :- harbor(L).
+hasDemand(P, L) :- demandOffer(P, L, V), V < 0.
+hasOffer(P, L)  :- demandOffer(P, L, V), V > 0.
+
+demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
+demand(P, L, 0)        :- product(P), location(L), not hasDemand(P, L).
+
+offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
+offer(P, L, 0)   :- product(P), location(L), not hasOffer(P, L).
+
+requiredNet(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
+requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), product(P).
+&dom { N..N } = req(P,L) :- requiredNet(P, L, N).
+
+validFromNode(L) :- demandOffer(_, L, M), M>0.
+validToNode(L) :- demandOffer(_, L, M), M<0.
+validToNode(L) :- harbor(L).
+validFromNode(L) :- harbor(L).
 noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), transportResource(TR).
 
 possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), 
-%validNode(From), validNode(To),  
+validFromNode(From), validToNode(To),  
 not noShipBetweenHarbors(From, To, TR), 
 productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap. %, not invalidProductTR(P,TR).
 
@@ -51,18 +67,17 @@ productSizeSmall(P,S) :- productSize(P,S).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
 &sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
-&sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- not demandOffer(P,L,_),  location(L), product(P).
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = -Net  :- demandOffer(P, L, Net).
+&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
+&sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- requiredNet(P, L, 0).
 
-%:- &sum{flow_in(P,L)} > M, demandOffer(P,L,N), N<0, M=N * -1.
-%:- &sum{flow_out(P,L)} > N, demandOffer(P,L,N), N>0.
-%:- &sum{flow_in(P,L)} !=0, demandOffer(P,L,N), N>0.
-%:- &sum{flow_out(P,L)} !=0, demandOffer(P,L,N), N<0.
+:- &sum{flow_in(P,L)}=0, demandOffer(P,L,N), N<0.
+:- &sum{flow_out(P,L)}=0, demandOffer(P,L,N), N>0.
 
 :- &sum{flow_out(P,From)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
 :- &sum{flow_in(P,To)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
 
 activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
+#minimize{1, From, To, TR: activeFlow(From,To,TR)}.
 
 freq(1..20).
 1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), tRCapSmall(TR,C) }1 :- activeFlow(From,To,TR).
@@ -71,10 +86,17 @@ freq(1..20).
 &sum{S*load(F, T, TR, P) : possibleFlow(F, T, TR, P),productSizeSmall(P,S)} <= TotalCap :-
 routeFreq(F, T, TR, Freq, TotalCap).
 % lower bound
-&sum{S*load(F, T, TR, P) :possibleFlow(F, T, TR, P),productSizeSmall(P,S)} >= Minus1 :-
-routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C, Freq>1.
+%&sum{S*load(F, T, TR, P) :possibleFlow(F, T, TR, P),productSizeSmall(P,S)} >= Minus1 :-
+%routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C, Freq>1.
 
-#minimize{C*Freq: routeFreq(F, T, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
+#minimize{C*Freq,From,To,TR: routeFreq(From, To, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
+
+% optimize on CO2 emission
+smallDistance(From,To,TR,D) :- route(_,From,To,TR,Dis,_), D=Dis/10.
+smallEmission(TR,E) :- transportCO2(TR,Em), E=Em/10.
+#minimize{D*Freq*E,From,To,TR: routeFreq(From, To, TR, Freq, _),smallDistance(From, To, TR, D),smallEmission(TR,E)}.
+
+
 """
 
 class ClingconMultibatchingSolver(SolverDO):
@@ -85,19 +107,20 @@ class ClingconMultibatchingSolver(SolverDO):
     start_solving = 0
 
     modelAtomTemplates = [
-        {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
-        {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
-        {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
-        {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq', 'totalcapacity']},
-        {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
-        {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
-        {'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
-        {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
-        {'name':'productSize','filter':lambda s: s.name=='productSizeSmall', 'columns':['product', 'size']},
-        {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
-        {'name':'transportCapacity','filter':lambda s: s.name=='tRCapSmall', 'columns':['transportresource', 'capacity']},
-        {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
-    ]
+                {'name':'totalSupply', 'filter':lambda s: s.name=='totalSupply', 'columns':['product' ,'amount']},
+                {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
+                {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
+                {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq','maxcapacity']}, #,'maxcapacity', 'minus1'
+                {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+                {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
+                #{'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
+                {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
+                {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
+                {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
+                {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+                {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['transportresource', 'transportationCost']},
+                {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
+            ]
 
     modelAggregateTemplates = [ 
                             {'name':'route_freq_cap','filter':lambda s: s.name=='route_freq_cap', 'columns':['from', 'to', 'transportresource','freq', 'total']},
@@ -113,7 +136,7 @@ class ClingconMultibatchingSolver(SolverDO):
             self,
             problem: MultibatchingProblem,
             params_objective_function: Optional[ParamsObjectiveFunction] = None,
-            **kwargs: Any,
+            **kwargs: Any, 
     ):
         super().__init__(problem, params_objective_function, **kwargs)
         self.ctl: Optional[clingo.Control] = None
@@ -122,7 +145,22 @@ class ClingconMultibatchingSolver(SolverDO):
         self.name_to_transport_type: Dict[str, Any] = {}
         self.name_to_product: Dict[str, Any] = {}
         self.route_key_to_link: Dict[tuple, TransportLink] = {}
+        self.cap_size_divide = 1
 
+    def set_cap_size_divide(self, val):
+        self.cap_size_divide = val
+
+    def sanitize(self, s: str) -> str:
+            s = str(s).replace(".", "").replace("-", "").replace(" ", "")
+            return s[0].lower() + s[1:]
+
+    def sanitize_num(self, val) -> int:
+        """Ensures input is a valid integer for Clingcon constraints."""
+        try:
+            return int(float(val)) # float handles "10.0" strings better than int()
+        except (ValueError, TypeError):
+            print("ValueError/ TypeError", ValueError, TypeError)
+        
 
     def processModelAtoms(self, model: clingo.Model):
         path_symbols = []
@@ -193,16 +231,16 @@ class ClingconMultibatchingSolver(SolverDO):
             logger.info(f"Model [{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
 
             self.processModelAtoms(model)
+            self.compute_active_flows()
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
 
             res.append((sol, fit))
-            self.compute_costs()
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
-            print('fit', fit)
-            print(self.problem.satisfy(sol))
-            print('satisfy', self.problem.satisfy(sol))
-            print("Check flows ", self.problem.check_flows(sol))
+
+            print("total costs:", fit, f"({fit:.2e})")
+            #print('satisfy', self.problem.satisfy(sol))
+            #print("Check flows ", self.problem.check_flows(sol))
             print("stopping", stopping)
             
             return not stopping
@@ -279,7 +317,7 @@ class ClingconMultibatchingSolver(SolverDO):
                
                 df.loc[len(df)]= {"from": from_name, "to":to_name, "transportresource": tr_name, "cost":value}
                 
-            if name.name == "req" and value > 0:
+            if name.name == "req" and value != 0:
                 df = self.all_dataframes["req"]
                 args = name.arguments
                 p_name, loc_name  = map(str, args)
@@ -288,53 +326,110 @@ class ClingconMultibatchingSolver(SolverDO):
         list_flows = []
 
         for link, product_quantities in flows_aggregation.items():
-            #print("link", link)
-            packing = {p: q for p, q in product_quantities.items() if q > 0}
-            if packing:
-                from_loc = str(link.location_l1.name).strip()
-                to_loc = str(link.location_l2.name).strip()
-                mode = str(link.transport_type.name).strip()
-                routeFreq_df = self.all_dataframes["routeFreq"]
-                mask = (routeFreq_df['from'].astype(str) == from_loc) & \
-                    (routeFreq_df['to'].astype(str) == to_loc) & \
-                    (routeFreq_df['transportresource'].astype(str) == mode)
-                freq = routeFreq_df.loc[mask, 'freq'].values[0]
-                list_flows.append(PackingTransport(link, packing, freq))
+            #packing = {p: q for p, q in product_quantities.items() if q > 0}
+            from_loc = self.sanitize(link.location_l1.name)
+            to_loc = self.sanitize(link.location_l2.name)
+            mode = self.sanitize(link.transport_type.name)
+            
+            #if self.all_dataframes["routeFreq"]:
+            #    routeFreq_df = self.all_dataframes["routeFreq"]
+            #    routeFreq_df['from','to','transportresource'] = routeFreq_df['from'].astype(str)
+            #    routeFreq_df['from','to','transportresource'] = routeFreq_df['to'].astype(str)
+            #    routeFreq_df['from','to','transportresource'] = routeFreq_df['transportresource'].astype(str)
+            #    mask = (routeFreq_df['from'].astype(str) == from_loc) & \
+            #        (routeFreq_df['to'].astype(str) == to_loc) & \
+            #        (routeFreq_df['transportresource'].astype(str) == mode)
+            #    
+            #    freq = (routeFreq_df.loc[mask, 'freq'].values[0]).number
+            #else:
+            freq = 1
+            packing = {}
+            for p, q in product_quantities.items():
+                if q > 0:
+                    items_per_trip = q #math.ceil(q / freq) 
+                    if items_per_trip > 0:
+                        packing[p] = items_per_trip
+            list_flows.append(PackingTransport(link, packing, freq))
 
         sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-        print("Sol", sol)
-
         #kpis = self.problem.evaluate(sol)
         #print("kpis", kpis)
         #logger.info(f"cost of current sol : kpis={kpis}")
         return sol #MultibatchingSolution(problem=self.problem, list_flows=list_flows)
 
-    def compute_costs(self):
+
+        
+    def _generate_facts(self) -> str:
+        # Same generation logic as before, ensure it returns a valid ASP string
+        facts = []
+
+        # Locations
+        self.name_to_location = {}
+        for loc in self.problem.locations:
+            s_name = self.sanitize(loc.name)
+            self.name_to_location[s_name] = loc
+            facts.append(f"location({s_name}).")
+
+        # Transport Resources
+        self.name_to_transport_type = {}
+        for tt in self.problem.transport_types:
+            s_name = self.sanitize(tt.name if tt.name else f"tr{tt.id}")
+            self.name_to_transport_type[s_name] = tt
+            facts.append(f"transportResource({s_name}).")
+            facts.append(f"transportCO2({s_name},{self.sanitize_num(tt.emissions)}).")
+            facts.append(f"transportCost({s_name},{max(0,self.sanitize_num(tt.cost))}).")
+            scaled_cap = max(0, int(tt.capacity / self.cap_size_divide))
+            facts.append(f"transportCapacity({s_name},{scaled_cap}).")
+            facts.append(f"transportSpeed({s_name},{self.sanitize_num(tt.speed)}).")
+
+        # Routes 
+        self.route_key_to_link = {}
+        for idx, tl in enumerate(self.problem.transport_links):
+            source = self.sanitize(tl.location_l1.name)
+            dest = self.sanitize(tl.location_l2.name)
+            tr_name = self.sanitize(tl.transport_type.name if tl.transport_type.name else f"tr{tl.transport_type.id}")
+            self.route_key_to_link[(source, dest, tr_name)] = tl
+            dist = int(tl.distance)
+            cost = int(self.sanitize_num(tl.transport_type.cost) * dist)
+            facts.append(f"route({idx},{source},{dest},{tr_name},{dist},{cost}).")
+
+        # Products
+        self.name_to_product = {}
+        for p in self.problem.products:
+            s_name = self.sanitize(p.name if p.name else f"p{p.id}")
+            self.name_to_product[s_name] = p
+            facts.append(f"product({s_name}).")
+            scaled_size = int(p.size / self.cap_size_divide)
+            facts.append(f"productSize({s_name},{scaled_size}).")
+            for valid_tr in p.valid_transports:
+                tr_s_name = self.sanitize(valid_tr.name if valid_tr.name else f"tr{valid_tr.id}")
+                facts.append(f"productTR({s_name},{tr_s_name}).")
+
+        # Demand/Offers
+        for loc in self.problem.locations:
+            loc_s_name = self.sanitize(loc.name)
+            for p, amount in loc.net_supply.items():
+                if amount != 0:
+                    p_s_name = self.sanitize(p.name if p.name else f"p{p.id}")
+                    facts.append(f"demandOffer({p_s_name},{loc_s_name},{int(amount)}).")
+            
+        
+        with open(os.path.join(os.path.dirname(__file__),'factsASP.lp'), 'w') as file_out:
+            file_out.writelines("\n".join(facts))
+        return "\n".join(facts)
+    
+    def compute_active_flows(self):
         
         active_flows_df = self.all_dataframes["activeFlow"]
-        logger.info(f"Total active flows for model: {active_flows_df.shape[0]}")
-        
-        route_df = self.all_dataframes["route"]
-        route_df['cost'] = route_df['cost'].values
-        route_freq_df = self.all_dataframes["routeFreq"]
-        route_freq_df['freq'] = route_freq_df['freq'].values
-        
-        merge_cols = ['from', 'to', 'transportresource']
-    
-        for df in [route_df, route_freq_df]:
-            for col in merge_cols:
-                # Convert to string and strip whitespace to ensure matching
-                df[col] = df[col].astype(str).str.strip()
+        print(f"Total active flows for model: {active_flows_df.shape[0]}")
 
-        merged_df = pd.merge(
-        route_freq_df, 
-        route_df, 
-        on=['from', 'to', 'transportresource'], 
-        how='inner'
-        )
+    def compute_costs(self):
+        
+        
+
         def extract_clingo_number(val):
             # Case A: It's a Clingo Symbol (has .number attribute)
-            if hasattr(val, 'number'): 
+            if hasattr(val, 'number'):  
                 return val.number
             # Case B: It's already a Python int or float
             if isinstance(val, (int, float)):
@@ -345,74 +440,46 @@ class ClingconMultibatchingSolver(SolverDO):
             except (ValueError, TypeError):
                 return 0  # Default fallback if data is bad
 
-        merged_df['freq'] = merged_df['freq'].apply(extract_clingo_number)
-        merged_df['cost'] = merged_df['cost'].apply(extract_clingo_number)
+        route_df = self.all_dataframes["route"]
+        route_df['cost'] = route_df['cost'].values
+        route_df['cost'] = route_df['cost'].apply(extract_clingo_number)
 
-        merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
+        route_df['distance'] = route_df['distance'].values
+        route_df['distance'] = route_df['distance'].apply(extract_clingo_number)
+
+        route_freq_df = self.all_dataframes["routeFreq"]
+        route_freq_df['freq'] = route_freq_df['freq'].values
+        route_freq_df['freq'] = route_freq_df['freq'].apply(extract_clingo_number)
         
-        logger.info(f"Total costs for model: {merged_df['total_cost'].sum()}")
-        
-    def _generate_facts(self) -> str:
-        # Same generation logic as before, ensure it returns a valid ASP string
-        facts = []
+        transportCost_df = self.all_dataframes["transportCost"]
+        transportCost_df['transportationCost'] = transportCost_df['transportationCost'].values
+        transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(extract_clingo_number)
 
-        def sanitize(s: str) -> str:
-            s = str(s).replace(".", "").replace("-", "").replace(" ", "")
-            return s[0].lower() + s[1:]
+        merge_cols = ['from', 'to', 'transportresource']
+    
+        for df in [route_df, route_freq_df,transportCost_df]:
+            for col in merge_cols:
+                if col in df.columns:
+                    # Convert to string and strip whitespace to ensure matching
+                    df[col] = df[col].astype(str).str.strip()
 
-        def sanitize_num(val) -> int:
-            return max(1, int(val))
-        
+        merged_df1 = pd.merge(
+            route_freq_df, 
+            route_df, 
+            on=['from', 'to', 'transportresource'], 
+            how='inner'
+        )
+
+        merged_df1['total_transportation_cost-1'] = merged_df1['freq'] * merged_df1['cost']
+
+        merged_df2 = pd.merge(
+            merged_df1, 
+            transportCost_df, 
+            on=['transportresource'], 
+            how='inner'
+        )
 
 
-        # Locations
-        self.name_to_location = {}
-        for loc in self.problem.locations:
-            s_name = sanitize(loc.name)
-            self.name_to_location[s_name] = loc
-            facts.append(f"location({s_name}).")
-
-        # Transport Resources
-        self.name_to_transport_type = {}
-        for tt in self.problem.transport_types:
-            s_name = sanitize(tt.name if tt.name else f"tr{tt.id}")
-            self.name_to_transport_type[s_name] = tt
-            facts.append(f"transportResource({s_name}).")
-            facts.append(f"transportCO2({s_name},{sanitize_num(tt.emissions)}).")
-            facts.append(f"transportCost({s_name},{sanitize_num(tt.cost)}).")
-            scaled_cap = max(1, int(tt.capacity / cap_size_divide))
-            facts.append(f"transportCapacity({s_name},{scaled_cap}).")
-            facts.append(f"transportSpeed({s_name},{sanitize_num(tt.speed)}).")
-
-        # Routes
-        self.route_key_to_link = {}
-        for idx, tl in enumerate(self.problem.transport_links):
-            source = sanitize(tl.location_l1.name)
-            dest = sanitize(tl.location_l2.name)
-            tr_name = sanitize(tl.transport_type.name if tl.transport_type.name else f"tr{tl.transport_type.id}")
-            self.route_key_to_link[(source, dest, tr_name)] = tl
-            dist = int(tl.distance)
-            cost = int(sanitize_num(tl.transport_type.cost) * dist)
-            facts.append(f"route({idx},{source},{dest},{tr_name},{dist},{cost}).")
-
-        # Products
-        self.name_to_product = {}
-        for p in self.problem.products:
-            s_name = sanitize(p.name if p.name else f"p{p.id}")
-            self.name_to_product[s_name] = p
-            facts.append(f"product({s_name}).")
-            scaled_size = int(p.size / cap_size_divide)
-            facts.append(f"productSize({s_name},{scaled_size}).")
-            for valid_tr in p.valid_transports:
-                tr_s_name = sanitize(valid_tr.name if valid_tr.name else f"tr{valid_tr.id}")
-                facts.append(f"productTR({s_name},{tr_s_name}).")
-
-        # Demand/Offers
-        for loc in self.problem.locations:
-            loc_s_name = sanitize(loc.name)
-            for p, amount in loc.net_supply.items():
-                if amount != 0:
-                    p_s_name = sanitize(p.name if p.name else f"p{p.id}")
-                    facts.append(f"demandOffer({p_s_name},{loc_s_name},{int(amount)}).")
-            
-        return "\n".join(facts)
+        merged_df2['total_transportation_cost-2'] = merged_df2['freq'] * merged_df2['transportationCost'] * merged_df2['distance']
+        print(f"Transportation costs", 'transport', merged_df1['total_transportation_cost-1'].sum())
+        print(f"Transportation costs", 'transport', merged_df2['total_transportation_cost-2'].sum())

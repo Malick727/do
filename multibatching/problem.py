@@ -123,13 +123,16 @@ class MultibatchingProblem(Problem):
                             * flow.nb_packing
                             for flow in variable.list_flows])
         compound = 0
-        print("transport_cost", transport_cost)
         for flow in variable.list_flows:
             value = sum([p.value*flow.product_packing[p]
                          for p in flow.product_packing])
             time = flow.transport_link.distance/flow.transport_link.transport_type.speed
             coef = value*((1+self.capital_factor)**time-1)
             compound += flow.nb_packing*coef
+
+        print({'transport': transport_cost,
+                'emission': emission_co2,
+                'capital': compound})
         return {'transport': transport_cost,
                 'emission': emission_co2,
                 'capital': compound}

@@ -977,7 +977,8 @@ def generate_multibatching_problem(
             id=i + 1,
             size=random.randint(min_product_size, max_product_size),
             value=random.randint(min_product_value, max_product_value),
-            valid_transports=valid_transports
+            valid_transports=valid_transports,
+            name=f"p{i+1}"
         )
         products_list.append(prod)
 

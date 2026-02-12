@@ -71,6 +71,7 @@ modelAtomTemplates = [
         {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
         {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
         {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+        {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['transportresource', 'transportationCost']},
         {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
     ]
 
@@ -405,25 +406,46 @@ def compute_costs(modelIndex):
         
     active_flows_df = all_dataframes["activeFlow"]
     print(f"Model {modelIndex}: Total active flows: {active_flows_df.shape[0]}")
+    
     route_df = all_dataframes["route"]
     route_df['cost'] = route_df['cost'].values
     route_df['cost'] = route_df['cost'].apply(to_int)
+
+    route_df['distance'] = route_df['distance'].values
+    route_df['distance'] = route_df['distance'].apply(to_int)
+
     route_freq_df = all_dataframes["routeFreq"]
     route_freq_df['freq'] = route_freq_df['freq'].values
     route_freq_df['freq'] = route_freq_df['freq'].apply(to_int)
+    
+    transportCost_df = all_dataframes["transportCost"]
+    transportCost_df['transportationCost'] = transportCost_df['transportationCost'].values
+    transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(to_int)
+
     # only keep the routes in route_freq
-    merged_df = pd.merge(
+    merged_df1 = pd.merge(
         route_freq_df, 
         route_df, 
         on=['from', 'to', 'transportresource'], 
         how='inner'
     )
 
-    merged_df['total_cost'] = merged_df['freq'] * merged_df['cost']
-    print(f"Model {modelIndex}: Total costs are {merged_df['total_cost'].sum()}")
+    merged_df1['total_transportation_cost-1'] = merged_df1['freq'] * merged_df1['cost']
+
+    # only keep the routes in route_freq
+    merged_df2 = pd.merge(
+        merged_df1, 
+        transportCost_df, 
+        on=['transportresource'], 
+        how='inner'
+    )
+    merged_df2['total_transportation_cost-2'] = merged_df2['freq'] * merged_df2['transportationCost'] * merged_df2['distance']
 
 
+    print(f"Model {modelIndex} costs", 'transport', merged_df1['total_transportation_cost-1'].sum())
+    print(f"Model {modelIndex} costs", 'transport', merged_df2['total_transportation_cost-2'].sum())
 
+ 
 def processModel(modelIndex):
     global check_clingcon_multibatching, compute_costs_var
     if check_clingcon_multibatching == True:

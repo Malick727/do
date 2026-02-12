@@ -2,10 +2,12 @@ from multibatching.solvers.asp import ClingconMultibatchingSolver
 from multibatching.solvers.cpsat import CpsatMultibatchingSolver
 from multibatching.utils import generate_multibatching_problem
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 import os
 import json
 from multibatching.parse_config_data import parse_json_to_problem
+from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMultibatchingSolver,
+                                             PackingViaBinPacking, GreedyPackingForMultibatching)
 
 def parse_problem(fix_problem: bool = False,
                   harbor_constraint: bool = False,
@@ -22,13 +24,8 @@ def parse_problem(fix_problem: bool = False,
     if filter_transport_types:
         for product in problem.products:
             size = product.size
-            #old_valid = product.valid_transports
-            #product.valid_transports = set({t for t in product.valid_transports
-            #                                if t.capacity >= size})
-            #print("product/ size", product, size)
-            #print("too big product",  set({t for t in product.valid_transports
-            #                               if t.capacity < size}))
-            #print("diff", old_valid ^ product.valid_transports )
+            product.valid_transports = set({t for t in product.valid_transports
+                                            if t.capacity >= size})
     return problem
 
 def script():
@@ -38,14 +35,18 @@ def script():
                                              num_transport_types=5,
                                              num_products=3,
                                              min_dist=1,
-                                             max_dist=5,
+                                             max_dist=5, 
                                              seed=51)
-    #problem = parse_problem(harbor_constraint=False, filter_transport_types=False)
-    # 2. Initialize the solver
+
+    problem = parse_problem(harbor_constraint=False, filter_transport_types=True)
     solver = ClingconMultibatchingSolver(problem)
+    solver.set_cap_size_divide(10000)
+
+
+    # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)
-    time_limit=1000
+    time_limit=100
     print(f"Starting solve with {time_limit}s timeout...")
     result_storage = solver.solve(callbacks=[BasicStatsCallback()],
                                   time_limit=time_limit)
@@ -54,15 +55,15 @@ def script():
     if solution == None:
         print("UNSAT")
     else:
-        print(problem.satisfy(solution), problem.evaluate(solution))
+        print("Check flows", problem.check_flows(solution))
+        pack = PackingViaBinPacking(problem)
+        pack.init_from_solution(solution)
+        res = pack.solve(time_limit_per_link=1)
+        sol_ = res.get_best_solution()
+        print("Evaluate after 2. step", problem.evaluate(sol_), problem.satisfy(sol_))
 
-    print(f"Solve Status: {solver.status_solver}")
-    if solution:
-        print(f"Best Solution Found: {fitness}")
-        # You can process 'solution' here (e.g. print flows)
-    else:
-        print("No solution found within the time limit.")
-
+        value = sum(problem.evaluate(sol_).values())
+        print("total costs:", value, f"({value:.2e})")
 
 if __name__ == "__main__":
     script()
