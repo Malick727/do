@@ -41,13 +41,7 @@ def script():
     problem = parse_problem(harbor_constraint=False,
                             filter_transport_types=True)
     solver = ClingconMultibatchingSolver(problem)
-<<<<<<< HEAD
     solver.set_cap_size_divide(1)
-
-
-=======
-    solver.set_cap_size_divide(10000)
->>>>>>> 90ff120d0aaf79bcf8b27d1ddf71cd674fb1cba2
     # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)

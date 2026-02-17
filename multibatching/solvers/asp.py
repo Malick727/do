@@ -231,7 +231,7 @@ class ClingconMultibatchingSolver(SolverDO):
     def init_model(self, **kwargs: Any) -> None:
         # Default options
         clingo_args = kwargs.get("clingo_args", [
-                                                 "--opt-mode=opt", #"--configuration=many" #,
+                                                "--parallel-mode=4"# "--opt-mode=opt", #"--configuration=many" #,
                                                 #" --opt-strategy=bb" ,
                                                  #"--heuristic=Domain"
                                                  ])
