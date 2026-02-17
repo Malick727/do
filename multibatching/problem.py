@@ -305,11 +305,14 @@ class MultibatchingProblem(Problem):
 
         # --- 3. Final Flow Conservation Check ---
         # After processing all flows, all current_net_flows should be close to zero
+        any_imbalance = False
         for (loc_id, prod_id), net_flow in current_net_flows.items():
             if abs(net_flow) > epsilon:
                 print(f"Validation Error: Flow imbalance for Location {loc_id}, Product P{prod_id}: {net_flow}")
-                return False
-
+                any_imbalance = True
+                #return False
+        if any_imbalance:
+            return False
         return True  # All checks passed
 
     def check_flows(self, solution: MultibatchingSolution):

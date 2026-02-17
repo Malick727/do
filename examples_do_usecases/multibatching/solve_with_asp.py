@@ -38,11 +38,16 @@ def script():
                                              max_dist=5, 
                                              seed=51)
 
-    problem = parse_problem(harbor_constraint=False, filter_transport_types=True)
+    problem = parse_problem(harbor_constraint=False,
+                            filter_transport_types=True)
     solver = ClingconMultibatchingSolver(problem)
+<<<<<<< HEAD
     solver.set_cap_size_divide(1)
 
 
+=======
+    solver.set_cap_size_divide(10000)
+>>>>>>> 90ff120d0aaf79bcf8b27d1ddf71cd674fb1cba2
     # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)
@@ -69,7 +74,7 @@ def script():
 
         
         print("Evaluate after 2. step", problem.evaluate(sol_), problem.satisfy(sol_))
-
+        print("satisfy : ", problem.satisfy(sol_))
         value = sum(problem.evaluate(sol_).values())
         print("total costs:", value, f"({value:.2e})")
 
