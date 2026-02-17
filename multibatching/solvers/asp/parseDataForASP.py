@@ -64,7 +64,7 @@ def json2asp(file_out):
 
         tr_names = list(map(lambda x: f"transportResource({reformulate(transportation_data.get(x)['name'])}).\n", transportation_data_filter))
         tr_co2 = list(map(lambda x: f"transportCO2({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['co2Emissions'])])}).\n", transportation_data_filter))
-        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data_filter))
+        tr_costs = list(map(lambda x: f"transportCost({reformulate(transportation_data.get(x)['name'])},{max([0,reformulateNr(transportation_data.get(x)['cost'])])}).\n", transportation_data_filter))
         tr_speeds = list(map(lambda x: f"transportSpeed({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(transportation_data.get(x)['speed'])])}).\n",  transportation_data_filter))
         tr_costPerCap = list(map(lambda x: f"transportCostPerCap({reformulate(transportation_data.get(x)['name'])},{max([1,reformulateNr(int((transportation_data.get(x)['capacity']/cap_size_divde)/transportation_data.get(x)['cost']))])}).\n",  transportation_data_filter))        
         

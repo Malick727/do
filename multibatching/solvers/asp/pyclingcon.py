@@ -71,6 +71,7 @@ modelAtomTemplates = [
         {'name':'productSize','filter':lambda s: s.name=='productSize', 'columns':['product', 'size']},
         {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
         {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
+        {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['transportresource', 'CO2']},
         {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['transportresource', 'transportationCost']},
         {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
     ]
@@ -422,6 +423,11 @@ def compute_costs(modelIndex):
     transportCost_df['transportationCost'] = transportCost_df['transportationCost'].values
     transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(to_int)
 
+    co2Cost_df = all_dataframes["transportCO2"]
+    co2Cost_df['CO2'] = co2Cost_df['CO2'].values
+    co2Cost_df['CO2'] = co2Cost_df['CO2'].apply(to_int)
+
+
     # only keep the routes in route_freq
     merged_df1 = pd.merge(
         route_freq_df, 
@@ -430,21 +436,23 @@ def compute_costs(modelIndex):
         how='inner'
     )
 
-    merged_df1['total_transportation_cost-1'] = merged_df1['freq'] * merged_df1['cost']
+    merged_df1['total_transportation_costs'] = merged_df1['freq'] * merged_df1['cost']
 
     # only keep the routes in route_freq
     merged_df2 = pd.merge(
         merged_df1, 
-        transportCost_df, 
+        co2Cost_df, 
         on=['transportresource'], 
         how='inner'
     )
-    merged_df2['total_transportation_cost-2'] = merged_df2['freq'] * merged_df2['transportationCost'] * merged_df2['distance']
+    merged_df2['total_co2_costs'] = merged_df2['freq'] * merged_df2['CO2'] * merged_df2['distance']
 
 
-    print(f"Model {modelIndex} costs", 'transport', merged_df1['total_transportation_cost-1'].sum())
-    print(f"Model {modelIndex} costs", 'transport', merged_df2['total_transportation_cost-2'].sum())
+    print(f"Model {modelIndex} costs", 'transport', merged_df1['total_transportation_costs'].sum())
+    print(f"Model {modelIndex} costs", 'co2', merged_df2['total_co2_costs'].sum())
 
+    value = merged_df1['total_transportation_costs'].sum() + merged_df2['total_co2_costs'].sum()
+    print("total costs:", value, f"({value:.2e}), [transport {merged_df1['total_transportation_costs'].sum()}, co2 {merged_df2['total_co2_costs'].sum()}] ")
  
 def processModel(modelIndex):
     global check_clingcon_multibatching, compute_costs_var

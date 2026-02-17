@@ -55,47 +55,95 @@ noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), tr
 possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), 
 validFromNode(From), validToNode(To),  
 not noShipBetweenHarbors(From, To, TR), 
-productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap. %, not invalidProductTR(P,TR).
+productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap.
 
-tRCapSmall(TR,Cap) :- transportCapacity(TR,Cap).
-productSizeSmall(P,S) :- productSize(P,S).
+tRCapSmall(TR,Cap) :- transportCapacity(TR,CapB), Cap=CapB/10000.
+productSizeSmall(P,S) :- productSize(P,SB), S = SB/10000.
+
+smallDistance(From,To,TR,D) :- route(_,From,To,TR,Dis,_), D=Dis/10.
+smallEmission(TR,E) :- transportCO2(TR,Em), E=Em/10.
 
 %invalidProductTR(P, TR) :- tRCapSmall(TR, Cap), productSizeSmall(P,S), S>Cap, productTR(P,TR).
 %#show invalidProductTR/2.   
 
+max_possible_load(F, T, TR, P, Bound) :- 
+    possibleFlow(F, T, TR, P),
+    totalSupply(P, MaxSupply),
+    tRCapSmall(TR, Cap),
+    MaxFreq = 30,
+    TotalRouteCap = (Cap * MaxFreq),
+    % The bound is the smaller of the two
+    Bound = MaxSupply,
+    MaxSupply <= TotalRouteCap.
+
+max_possible_load(F, T, TR, P, Bound) :- 
+    possibleFlow(F, T, TR, P),
+    totalSupply(P, MaxSupply),
+    tRCapSmall(TR, Cap),
+    MaxFreq = 30,
+    TotalRouteCap = (Cap * MaxFreq),
+    % The bound is the smaller of the two
+    Bound = TotalRouteCap,
+    MaxSupply > TotalRouteCap.
+
+% Apply the tightened domain
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
-&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
-&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
 
-&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
-&sum{flow_in(P,L); -1*flow_out(P,L)} = 0 :- requiredNet(P, L, 0).
 
-:- &sum{flow_in(P,L)}=0, demandOffer(P,L,N), N<0.
-:- &sum{flow_out(P,L)}=0, demandOffer(P,L,N), N>0.
+% If a node cannot reach a demand for product P, its outgoing load must be 0
+%&dom { 0..0 } = load(F, T, TR, P) :- possibleFlow(F, T, TR, P), not can_reach_demand(T, P).
 
-:- &sum{flow_out(P,From)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
-:- &sum{flow_in(P,To)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
+&sum {  
+    load(From, L, TR, P) : possibleFlow(From, L, TR, P); 
+    -1 * load(L, To, TR, P) : possibleFlow(L, To, TR, P) 
+} = Net :- requiredNet(P, L, Net).
+
+%&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
+%&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
+
+%&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
+
+%:- &sum{ load(From, L, TR, P) : possibleFlow(From, L, TR, P)} < Net, demandOffer(P, L, Net), Net < 0.
+%:- &sum{ load(L, To, TR, P) : possibleFlow(L, To, TR, P)} < Net, demandOffer(P, L, Net), Net > 0.
+
+%:- &sum{load(From,To, TR, P): possibleFlow(From, To, TR, P)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
+%:- &sum{load(From, To, TR, P): possibleFlow(From, To, TR, P)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
 
 activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
-#minimize{1, From, To, TR: activeFlow(From,To,TR)}.
+%#minimize{1, From, To, TR: activeFlow(From,To,TR)}.
 
-freq(1..20).
-1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), tRCapSmall(TR,C) }1 :- activeFlow(From,To,TR).
+&minimize{freq_var(F, T, TR) * D * E: route(_,F,T,TR,D,C), smallEmission(TR,E); freq_var(F, T, TR) * C: route(_,F,T,TR,_,C)}.
+
+% 2. Integrated Frequency Variable 
+&dom { 1..30 } = f_var(F, T, TR) :- possibleFlow(F, T, TR, _), activeFlow(F,T,TR).
+&dom { 0..0 } = f_var(F, T, TR) :- possibleFlow(F, T, TR, _), not activeFlow(F,T,TR).
+
+% 3. Link Load to Frequency (Capacity)
+&sum { S * load(F, T, TR, P) : productSizeSmall(P, S) } <= Cap * f_var(F, T, TR) 
+    :- possibleFlow(F, T, TR, _), tRCapSmall(TR, Cap).
+
+&sum { S * load(F, T, TR, P) : productSizeSmall(P, S), possibleFlow(F, T, TR, P) } 
+     > Cap * (freq_var(F, T, TR) - 1)
+     :- possibleFlow(F, T, TR, _), tRCapSmall(TR, Cap), &sum{freq_var(F, T, TR)} > 0.
+
+% 4. Tighten f_var: if load exists, frequency must be at least 1
+&sum { load(F, T, TR, P) : possibleFlow(F, T, TR, P) } > 0 :- &sum{f_var(F, T, TR)} > 0, possibleFlow(F, T, TR, _) .
+
+%freq(1..30).
+%1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), tRCapSmall(TR,C) }1 :- activeFlow(From,To,TR).
 
 % upper bound
-&sum{S*load(F, T, TR, P) : possibleFlow(F, T, TR, P),productSizeSmall(P,S)} <= TotalCap :-
-routeFreq(F, T, TR, Freq, TotalCap).
+%&sum{S*load(F, T, TR, P) : possibleFlow(F, T, TR, P),productSizeSmall(P,S)} <= TotalCap :-
+%routeFreq(F, T, TR, Freq, TotalCap).
 % lower bound
 %&sum{S*load(F, T, TR, P) :possibleFlow(F, T, TR, P),productSizeSmall(P,S)} >= Minus1 :-
-%routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C, Freq>1.
+%routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C*10, Freq>1.
 
-#minimize{C*Freq,From,To,TR: routeFreq(From, To, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
+%costPerActiveFlow(From, To, TR,Freq*C) :- routeFreq(From, To, TR, Freq, TotalCap), route(_, From, To, TR, _, C).
+%emissionPerActiveFlow(From, To, TR,Freq*E*D) :- routeFreq(From, To, TR, Freq, _),route(_, From, To, TR,D, _),transportCO2(TR,E).
 
-% optimize on CO2 emission
-smallDistance(From,To,TR,D) :- route(_,From,To,TR,Dis,_), D=Dis/10.
-smallEmission(TR,E) :- transportCO2(TR,Em), E=Em/10.
-#minimize{D*Freq*E,From,To,TR: routeFreq(From, To, TR, Freq, _),smallDistance(From, To, TR, D),smallEmission(TR,E)}.
-
+%#minimize{C,From,To,TR: costPerActiveFlow(From,To,TR,C)}.
+%#minimize{C,From,To,TR: emissionPerActiveFlow(From,To,TR,C)}.
 
 """
 
@@ -119,6 +167,7 @@ class ClingconMultibatchingSolver(SolverDO):
                 {'name':'possibleFlow','filter':lambda s: s.name=='possibleFlow', 'columns':['from', 'to', 'transportresource','product']},
                 {'name':'transportCapacity','filter':lambda s: s.name=='transportCapacity', 'columns':['transportresource', 'capacity']},
                 {'name':'transportCost','filter':lambda s: s.name=='transportCost', 'columns':['transportresource', 'transportationCost']},
+                {'name':'transportCO2','filter':lambda s: s.name=='transportCO2', 'columns':['transportresource', 'CO2']},
                 {'name':'productOnFlow','filter':lambda s: s.name=='productOnFlow', 'columns':['from', 'to', 'transportresource','product','amount']}
             ]
 
@@ -181,8 +230,33 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
-        clingo_args = kwargs.get("clingo_args", [#"--models=0",
-                                                 "--opt-mode=opt"])
+        clingo_args = kwargs.get("clingo_args", [
+                                                 "--opt-mode=opt", #"--configuration=many" #,
+                                                #" --opt-strategy=bb" ,
+                                                 #"--heuristic=Domain"
+                                                 ])
+      #  clingo_args = kwargs.get("clingo_args", 
+                               #  [
+    #"--parallel-mode=4,split",   # 'split' is better for optimization than 'compete'
+    #"--opt-mode=opt",            # Forces search for the best
+    #"--restart-on-model",        # CRITICAL: Restarts search with a better bound
+    #"--opt-strategy=bb",         # Branch-and-Bound (ensures cost only goes down)
+    #"--configuration=many"       # Keeps diverse strategies but they will share bounds
+#])
+                               #  ["--opt-mode=optN", "-t", "4", "--stats", "--restart-on-model"])
+                                 
+                                # ["--opt-mode=optN",  "--stats", "--restart-on-model", "--heuristic=Vsids"])
+        #"--heuristic=Domain", # Tells clingo to actually use your #heuristic rules
+        #"--opt-strategy=bb,dec",
+        #"--parallel-mode=4",
+        #"--configuration=many"
+        #"--restart-on-model",
+        #"--rand-freq=0.05", # 5% random moves to escape rigid symmetry rules
+        #"--opt-strategy=bb,dec",
+        #"--parallel-mode=4"
+        #])
+        
+        
         self.ctl = clingo.Control(clingo_args)
         self.theory = ClingconTheory()
 
@@ -232,13 +306,14 @@ class ClingconMultibatchingSolver(SolverDO):
 
             self.processModelAtoms(model)
             self.compute_active_flows()
+            self.compute_costs()
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
 
             res.append((sol, fit))
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
 
-            print("total costs:", fit, f"({fit:.2e})")
+            print("total costs (estimate without frequencies):", fit, f"({fit:.2e})")
             #print('satisfy', self.problem.satisfy(sol))
             #print("Check flows ", self.problem.check_flows(sol))
             print("stopping", stopping)
@@ -258,6 +333,13 @@ class ClingconMultibatchingSolver(SolverDO):
                 if not finished:
                     logger.info(f"Time limit of {time_limit}s reached.")
                     handle.cancel()
+                stats = self.ctl.statistics
+                # Some clingo versions/configurations expose the lower bound in stats
+                if 'solve' in stats and 'lower_bound' in stats['solve']:
+                    self.lower_bound = stats['solve']['lower_bound']
+                    if self.lower_bound > 0:
+                        gap = self.lower_bound
+                        print(f"Lower bound: {gap:.2f}%")
         if len(res) > 0:
             self.status_solver = StatusSolver.SATISFIED
         else:
@@ -425,7 +507,6 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def compute_costs(self):
         
-        
 
         def extract_clingo_number(val):
             # Case A: It's a Clingo Symbol (has .number attribute)
@@ -455,13 +536,9 @@ class ClingconMultibatchingSolver(SolverDO):
         transportCost_df['transportationCost'] = transportCost_df['transportationCost'].values
         transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(extract_clingo_number)
 
-        merge_cols = ['from', 'to', 'transportresource']
-    
-        for df in [route_df, route_freq_df,transportCost_df]:
-            for col in merge_cols:
-                if col in df.columns:
-                    # Convert to string and strip whitespace to ensure matching
-                    df[col] = df[col].astype(str).str.strip()
+        co2Cost_df = self.all_dataframes["transportCO2"]
+        co2Cost_df['CO2'] = co2Cost_df['CO2'].values
+        co2Cost_df['CO2'] = co2Cost_df['CO2'].apply(extract_clingo_number)
 
         merged_df1 = pd.merge(
             route_freq_df, 
@@ -470,16 +547,21 @@ class ClingconMultibatchingSolver(SolverDO):
             how='inner'
         )
 
-        merged_df1['total_transportation_cost-1'] = merged_df1['freq'] * merged_df1['cost']
+        merged_df1['total_transportation_costs'] = merged_df1['freq'] * merged_df1['cost']
 
         merged_df2 = pd.merge(
             merged_df1, 
-            transportCost_df, 
+            co2Cost_df, 
             on=['transportresource'], 
             how='inner'
         )
 
+        merged_df2['total_co2_costs'] = merged_df2['freq'] * merged_df2['CO2'] * merged_df2['distance']
+    
+        transport_costs = merged_df1['total_transportation_costs'].sum()
+        co2_costs = merged_df2['total_co2_costs'].sum()
 
-        merged_df2['total_transportation_cost-2'] = merged_df2['freq'] * merged_df2['transportationCost'] * merged_df2['distance']
-        print(f"Transportation costs", 'transport', merged_df1['total_transportation_cost-1'].sum())
-        print(f"Transportation costs", 'transport', merged_df2['total_transportation_cost-2'].sum())
+        total_costs = transport_costs + co2_costs
+        print("total costs:", total_costs, f"({total_costs:.2e}) [transport: {transport_costs} ({transport_costs:.2e}), emission: {co2_costs}, ({co2_costs:.2e})]") 
+
+        return total_costs

@@ -40,7 +40,7 @@ def script():
 
     problem = parse_problem(harbor_constraint=False, filter_transport_types=True)
     solver = ClingconMultibatchingSolver(problem)
-    solver.set_cap_size_divide(10000)
+    solver.set_cap_size_divide(1)
 
 
     # 2. Initialize the solver
@@ -53,13 +53,21 @@ def script():
     # 4. Retrieve and display results
     solution, fitness = result_storage.get_best_solution_fit()
     if solution == None:
-        print("UNSAT")
+        print("UNSAT") 
     else:
+
         print("Check flows", problem.check_flows(solution))
+        fit = solver.aggreg_from_sol(solution)
+        total_costs = solver.compute_costs()
+        print("total costs considered solution (estimate without frequencies):", fit, f"({fit:.2e})")
+        print("total costs considered solution:", total_costs, f"({total_costs:.2e})")
+
         pack = PackingViaBinPacking(problem)
         pack.init_from_solution(solution)
         res = pack.solve(time_limit_per_link=1)
         sol_ = res.get_best_solution()
+
+        
         print("Evaluate after 2. step", problem.evaluate(sol_), problem.satisfy(sol_))
 
         value = sum(problem.evaluate(sol_).values())
