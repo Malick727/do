@@ -130,9 +130,6 @@ class MultibatchingProblem(Problem):
             coef = value*((1+self.capital_factor)**time-1)
             compound += flow.nb_packing*coef
 
-        print({'transport': transport_cost,
-                'emission': emission_co2,
-                'capital': compound})
         return {'transport': transport_cost,
                 'emission': emission_co2,
                 'capital': compound}

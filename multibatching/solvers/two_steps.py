@@ -43,7 +43,7 @@ class TwoStepMultibatchingSolver(SolverDO):
         sub_brick_flow: SubBrick = args["flow_solver"]
         sub_brick_pack: SubBrick = args["packing_solver"]
 
-        solver_flow: MultibatchingSolver = sub_brick_flow.cls(problem=self.problem)
+        solver_flow: MultibatchingSolver = sub_brick_flow.cls(problem=self.problem, **sub_brick_flow.kwargs)
         solver_flow.init_model(**sub_brick_flow.kwargs)
         res = solver_flow.solve(**sub_brick_flow.kwargs)
         best_n_flow_solution = args["best_n_flow_solution"]

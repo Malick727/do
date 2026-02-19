@@ -153,7 +153,8 @@ from multibatching.problem import (MultibatchingProblem,
 
 
 
-def parse_json_to_problem(json_data: dict, harbor_constraint = False) -> MultibatchingProblem:
+def parse_json_to_problem(json_data: dict, harbor_constraint = False,
+                          scale_co2: float = 1) -> MultibatchingProblem:
     """
     Parses a JSON dictionary into a MultibatchingProblem object.
     """
@@ -164,7 +165,7 @@ def parse_json_to_problem(json_data: dict, harbor_constraint = False) -> Multiba
             name=data["name"],
             cost=data["cost"],
             speed=data["speed"],
-            emissions=data["co2Emissions"],
+            emissions=data["co2Emissions"]*scale_co2,
             capacity=data["capacity"]//10**4
         ) for _id, data in json_data["transportResources"].items()
     }

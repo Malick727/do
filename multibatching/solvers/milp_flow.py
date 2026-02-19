@@ -11,6 +11,7 @@ from discrete_optimization.binpack.solvers.cpsat import ModelingBinPack
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from discrete_optimization.generic_tools.do_problem import Solution
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver, ParametersMilp
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.generic_tools.do_solver import WarmstartMixin
@@ -43,11 +44,14 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
     """
 
     problem: MultibatchingProblem
+    hyperparameters = [CategoricalHyperparameter(name="add_lb_constraint_nb_trips",
+                                                 choices=[True, False], default=False)]
 
     def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
         super().__init__(problem, **kwargs)
         self.variables: Dict[str, Any] = {}
         self.single_batching: bool = False
+        print(kwargs)
         self.scaling_factor = kwargs.get("scaling_factor", 1000)
 
     def init_model(self, single_batching: bool = False, **kwargs: Any) -> None:
@@ -55,6 +59,7 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
         Initializes the Gurobi model by dispatching to the appropriate
         model-building method based on the `single_batching` flag.
         """
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
         self.single_batching = single_batching
         if self.single_batching:
             self._init_model_flows_single_batching(**kwargs)
@@ -62,8 +67,125 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
             self._init_model_flows_multi_batching(**kwargs)
         self.model.update()
 
+    def precompute_valid_links(self, tolerance=0.1):
+        """
+        Robust Heuristic: Identifies which transport links are relevant for each product.
+
+        It builds a specific graph G_p for each product P, containing only
+        the TransportLinks compatible with P (i.e. link.transport_type in p.valid_transports).
+
+        A link (u, v) is relevant for product P if there exists ANY pair of
+        (Source s, Sink d) for P such that:
+           dist_p(s, u) + link_len(u, v) + dist_p(v, d) <= (1 + tolerance) * dist_p(s, d)
+        """
+        import networkx as nx
+
+        valid_links_per_product = defaultdict(set)
+
+        for p in self.problem.products:
+            # 1. Identify Producers and Consumers for this specific product
+            sources = [l.id for l in self.problem.locations if l.net_supply.get(p, 0) > 1e-6]
+            sinks = [l.id for l in self.problem.locations if l.net_supply.get(p, 0) < -1e-6]
+
+            if not sources or not sinks:
+                continue
+
+            # 2. Build the Product-Specific Graph G_p
+            # Only include links where the transport type is allowed for this product
+            G_p = nx.DiGraph()
+
+            # We also map (u, v) -> list of (link_index, weight)
+            # because there might be multiple transport modes between u and v (e.g. Truck vs Train)
+            # and we need to check them individually.
+            edges_to_indices = defaultdict(list)
+
+            for i, tl in enumerate(self.problem.transport_links):
+                # KEY CHECK: Is this transport type valid for this product?
+                # Also check capacity constraints if relevant (size <= capacity)
+                if (tl.transport_type in p.valid_transports and
+                        p.size <= tl.transport_type.capacity):
+
+                    u, v = tl.location_l1.id, tl.location_l2.id
+                    w = 1 # tl.distance
+
+                    # For NetworkX, we usually want the *best* weight between u and v
+                    # if we just want shortest path distance.
+                    # But we must store all parallel edges to evaluate them later.
+                    edges_to_indices[(u, v)].append((i, w))
+
+                    # Update graph with the shortest edge between u and v found so far
+                    if G_p.has_edge(u, v):
+                        if w < G_p[u][v]['weight']:
+                            G_p[u][v]['weight'] = w
+                    else:
+                        G_p.add_edge(u, v, weight=w)
+
+            # 3. Compute All-Pairs Shortest Paths on G_p
+            try:
+                # This gives the shortest path distance matrix for valid moves only
+                path_lengths = dict(nx.all_pairs_dijkstra_path_length(G_p, weight='weight'))
+            except nx.NetworkXNoPath:
+                continue  # Disconnected graph for this product
+
+            # 4. Filter Links
+            # We iterate over all physically existing links again, but only check valid ones
+            for (u, v), link_list in edges_to_indices.items():
+
+                # Pre-check: Can any source reach u?
+                valid_sources = [s for s in sources if s in path_lengths and u in path_lengths[s]]
+                if not valid_sources:
+                    continue
+
+                # Pre-check: Can v reach any sink?
+                if v not in path_lengths:
+                    continue
+                valid_sinks = [d for d in sinks if d in path_lengths[v]]
+                if not valid_sinks:
+                    continue
+
+                # Check each specific transport mode between u and v
+                for (index_tl, w) in link_list:
+                    is_useful = False
+
+                    for s in valid_sources:
+                        dist_s_u = path_lengths[s][u]
+
+                        for d in valid_sinks:
+                            if d not in path_lengths[s]:
+                                continue  # Should not happen if graph is connected, but safety check
+
+                            dist_s_d_opt = path_lengths[s][d]
+                            dist_v_d = path_lengths[v][d]
+
+                            # Check Path Quality
+                            path_via_link = dist_s_u + w + dist_v_d
+
+                            # Relaxed triangle inequality
+                            if path_via_link <= dist_s_d_opt * (1.0 + tolerance) + 1e-5:
+                                is_useful = True
+                                break
+
+                        if is_useful: break
+
+                    if is_useful:
+                        valid_links_per_product[p.id].add(index_tl)
+
+        return valid_links_per_product
+
+
     def _init_model_flows_multi_batching(self, **kwargs: Any) -> None:
         """Builds the standard flow model where multiple products can share a transport."""
+        use_shortest_path = kwargs.get("restrict_to_shortest_paths", False)
+        sp_tolerance = kwargs.get("shortest_path_tolerance", 0.0)  # 0.0 = Strict, 0.2 = +20% length allowed
+
+        # Option B: No incoming flow at producers
+        no_incoming_at_source = kwargs.get("prevent_incoming_at_source", False)
+
+        valid_links_map = None
+        if use_shortest_path:
+            logger.info(f"Computing valid links (Shortest Path Heuristic, tol={sp_tolerance})...")
+            valid_links_map = self.precompute_valid_links(tolerance=sp_tolerance)
+
         logger.info("Initializing Gurobi model (Multi-Batching Flow)...")
         #env = gurobipy.Env()
         model = gurobipy.Model("multibatching-flow") #, env=env)
@@ -76,8 +198,8 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
             i: model.addVar(vtype=gurobipy.GRB.INTEGER, name=f"nb_trips_{i}")
             for i in range(self.problem.nb_transport_links)
         }
-        for i in nb_trips:
-            nb_trips[i].BranchPriority = 20
+        #for i in nb_trips:
+        #    nb_trips[i].BranchPriority = 20
 
         flows = {
             i: {
@@ -87,13 +209,21 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
                     name=f"flow_{i}_{p_idx}",
                 )
                 for p_idx, p in enumerate(self.problem.products)
-                if tl.transport_type in p.valid_transports and tl.transport_type.capacity > p.size
+                if (
+                    # 1. Transport Compatibility & Capacity
+                        tl.transport_type in p.valid_transports
+                        and tl.transport_type.capacity > p.size
+                        # 2. Heuristic A: Restrict to Valid Paths (Shortest Path logic)
+                        and (valid_links_map is None or i in valid_links_map.get(p.id, set()))
+                        # 3. Heuristic B: Prevent Incoming Flow at Producers (No U-turns to factory)
+                        and (not no_incoming_at_source or tl.location_l2.net_supply.get(p, 0) <= 1e-6)
+                )
             }
             for i, tl in enumerate(self.problem.transport_links)
         }
-        for i in flows:
-            for p in flows[i]:
-                flows[i][p].BranchPriority = 30
+        #for i in flows:
+        #    for p in flows[i]:
+        #        flows[i][p].BranchPriority = 30
 
         # --- Constraints ---
         # Capacity Constraint
@@ -119,11 +249,26 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
                     if tl.location_l1 == loc and p_idx in flows[i]
                 )
                 model.addLConstr(in_flow + loc.net_supply.get(p, 0) == out_flow)
-
+        if kwargs["add_lb_constraint_nb_trips"]:
+            self.add_advanced_capacity_constraints(model=model,
+                                                   flows_variables=flows,
+                                                   nb_trips_per_link=nb_trips,
+                                                   solver_type="gurobi",
+                                                   max_k=10)
+            #self.add_global_flow_limit_constraints(model=model,
+            #                                       flows_variables=flows,
+            #                                       solver_type="gurobi",
+            #                                       factor=2)
+            #self.add_limit_active_links_constraints(model=model,
+            #                                        flows_variables=flows,
+            #                                        solver_type="gurobi",
+            #                                        factor=3)
+            model.update()
         # --- Objective ---
         self._set_objective(model, nb_trips, flows)
 
         self.model = model
+
         self.variables = {"nb_trips": nb_trips, "flows": flows}
 
     def _init_model_flows_single_batching(self, **kwargs: Any) -> None:
@@ -179,8 +324,170 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
         self.model = model
         self.variables = {"nb_trips": nb_trips, "flows": flows, "nb_trips_per_product": nb_trips_per_product}
 
+    def add_advanced_capacity_constraints(self, model,
+                                          flows_variables,
+                                          nb_trips_per_link,
+                                          solver_type="gurobi",
+                                          max_k=30):
+        """
+        Adds generalized lower bound constraints on the number of trips.
+        For each k in [2..max_k], we consider items with size > Capacity/k.
+        Since at most k-1 such items fit in one vehicle, we add the cut:
+            (k-1) * NbTrips >= Sum(Flows of these items)
+        """
+        # Select summation function based on solver
+        if solver_type == "gurobi":
+            import gurobipy
+            sum_func = gurobipy.quicksum
+        else:
+            sum_func = sum
+
+        for index_tl in range(self.problem.nb_transport_links):
+            if index_tl not in nb_trips_per_link:
+                continue
+
+            tl = self.problem.transport_links[index_tl]
+            capacity = tl.transport_type.capacity
+            if capacity <= 0:
+                continue
+
+            nb_trips_var = nb_trips_per_link[index_tl]
+            current_flow_vars = flows_variables[index_tl]
+
+            # Iterate k from 2 up to max_k (e.g., items > C/2, > C/3, ..., > C/10)
+            for k in range(2, max_k + 1):
+                relevant_flows = []
+
+                for index_product, flow_var in current_flow_vars.items():
+                    product = self.problem.products[index_product]
+                    # Check condition: size > Capacity / k  <==>  size * k > Capacity
+                    if product.size * k > capacity:
+                        relevant_flows.append(flow_var)
+
+                if relevant_flows:
+                    # Constraint: (k-1) * NbTrips >= Sum(Relevant Flows)
+                    lhs = (k - 1) * nb_trips_var
+                    rhs = sum_func(relevant_flows)
+
+                    if solver_type == "gurobi":
+                        model.addLConstr(lhs >= rhs)
+                    else:  # CP-SAT
+                        model.Add(lhs >= rhs)
+
+    def add_limit_active_links_constraints(self, model, flows_variables, solver_type="gurobi", factor=2):
+        """
+        Limits the number of transport links where a given product flows.
+        Limit = factor * (Number of nodes with non-zero supply/demand for that product).
+        This helps pruning the search space by forcing sparser paths (e.g. tree-like).
+        """
+        if factor is None:
+            return
+
+        # Select summation function based on solver
+        if solver_type == "gurobi":
+            import gurobipy
+            sum_func = gurobipy.quicksum
+        else:
+            sum_func = sum
+
+        for index_product in range(self.problem.nb_products):
+            product = self.problem.products[index_product]
+
+            # 1. Count Active Nodes (Source or Sink for this product)
+            # A node is active if it has non-zero net supply/demand
+            nb_active_nodes = 0
+            for loc in self.problem.locations:
+                if abs(loc.net_supply.get(product, 0)) > 1e-6:
+                    nb_active_nodes += 1
+
+            # 2. Calculate Limit
+            # A tree connecting N nodes has N-1 edges.
+            # We use (N * factor) to allow some transshipment/cycles.
+            # We ensure limit is at least nb_active_nodes to prevent infeasibility.
+            limit = int(math.ceil(nb_active_nodes * factor))
+            limit = max(limit, nb_active_nodes)  # Safety bound
+
+            # 3. Create Indicators for Active Links
+            indicators = []
+
+            # Collect all flow vars for this product across all links
+            # flows_variables structure: {link_idx: {prod_idx: var}}
+            for index_tl in flows_variables:
+                if index_product in flows_variables[index_tl]:
+                    flow_var = flows_variables[index_tl][index_product]
+
+                    if solver_type == "gurobi":
+                        # z=1 if flow > 0
+                        z = model.addVar(vtype=gurobipy.GRB.BINARY, name=f"used_{index_tl}_{index_product}")
+                        # Constraint: flow <= Capacity * z
+                        # Using total supply as Big-M for flow bound
+                        M = self.problem.get_total_supply(product)
+                        model.addLConstr(flow_var <= M * z)
+                        indicators.append(z)
+                    else:  # CP-SAT
+                        z = model.NewBoolVar(f"used_{index_tl}_{index_product}")
+                        # If z=0, then flow must be 0. (Equivalent to flow > 0 => z=1)
+                        model.Add(flow_var == 0).OnlyEnforceIf(z.Not())
+                        indicators.append(z)
+
+            # 4. Add Cardinality Constraint
+            if indicators:
+                if solver_type == "gurobi":
+                    model.addLConstr(sum_func(indicators) <= limit, name=f"limit_links_{index_product}")
+                else:
+                    model.Add(sum_func(indicators) <= limit)
+
+    def add_global_flow_limit_constraints(self, model, flows_variables, solver_type="cpsat", factor=2):
+        """
+        Limits the total volume of flow for each product across the entire network.
+        Constraint: Sum(Flows_of_Product_P) <= factor * TotalDemand_of_Product_P
+
+        - A factor of 1.0 implies direct shipments only (shortest path in terms of hops).
+        - A factor of 2.0 implies that, on average, each unit can traverse 2 links (1 transshipment).
+        - This prevents excessive detours without using binary variables.
+        """
+        if factor is None:
+            return
+
+        # Select summation function based on solver
+        if solver_type == "gurobi":
+            import gurobipy
+            sum_func = gurobipy.quicksum
+        else:
+            sum_func = sum
+
+        for index_product in range(self.problem.nb_products):
+            product = self.problem.products[index_product]
+
+            # 1. Compute Total Demand (sum of positive requirements) for this product
+            total_demand = self.problem.get_total_demand(product)
+
+            # If there is no demand, no flow should happen (handled by conservation, but safe to skip)
+            if total_demand <= 0:
+                continue
+
+            # 2. Collect all flow variables for this product across all links
+            product_flows = []
+            for index_tl in flows_variables:
+                if index_product in flows_variables[index_tl]:
+                    product_flows.append(flows_variables[index_tl][index_product])
+
+            if not product_flows:
+                continue
+
+            # 3. Add Constraint
+            # We scale the demand by the factor (e.g., 1.5 * 100 = 150 max flow volume)
+            limit = factor * total_demand
+
+            if solver_type == "gurobi":
+                model.addLConstr(sum_func(product_flows) <= limit, name=f"global_flow_limit_{index_product}")
+            else:
+                # CP-SAT requires integer bounds
+                model.Add(sum_func(product_flows) <= int(limit))
+
     def _set_objective(self, model, nb_trips, flows):
         """Helper function to build and set the objective expression."""
+        print(self.scaling_factor)
         transport_cost = gurobipy.quicksum(
             nb_trips[i] * int(tl.distance * tl.transport_type.cost * self.scaling_factor)
             for i, tl in enumerate(self.problem.transport_links)
@@ -299,6 +606,112 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
         self.variables: Dict[str, Any] = {}
         self.scaling_factor = kwargs.get("scaling_factor", 1)
 
+    def precompute_valid_links(self, tolerance=0.1):
+        """
+        Robust Heuristic: Identifies which transport links are relevant for each product.
+
+        It builds a specific graph G_p for each product P, containing only
+        the TransportLinks compatible with P (i.e. link.transport_type in p.valid_transports).
+
+        A link (u, v) is relevant for product P if there exists ANY pair of
+        (Source s, Sink d) for P such that:
+           dist_p(s, u) + link_len(u, v) + dist_p(v, d) <= (1 + tolerance) * dist_p(s, d)
+        """
+        import networkx as nx
+
+        valid_links_per_product = defaultdict(set)
+
+        for p in self.problem.products:
+            # 1. Identify Producers and Consumers for this specific product
+            sources = [l.id for l in self.problem.locations if l.net_supply.get(p, 0) > 1e-6]
+            sinks = [l.id for l in self.problem.locations if l.net_supply.get(p, 0) < -1e-6]
+
+            if not sources or not sinks:
+                continue
+
+            # 2. Build the Product-Specific Graph G_p
+            # Only include links where the transport type is allowed for this product
+            G_p = nx.DiGraph()
+
+            # We also map (u, v) -> list of (link_index, weight)
+            # because there might be multiple transport modes between u and v (e.g. Truck vs Train)
+            # and we need to check them individually.
+            edges_to_indices = defaultdict(list)
+
+            for i, tl in enumerate(self.problem.transport_links):
+                # KEY CHECK: Is this transport type valid for this product?
+                # Also check capacity constraints if relevant (size <= capacity)
+                if (tl.transport_type in p.valid_transports and
+                        p.size <= tl.transport_type.capacity):
+
+                    u, v = tl.location_l1.id, tl.location_l2.id
+                    w = 1 # tl.distance
+
+                    # For NetworkX, we usually want the *best* weight between u and v
+                    # if we just want shortest path distance.
+                    # But we must store all parallel edges to evaluate them later.
+                    edges_to_indices[(u, v)].append((i, w))
+
+                    # Update graph with the shortest edge between u and v found so far
+                    if G_p.has_edge(u, v):
+                        if w < G_p[u][v]['weight']:
+                            G_p[u][v]['weight'] = w
+                    else:
+                        G_p.add_edge(u, v, weight=w)
+
+            # 3. Compute All-Pairs Shortest Paths on G_p
+            try:
+                # This gives the shortest path distance matrix for valid moves only
+                path_lengths = dict(nx.all_pairs_dijkstra_path_length(G_p, weight='weight'))
+            except nx.NetworkXNoPath:
+                continue  # Disconnected graph for this product
+
+            # 4. Filter Links
+            # We iterate over all physically existing links again, but only check valid ones
+            for (u, v), link_list in edges_to_indices.items():
+
+                # Pre-check: Can any source reach u?
+                valid_sources = [s for s in sources if s in path_lengths and u in path_lengths[s]]
+                if not valid_sources:
+                    continue
+
+                # Pre-check: Can v reach any sink?
+                if v not in path_lengths:
+                    continue
+                valid_sinks = [d for d in sinks if d in path_lengths[v]]
+                if not valid_sinks:
+                    continue
+
+                # Check each specific transport mode between u and v
+                for (index_tl, w) in link_list:
+                    is_useful = False
+
+                    for s in valid_sources:
+                        dist_s_u = path_lengths[s][u]
+
+                        for d in valid_sinks:
+                            if d not in path_lengths[s]:
+                                continue  # Should not happen if graph is connected, but safety check
+
+                            dist_s_d_opt = path_lengths[s][d]
+                            dist_v_d = path_lengths[v][d]
+
+                            # Check Path Quality
+                            path_via_link = dist_s_u + w + dist_v_d
+
+                            # Relaxed triangle inequality
+                            if path_via_link <= dist_s_d_opt * (1.0 + tolerance) + 1e-5:
+                                is_useful = True
+                                break
+
+                        if is_useful: break
+
+                    if is_useful:
+                        valid_links_per_product[p.id].add(index_tl)
+
+        return valid_links_per_product
+
+
     def init_model(self, max_trips_per_link: int = 15, **kwargs: Any) -> None:
         """
         Builds the Gurobi model based on a detailed, per-trip ("unit flow") formulation.
@@ -309,6 +722,14 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
                                       to define the variable space.
         """
         logger.info("Initializing Gurobi model (Unit Flow)...")
+        use_shortest_path = kwargs.get("restrict_to_shortest_paths", False)
+        sp_tolerance = kwargs.get("shortest_path_tolerance", 0.0)  # 0.0 = Strict, 0.2 = +20% length allowed
+        # Option B: No incoming flow at producers
+        no_incoming_at_source = kwargs.get("prevent_incoming_at_source", False)
+        valid_links_map = None
+        if use_shortest_path:
+            logger.info(f"Computing valid links (Shortest Path Heuristic, tol={sp_tolerance})...")
+            valid_links_map = self.precompute_valid_links(tolerance=sp_tolerance)
         model = gurobipy.Model("multibatching-unit-flow")
         sol: MultibatchingSolution = kwargs.get("solution", None)
         delta: int = kwargs.get("delta_to_solution", 1)
@@ -337,7 +758,18 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
                         ub=int(tl.transport_type.capacity / p.size) if p.size > 0 else 0
                     )
                     for p_idx, p in enumerate(self.problem.products)
-                    if tl.transport_type in p.valid_transports and tl.transport_type.capacity > p.size
+                    if (
+                        # 1. Transport Compatibility & Capacity
+                            tl.transport_type in p.valid_transports
+                            and tl.transport_type.capacity > p.size
+                            # 2. Heuristic A: Restrict to Valid Paths (Shortest Path logic)
+                            and (valid_links_map is None or i in valid_links_map.get(p.id, set()))
+                            # 3. Heuristic B: Prevent Incoming Flow at Producers (No U-turns to factory)
+                            and (not no_incoming_at_source or tl.location_l2.net_supply.get(p, 0) <= 1e-6)
+                    )
+
+
+
                 } for j in range(max_nb_trip_per_transport_link[i])
             } for i, tl in enumerate(self.problem.transport_links)
         }

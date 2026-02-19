@@ -1,12 +1,8 @@
 import os
-
-from discrete_optimization.generic_tools.cp_tools import CPSolverName
-
-os.environ["DO_SKIP_MZN_CHECK"] = "1"
 from discrete_optimization.datasets import get_data_home
 import logging
 import matplotlib.pyplot as plt
-from discrete_optimization.rcpsp.rcpsp_parser import get_data_available, parse_file
+from discrete_optimization.rcpsp.parser import get_data_available, parse_file
 from discrete_optimization.rcpsp.rcpsp_solvers import CP_RCPSP_MZN, ParametersCP
 from discrete_optimization.rcpsp.solver.cpsat_solver import CPSatRCPSPSolver
 from discrete_optimization.rcpsp.rcpsp_utils import plot_ressource_view, plot_task_gantt
