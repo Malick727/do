@@ -1,4 +1,6 @@
 import os
+from asyncio import timeout
+
 import sys
 
 this_folder = os.path.abspath(os.path.dirname(__file__))
@@ -41,27 +43,27 @@ def subbricks_packing(timeout):
 
 def subbricks_flow(timeout):
     c = dict(networkx=SubBrick(cls=NetxMultibatchingSolver, kwargs={}),
-             cpsat=SubBrick(cls=CpsatMultibatchingSolver, kwargs={"modeling": ModelingMultiBatch.FLOW,
+             cp=SubBrick(cls=CpsatMultibatchingSolver, kwargs={"modeling": ModelingMultiBatch.FLOW,
                                                                   "time_limit": int(0.75 * timeout),
                                                                   "parameters_cp": p}),
              milp=SubBrick(cls=GurobiMultibatchingSolver, kwargs={"time_limit": int(0.75 * timeout)}),
-             cpsat_shortest=SubBrick(cls=CpsatMultibatchingSolver, kwargs={"modeling": ModelingMultiBatch.FLOW,
+             cp_short=SubBrick(cls=CpsatMultibatchingSolver, kwargs={"modeling": ModelingMultiBatch.FLOW,
                                                                            "time_limit": int(0.75*timeout),
                                                                            "restrict_to_shortest_paths": True,
                                                                            "shortest_path_tolerance": 1.2,
                                                                            "parameters_cp": p}),
-             milp_shortest=SubBrick(cls=GurobiMultibatchingSolver, kwargs={"time_limit": int(0.75*timeout),
+             milp_short=SubBrick(cls=GurobiMultibatchingSolver, kwargs={"time_limit": int(0.75*timeout),
                                                                           "restrict_to_shortest_paths": True,
                                                                           "shortest_path_tolerance": 1.2}),
              asp=SubBrick(cls=ClingconMultibatchingSolver, kwargs={"time_limit": int(0.75*timeout)}))
     return c
 
 def subbricks_third_step(timeout):
-    return dict(cpsat_no_delta = SubBrick(CpsatMultibatchingSolver, dict(modeling=ModelingMultiBatch.UNIT_FLOW,
+    return dict(cp_no_delta = SubBrick(CpsatMultibatchingSolver, dict(modeling=ModelingMultiBatch.UNIT_FLOW,
                                                              time_limit=int(timeout),
                                                              ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
                                                              parameters_cp=p)),
-                cpsat_delta = SubBrick(CpsatMultibatchingSolver,
+                cp_delta = SubBrick(CpsatMultibatchingSolver,
                                        dict(modeling=ModelingMultiBatch.UNIT_FLOW,
                                             time_limit=int(timeout),
                                             ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
@@ -106,7 +108,7 @@ def config_3steps(timeout):
 
     configs = {}
 
-    for flow in ["cpsat", "milp", "cpsat_shortest", "milp_shortest"]:
+    for flow in ["cp", "milp", "cp_short", "milp_short"]:
         for third_step in c_3steps:
             configs[flow+"-greedy-"+third_step] = SolverConfig(cls=SequentialMetasolver,
                                                                kwargs=dict(list_subbricks=c[(flow, "greedy")]))
@@ -120,3 +122,8 @@ def all_configs(timeout):
     c.update(config_2step(timeout))
     c.update(config_3steps(timeout))
     return c
+
+if __name__ == "__main__":
+    configs = all_configs(10)
+    print(len(configs))
+    print(configs.keys())

@@ -18,6 +18,16 @@ def main():
                             scale_co2=1 / 1000000)
     overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
     solver_configs = all_configs(timeout=500)
+    sc = {}
+    for key in solver_configs:
+        if isinstance(key, tuple):
+            sc[key[0]+'-'+key[1]] = solver_configs[key]
+        else:
+            sc[str(key)] = solver_configs[key]
+    for key in sc:
+        if len(key) > 32:
+            print(key, len(key))
+    solver_configs = sc
     database_filepath = f"{study_name}.h5"
     if overwrite:
         try:
@@ -25,6 +35,7 @@ def main():
         except FileNotFoundError:
             pass
     import gurobipy as gp
+
     # loop over instances x configs
     for k in range(5): # 5 tries
         for config_name, solver_config in solver_configs.items():
@@ -47,9 +58,10 @@ def main():
                     callbacks=[stats_cb],
                     **solver_config.kwargs)
             # get metrics and solver status
-            sol = result_store[-1][0]
-            print("satisfy", problem.satisfy(sol))
-            print(problem.evaluate(sol))
+            if len(result_store) > 0:
+                sol = result_store[-1][0]
+                print("satisfy", problem.satisfy(sol))
+                print(problem.evaluate(sol))
             status = solver.status_solver
             metrics = stats_cb.get_df_metrics()
             reason = ""
@@ -61,7 +73,7 @@ def main():
                 xp = Experiment.from_solver_config(
                     xp_id=xp_id,
                     instance="main_instance",
-                    config_name=config_name,
+                    config_name=str(config_name),
                     solver_config=SolverConfig(solver_config.cls,
                                                config_name),
                     metrics=metrics,
