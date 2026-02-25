@@ -24,7 +24,7 @@ def main():
     for k in range(5): # 5 tries
         for config_name, solver_config in solver_configs.items():
             logging.info(f"###### Running config {config_name} ######\n\n")
-            if "milp" in config_name or "gurobi" in config_name:
+            if "milp" in config_name or "gurobi" in config_name or "gurobi" in str(solver_config.cls.__name__).lower():
                 with gp.Env() as env:
                     solver = solver_config.cls(problem, **solver_config.kwargs)
                     solver.init_model(**solver_config.kwargs)
@@ -64,3 +64,6 @@ def main():
                     reason=reason,
                 )
                 database.store(xp)
+
+if __name__ == "__main__":
+    main()

@@ -50,6 +50,29 @@ def subbricks_flow(timeout):
              asp=SubBrick(cls=ClingconMultibatchingSolver, kwargs={"time_limit": int(0.75*timeout)}))
     return c
 
+def subbricks_third_step(timeout):
+    return dict(cpsat_no_delta = SubBrick(CpsatMultibatchingSolver, dict(modeling=ModelingMultiBatch.UNIT_FLOW,
+                                                             time_limit=int(timeout),
+                                                             ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
+                                                             parameters_cp=p)),
+                cpsat_delta = SubBrick(CpsatMultibatchingSolver,
+                                       dict(modeling=ModelingMultiBatch.UNIT_FLOW,
+                                            time_limit=int(timeout),
+                                            ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
+                                            parameters_cp=p,
+                                            delta_to_solution=2),
+                                       kwargs_from_solution={"solution": lambda sol: sol}),
+                milp_no_delta = SubBrick(GurobiMultibatchingSolverUnitFlow,
+                                         dict(time_limit=int(timeout))),
+                milp_delta = SubBrick(GurobiMultibatchingSolverUnitFlow,
+                         dict(time_limit=int(timeout),
+                              delta_to_solution=2),
+                         kwargs_from_solution={"solution": lambda sol: sol}
+                         )
+    )
+
+
+
 def configs_direct_solve(timeout):
     c = dict()
     c["flow-milp"] = SolverConfig(GurobiMultibatchingSolverUnitFlow, {"time_limit": timeout})
@@ -73,92 +96,14 @@ def config_2step(timeout):
 
 def config_3steps(timeout):
     c = config_2step(timeout//2)
+    c_3steps = subbricks_third_step(timeout//2)
+
     configs = {}
-    configs[("cpsat-greedy-cpsat-nodelta")] = SolverConfig(cls=SequentialMetasolver,
-                                            kwargs=dict(list_subbricks=[
-                                                c[("cpsat", "greedy")],
-                                                SubBrick(CpsatMultibatchingSolver,
-                                                         dict(modeling=ModelingMultiBatch.UNIT_FLOW,
-                                                              time_limit=int(timeout//2),
-                                                              ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
-                                                              parameters_cp=p),
-                                                         )])
-                                            )
-    configs[("cpsat-greedy-cpsat-2delta")] = SolverConfig(cls=SequentialMetasolver,
-                 kwargs=dict(list_subbricks=[
-                     c[("cpsat", "greedy")],
-                     SubBrick(CpsatMultibatchingSolver,
-                              dict(modeling=ModelingMultiBatch.UNIT_FLOW,
-                                   time_limit=int(timeout//2),
-                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
-                                   parameters_cp=p,
-                                   delta_to_solution=2),
-                              kwargs_from_solution={"solution": lambda sol: sol}
-                              )])
-                 )
 
-    configs[("cpsat-greedy-milp-nodelta")] = SolverConfig(cls=SequentialMetasolver,
-                 kwargs=dict(list_subbricks=[
-                     c[("cpsat", "greedy")],
-                     SubBrick(GurobiMultibatchingSolverUnitFlow,
-                              dict(time_limit=int(timeout // 2)),
-                              )
-                 ])
-                 )
-
-
-    configs[("cpsat-greedy-milp-2delta")] = SolverConfig(cls=SequentialMetasolver,
-                 kwargs=dict(list_subbricks=[
-                     c[("cpsat", "greedy")],
-                     SubBrick(GurobiMultibatchingSolverUnitFlow,
-                              dict(time_limit=int(timeout // 2),
-                                   delta_to_solution=2),
-                              kwargs_from_solution={"solution": lambda sol: sol}
-                              )
-                 ])
-                 )
-
-    configs[("milp-greedy-cpsat-nodelta")] = SolverConfig(cls=SequentialMetasolver,
-                                                     kwargs=dict(list_subbricks=[
-                                                         c[("milp", "greedy")],
-                                                         SubBrick(CpsatMultibatchingSolver,
-                                                                  dict(modeling=ModelingMultiBatch.UNIT_FLOW,
-                                                                       time_limit=int(timeout // 2),
-                                                                       ortools_cpsat_solver_kwargs=dict(
-                                                                           log_search_progress=False),
-                                                                       parameters_cp=p),
-                                                                  kwargs_from_solution={"solution": lambda sol: sol}
-                                                                  )])
-                                                     )
-    configs[("milp-greedy-cpsat-2delta")] = SolverConfig(cls=SequentialMetasolver,
-                                                    kwargs=dict(list_subbricks=[
-                                                        c[("cpsat", "greedy")],
-                                                        SubBrick(CpsatMultibatchingSolver,
-                                                                 dict(modeling=ModelingMultiBatch.UNIT_FLOW,
-                                                                      time_limit=int(timeout // 2),
-                                                                      ortools_cpsat_solver_kwargs=dict(
-                                                                          log_search_progress=False),
-                                                                      parameters_cp=p,
-                                                                      delta_to_solution=2),
-                                                                 kwargs_from_solution={"solution": lambda sol: sol}
-                                                                 )])
-                                                    )
-    configs[("milp-greedy-milp-nodelta")] = SolverConfig(cls=SequentialMetasolver,
-                                                          kwargs=dict(list_subbricks=[
-                                                              c[("milp", "greedy")],
-                                                              SubBrick(GurobiMultibatchingSolverUnitFlow,
-                                                                       dict(time_limit=int(timeout // 2)))]
-                                                          ))
-    configs[("milp-greedy-milp-2delta")] = SolverConfig(cls=SequentialMetasolver,
-                                                         kwargs=dict(list_subbricks=[
-                                                             c[("cpsat", "greedy")],
-                                                             SubBrick(GurobiMultibatchingSolverUnitFlow,
-                                                                      dict(time_limit=int(timeout // 2),
-                                                                           delta_to_solution=2),
-                                                                      kwargs_from_solution={
-                                                                          "solution": lambda sol: sol}
-                                                                      )])
-                                                         )
+    for flow in ["cpsat", "milp", "cpsat_shortest", "milp_shortest"]:
+        for third_step in c_3steps:
+            configs[flow+"-greedy-"+third_step] = SolverConfig(cls=SequentialMetasolver,
+                                                               kwargs=dict(list_subbricks=c[(flow, "greedy")]))
     return configs
 
 
@@ -168,3 +113,4 @@ def all_configs(timeout):
     c.update(configs_direct_solve(timeout))
     c.update(config_2step(timeout))
     c.update(config_3steps(timeout))
+    return c
