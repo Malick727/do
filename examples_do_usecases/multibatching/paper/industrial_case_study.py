@@ -2,6 +2,7 @@ import os
 import logging
 import sys
 
+from examples_do_usecases.multibatching.paper.callback import StatsCallbackForExpe
 
 this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../../"))
@@ -17,7 +18,7 @@ def main():
     problem = parse_problem(False, False,
                             scale_co2=1 / 1000000)
     overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-    solver_configs = all_configs(timeout=500)
+    solver_configs = all_configs(timeout=100)
     sc = {}
     for key in solver_configs:
         if isinstance(key, tuple):
@@ -45,7 +46,7 @@ def main():
                     solver = solver_config.cls(problem, **solver_config.kwargs)
                     solver.init_model(**solver_config.kwargs)
                     # solve
-                    stats_cb = BasicStatsCallback()
+                    stats_cb = StatsCallbackForExpe()
                     result_store = solver.solve(
                         callbacks=[stats_cb],
                         **solver_config.kwargs)
@@ -53,7 +54,7 @@ def main():
                 solver = solver_config.cls(problem, **solver_config.kwargs)
                 solver.init_model(**solver_config.kwargs)
                 # solve
-                stats_cb = BasicStatsCallback()
+                stats_cb = StatsCallbackForExpe()
                 result_store = solver.solve(
                     callbacks=[stats_cb],
                     **solver_config.kwargs)
