@@ -33,40 +33,98 @@ class Constraint(object):
         self.sens = sens
         self.rhs = rhs
 
+def pricing_greedy(data):
+
+    found_patterns = []
+    transport_link, duals, branch_cons, forbidden_assignment, max_demand = data
+    
+    # # Use BasePricer helper
+    # capacity, duration, fixed_cost, valid_products = self.prepare_subproblem_data(route)
+    
+    # if not valid_products:
+    #     continue
+
+    candidates = []
+    for p, p_size in transport_link['products']:
+        mu = duals[transport_link["id"]][p]
+
+        # Net impact on Reduced Cost (negative is good)
+        net_cost_per_unit = - mu
+        
+        if net_cost_per_unit < 0:
+            candidates.append((p, net_cost_per_unit, p_size))
+
+    # Sort by Efficiency: Most negative cost per unit of size
+    candidates.sort(key=lambda x: x[1] / x[2])
+
+    current_load = 0.0
+    pattern = {}
+    
+    for prod, cost_impact, size in candidates:
+        if current_load + size <= capacity:
+            qty = int((capacity - current_load) // size)
+            if qty > 0:
+                pattern[prod] = float(qty)
+                current_load += qty * size
+
+    # if pattern:
+    #     variable_part_rc = sum(
+    #         qty * (CostCalculator.calculate_interest(p.value, duration, self.settings) 
+    #                 - duals.get((route.transport_link, p), 0))
+    #         for p, qty in pattern.items()
+    #     )
+        
+    #     total_rc = fixed_cost + variable_part_rc
+        
+    #     # Check Result using settings.epsilon
+    #     if total_rc < -self.settings.epsilon:
+    #         found_patterns.append({
+    #             'route': route,
+    #             'pattern': pattern,
+    #             'duration': duration,
+    #             'fixed_cost': fixed_cost
+    #         })
+
+    return found_patterns
+
 def pricing_worker(data):
     """
     data is a tuple: (link_info, dual_values, branching_constraints, forbidden)
     """
-    link, duals, branch_cons, forbidden = data
+    transport_link, duals, branch_cons, forbidden_assignment, max_demand = data
     
     model = CpModel()
     y = {}
     # Use IDs or local dicts, don't pass Gurobi objects here
-    for p_id, p_size in link['products']:
-        y[p_id] = model.NewIntVar(0, int(link['capacity'] // p_size), f"y_{p_id}")
+    for p, p_size in transport_link['products']:
+        y[p] = model.NewIntVar(0, int(transport_link['capacity'] // p_size), f"y_{p}")
         # Apply branching constraints from the passed dict
-        for c in branch_cons.get(p_id, []):
-            if c['sens'] == "<=":
-                model.Add(y[p_id] <= c['rhs'])
+        for c in branch_cons[p]:
+            if c.sens == "<=":
+                model.Add(y[p] <= c.rhs)
             else:
-                model.Add(y[p_id] >= c['rhs'])
+                model.Add(y[p] >= c.rhs)
+        model.add(y[p]<=max_demand[p])
 
-    # Add Knapsack constraint
-    model.Add(sum(y[p_id] * p_size for p_id, p_size in link['products']) <= int(link['capacity']))
+    model.add(sum(y[p] * p_size for p, p_size in transport_link['products']) <= int(transport_link['capacity']))
+
+    if len(forbidden_assignment)>0:
+        model.add_forbidden_assignments([y[p] for p,_ in transport_link['products']], forbidden_assignment)
+    
     
     # Define Objective: (Cost + Emissions) * Dist - Sum(y * dual_diff)
     obj_terms = []
-    for p_id, _ in link['products']:
-        dual_diff = duals[link['l2']][p_id] - duals[link['l1']][p_id]
-        obj_terms.append(y[p_id] * int(dual_diff * 10000)) # Scale if using CP-SAT (ints only)
+    for p, _ in transport_link['products']:
+        dual_diff = duals[transport_link['l2']][p] - duals[transport_link['l1']][p]
+        obj_terms.append(y[p] * int(dual_diff * 10000)) # Scale if using CP-SAT (ints only)
 
-    model.Minimize(link['base_cost'] * 10000 - sum(obj_terms))
+    model.Minimize(transport_link['base_cost'] * 10000 - sum(obj_terms))
     
     solver = CpSolver()
     status = solver.Solve(model)
     
     if status in [4, 2]: # Optimal or Feasible
-        return {p_id: solver.Value(y[p_id]) for p_id, _ in link['products']}, solver.ObjectiveValue() / 10000
+        return {p: solver.Value(y[p]) for p, _ in transport_link['products']}, solver.ObjectiveValue() / 10000
     return None, 0
 
 
@@ -86,8 +144,10 @@ class ColumnGenerationSolver(MultibatchingSolver):
         self.coef_cuts = {}
         self.demand_tot = {}
         self.branching_constraints: dict[TransportLink, dict[Product, list[Constraint]]] = {}
+        self.transport_links_active = {}
 
-    def init_model(self, **kwargs):
+
+    def init_model(self, init_solution = None, flows_on_demand=False, **kwargs):
         model = gp.Model()
         max_frequency = 10 #Maximum frequency for each transport link, identical for all at the moment
 
@@ -103,6 +163,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
                 self.dual_values[l][p] = 0        
             transport_links_out[l.id]=[]
             transport_links_in[l.id] = []
+
 
         for tl in self.problem.transport_links:
             self.forbidden_assignment[tl] = []
@@ -142,14 +203,17 @@ class ColumnGenerationSolver(MultibatchingSolver):
                 self.branching_constraints[tl][p] = []
 
         # Batch initialization
+        
         batches = {}
         batches_tt = {}
+
         for tt in self.problem.transport_types:
             batches_tt[tt] = []
             for p1 in self.problem.products:
                 if tt in p1.valid_transports:
                     batch_init = {}
-                    batch_init[p1] = tt.capacity//p1.size
+                    # batch_init[p1] = tt.capacity//p1.size
+                    batch_init[p1] = 0
                     for p2 in self.problem.products:
                         if tt in p2.valid_transports:
                             if p1 != p2:
@@ -157,7 +221,26 @@ class ColumnGenerationSolver(MultibatchingSolver):
                     batches_tt[tt].append(batch_init)
         for tl in self.problem.transport_links:
              batches[tl] = copy.copy(batches_tt[tl.transport_type])
+
+        list_tl = []
+
+        if init_solution != None:
+            for packing_transport in init_solution.list_flows:
+                tl_id = packing_transport.transport_link.id
+                tl = self.problem.transport_links_id_to_object[tl_id]
+                list_tl.append(tl)
+                new_batch = {}
+                for p, nb in packing_transport.product_packing.items():
+                    new_batch[p] = nb
+                for p in self.products_on_links[tl]:
+                    if p in new_batch.keys():
+                        continue
+                    new_batch[p] = 0
+                batches[tl].append(new_batch)
+
         self.batches = batches
+        for tl in list_tl:
+            print(len(self.batches[tl]))
 
 
         # for transport_link in self.problem.transport_links:
@@ -175,15 +258,24 @@ class ColumnGenerationSolver(MultibatchingSolver):
         
         
         ################################## Decision variable definition
+        y  = {}
+        flow = {}
+        for tl in self.problem.transport_links:
+            y[tl] = {}
+            flow[tl] = {}
+            for p in products_on_links[tl]:
+                y[tl][p] = model.addVar(lb=0, name=f"y_{tl.id}_{p}")
+                flow[tl][p] = model.addVar(lb=0, name=f"f_{tl.id}_{p}")
 
 
         # Batch selection per arc
         x={}
         for tl in self.problem.transport_links:
-            x[tl] = {}
-            # type_link = tl.transport_type
-            for b in range(len(self.batches[tl])):
-                x[tl][b] = model.addVar(lb=0, name=f"x_{tl.id}_b{b}")
+                x[tl] = {}
+                # type_link = tl.transport_type
+                for b in range(len(self.batches[tl])):
+                    x[tl][b] = model.addVar(lb=0, name=f"x_{tl.id}_b{b}")
+
 
         self.variables["x"] = x
 
@@ -206,21 +298,21 @@ class ColumnGenerationSolver(MultibatchingSolver):
         for l in self.problem.locations:
             for p in self.products_on_locations[l]:
                 if p in l.net_supply.keys():
-                    
                     demand_p = -l.net_supply[p]
                     if demand_p > 0:
-                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) + s[l][p] ==  demand_p, name=f"demand_{l.id}_p{p.id}")
+                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) + s[l][p] >=  demand_p, name=f"demand_{l.id}_p{p.id}")
                         # model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id]) + s[l][p] ==  demand_p, name=f"demand_{l.id}_p{p.id}")
                         # model.addConstr(s[l][p] <= gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) - demand_p)
                     else:
-                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) - s[l][p] ==  demand_p, name=f"demand_{l.id}_p{p.id}")
+                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) - s[l][p] <=  demand_p, name=f"demand_{l.id}_p{p.id}")
                         # model.addConstr(s[l][p] <= gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) + demand_p)
                 else:
-                    model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) ==  0, name=f"demand_{l.id}_p{p.id}")
-                    # model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl]) == 0, name=f"demand_{l.id}_p{p.id}")
-
-                    # model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) == 0, name=f"null_demand_out_{l.id}_p{p.id}")
+                        model.addConstr(gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_in[l.id] if p in self.products_on_links[tl])-gp.quicksum(gp.quicksum(x[tl][b]*self.batches[tl][b][p] for b in range(len(self.batches[tl]))) for tl in transport_links_out[l.id] if p in self.products_on_links[tl]) ==  0, name=f"demand_{l.id}_p{p.id}")
                     
+
+        # for tl in self.problem.transport_links:
+        #     for p in products_on_links[tl]:
+        #         model.addConstr(y[tl][p] - flow[tl][p] >= 0)
 
 
         # for l in self.problem.locations:
@@ -403,12 +495,14 @@ class ColumnGenerationSolver(MultibatchingSolver):
                 },
                 self.dual_values, # Ensure this is a dict of dicts (floats), not Gurobi vars
                 self.branching_constraints[tl], # Helper to convert objects to dicts
-                self.forbidden_assignment[tl]
+                self.forbidden_assignment[tl],
+                self.demand_tot
             ))
 
         # 2. Use the Pool
-        with Pool(processes=10) as pool:
+        with Pool(processes=min(10, len(self.problem.products))) as pool:
             results = pool.map(pricing_worker, payloads)
+            # results = pool.map(pricing_greedy, payloads)
 
         # 3. Process results
         for tl, (col_data, red_cost) in zip(list_links, results):
@@ -494,6 +588,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
             
             if not(optimal):
                 self.addColumns(new_columns)
+                print("Number of new columns :", len(new_columns))
 
         sol = self.get_final_solution()
         # print("nb variables",len(self.rp_model.getVars()))

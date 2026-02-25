@@ -288,6 +288,7 @@ class ColumnGenerationSolver(MultibatchingSolver):
         #     if int(max_missing[p]) >0:
         #         model.add(y[p]<=int(max_missing[p]))
 
+
             
         model.minimize(int((transport_link.transport_type.cost+transport_link.transport_type.emissions)*transport_link.distance)-sum(y[p]*(self.dual_values[transport_link.location_l2][p]-self.dual_values[transport_link.location_l1][p]) for p in self.products_on_links[transport_link]))
         

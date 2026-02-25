@@ -7,7 +7,7 @@ from gurobipy import GRB
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver
 from multibatching.problem import MultibatchingProblem, MultibatchingSolution, PackingTransport, TransportLink
 from multibatching.solvers import MultibatchingSolver
-from multibatching.solvers.column_generation_cp import ColumnGenerationSolver
+from multibatching.solvers.column_generation_cp_parallel import ColumnGenerationSolver
 # from multibatching.solvers.column_generation import ColumnGenerationSolver
 from dataclasses import dataclass
 from numpy.linalg import inv
@@ -51,20 +51,22 @@ class BranchAndPriceSolver(MultibatchingSolver):
 
     problem : MultibatchingProblem
 
-    def __init__(self, problem : MultibatchingProblem, params_objective_function = None, **kwargs):
+    def __init__(self, problem : MultibatchingProblem, init_solution : MultibatchingSolution, params_objective_function = None, **kwargs):
         super().__init__(problem, params_objective_function, **kwargs)
         self.problem = problem
         self.best_value = math.inf #Minimization problem
         self.best_sol = None
+        self.init_solution = init_solution
         self.model = self._create_root_model()
         self.node_depth = 0
         self.max_cut = 1
         self.nb_current_cut = 0
         self.cut_ID = 0
+        
 
     def _create_root_model(self):
         solver = ColumnGenerationSolver(self.problem)
-        solver.init_model()
+        solver.init_model(self.init_solution)
         return solver
     
     def solve(self, **kwargs):
@@ -126,7 +128,7 @@ class BranchAndPriceSolver(MultibatchingSolver):
 
         return integer, fractional_vars, selected_var, frac_value, greater_than_one
     
-    def _compute_rhs_float(self, fractional_vars, tl, p):
+    def _compute_rhs_float(self, fractional_vars, tl, p, var_name):
         rhs = 0
         for v_name, v_value in fractional_vars.items():
             _, tl_str, b = v_name.split("_")
@@ -230,8 +232,8 @@ class BranchAndPriceSolver(MultibatchingSolver):
             print("Cut branch")
             return
         
-        # if self.best_sol != None:
-        #     return
+        if self.best_sol != None:
+            return
         
         integer_sol, fractional_vars, next_var, frac_value, greater_than_one = self._is_sol_integer()
 
@@ -262,10 +264,13 @@ class BranchAndPriceSolver(MultibatchingSolver):
             # self.model.addForbiddenBatch(var_name)
             p_id, rhs = self._get_product_to_constrain(var_name, frac_value)
             _, tl, b = var_name.split("_")
+            b = b.split("b")[1]
 
             for p in self.model.products_on_links[self.problem.transport_links_id_to_object[tl]]:
                 # Get floating part of each variable on the transport link
-                rhs_float = self._compute_rhs_float(fractional_vars, tl, p)
+                rhs_float = frac_value*self.model.batches[self.problem.transport_links_id_to_object[tl]][int(b)][p]
+
+                # rhs_float = self._compute_rhs_float(fractional_vars, tl, p, var_name)
                 self.model.addBatchConstraint(self.problem.transport_links_id_to_object[tl], p, "<=", int(round(rhs_float)))
 
             # self.model.addBatchConstraint(self.problem.transport_links_id_to_object[tl], p_id, "<=", rhs)

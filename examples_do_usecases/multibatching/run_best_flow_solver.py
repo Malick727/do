@@ -1,6 +1,10 @@
 import logging
 
 from discrete_optimization.binpack.solvers.cpsat import CpSatBinPackSolver, ModelingBinPack
+import os, sys
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../")) 
+
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 from discrete_optimization.generic_tools.sequential_metasolver import SequentialMetasolver
 from discrete_optimization.generic_tools.study import SolverConfig
@@ -13,6 +17,9 @@ from examples_do_usecases.multibatching.solve_industrial_use_case import parse_p
 import logging
 logging.basicConfig(level=logging.INFO)
 def run_best():
+import pickle
+
+def run():
     solver_config = SolverConfig(cls=SequentialMetasolver,
                                  kwargs=dict(list_subbricks=[
                                      SubBrick(cls=TwoStepMultibatchingSolver,
@@ -194,6 +201,10 @@ def run_gurobi_unit():
     res = solver.solve(**solver_config.kwargs)
     sol = res[-1][0]
     print(problem.evaluate(sol), problem.satisfy(sol))
+
+
+    with open('examples_do_usecases/multibatching/res_data/best_flow_solver_sol.pickle', 'wb') as handle:
+        pickle.dump(sol, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 if __name__ == "__main__":

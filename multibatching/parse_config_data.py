@@ -175,7 +175,8 @@ def parse_json_to_problem(json_data: dict, harbor_constraint = False,
         _id: Product(
             id=_id,
             name=data["name"],
-            size=data["size"]//10**4,
+            # size=data["size"]//10**4,
+            size=data["size"],
             value=data["value"],
             valid_transports=frozenset(
                 transport_types_map[tr_id] for tr_id in data["validTR"]
@@ -231,16 +232,17 @@ def parse_json_to_problem(json_data: dict, harbor_constraint = False,
         for tr_id, tr_data in data["transportResources"].items():
             transport_type = transport_types_map[tr_id]
             distance = tr_data["distance"]
-            if not(is_harbor) or (transport_type.name in ships) or not(harbor_constraint):
-                transport_links_list.append(
-                    TransportLink(
-                        id = _id+"tr*id"+tr_id,
-                        location_l1=loc1,
-                        location_l2=loc2,
-                        distance=distance,
-                        transport_type=transport_type
-                    )
+            # if not(is_harbor) or (transport_type.name in ships) or not(harbor_constraint):
+            transport_links_list.append(
+                TransportLink(
+                    # id = _id+"tr*id"+tr_id,
+                    id = _id+"tr*id"+tr_id,
+                    location_l1=loc1,
+                    location_l2=loc2,
+                    distance=distance,
+                    transport_type=transport_type
                 )
+            )
 
     # 5. Extract settings
     settings = json_data["settings"]
