@@ -6,10 +6,34 @@ from discrete_optimization.generic_tools.callbacks.stats_retrievers import Basic
 from discrete_optimization.generic_tools.study import Hdf5Database, Experiment, SolverConfig
 from examples_do_usecases.multibatching.paper.configs import all_configs
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
+from multibatching.utils import generate_multibatching_problem
+
 
 def get_artificial_problems():
+    num_locations: int = 6,
+    num_transport_types: int = 2,
+    num_products: int = 2,
+    min_dist: int = 1,
+    max_dist: int = 10,
+    min_capacity: int = 10,
+    max_capacity: int = 20,
+    min_product_size: int = 1,
+    max_product_size: int = 5,
+    min_product_value: int = 100,
+    max_product_value: int = 1000,
+    min_tt_cost: int = 10,
+    max_tt_cost: int = 100,
+    min_tt_speed: float = 0.1,
+    max_tt_speed: float = 1.0,
+    min_tt_emissions: int = 10,
+    max_tt_emissions: int = 100,
+    max_links_per_pair: int = 2,  # Max 2 links between any A->B pair (e.g., different transport types)
+    demand_sparsity: float = 0.5,  # % of (location, product) pairs that will have non-zero demand
+    max_demand_abs: int = 50,  # Max absolute supply/demand value for any product at a location
+    seed: int = None  # For reproducibility
+
     simples = generate_multibatching_problem(num_locations=5, num_products=3,
-                                          num_transport_types=3, seed=40)
+                                             num_transport_types=3, seed=40)
 
 
 
