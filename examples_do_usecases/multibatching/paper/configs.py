@@ -128,7 +128,6 @@ def all_configs(timeout):
     c.update(configs_direct_solve(timeout))
     c.update(config_2step(timeout))
     c.update(config_3steps(timeout))
-    c = config_3steps(timeout)
     return c
 
 if __name__ == "__main__":
