@@ -175,8 +175,8 @@ def parse_json_to_problem(json_data: dict, harbor_constraint = False,
         _id: Product(
             id=_id,
             name=data["name"],
-            # size=data["size"]//10**4,
-            size=data["size"],
+            size=data["size"]//10**4,
+            # size=data["size"],
             value=data["value"],
             valid_transports=frozenset(
                 transport_types_map[tr_id] for tr_id in data["validTR"]
