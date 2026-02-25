@@ -6,10 +6,8 @@ from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp,
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
-from discrete_optimization.generic_tools.hub_solver.optal.generic_optal import OptalSolver
 from discrete_optimization.generic_tools.do_solver import BoundsProviderMixin
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import (CategoricalHyperparameter,
-                                                                                IntegerHyperparameter)
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
 import inspect
 import logging
 
@@ -74,7 +72,6 @@ class OptalCpSolver(CpSolver, BoundsProviderMixin):
         kw = {"timeLimit": time_limit,
               "nbWorkers": parameters_cp.nb_process}
         kw.update(args)
-        import inspect
         kwparams = {key: kw[key] for key in kw
                     if key not in {"lower_bound_method"}
                     and key in inspect.signature(cp.Parameters).parameters

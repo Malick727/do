@@ -41,8 +41,9 @@ from examples_do_usecases.multibatching.solve_industrial_use_case import parse_p
 
 logging.basicConfig(level=logging.INFO)
 
-study_name = "multibatching-study-harbor-II"
-problem = parse_problem(False, False)
+study_name = "multibatching-study-scaled"
+problem = parse_problem(False, False,
+                        scale_co2=1/1000000)
 
 def create_configs():
     solver_configs = {}
@@ -244,7 +245,6 @@ def config_gurobi_lazy():
                                          kwargs=dict(time_limit=5000))
     return configs
 
-
 def config_gurobi_lazy_seq():
     configs = {}
     configs["seqmilplazy"] = SolverConfig(cls=SequentialMetasolver,
@@ -264,24 +264,36 @@ def config_gurobi_lazy_seq():
 
 overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
 solver_configs = config_sequential_milp()
+solver_configs.update(config_sequential())
+solver_configs.update(create_configs())
 database_filepath = f"{study_name}.h5"
 if overwrite:
     try:
         os.remove(database_filepath)
     except FileNotFoundError:
         pass
-
+import gurobipy as gp
 # loop over instances x configs
 for k in range(1): # 5 tries
     for config_name, solver_config in solver_configs.items():
         logging.info(f"###### Running config {config_name} ######\n\n")
-        solver = solver_config.cls(problem, **solver_config.kwargs)
-        solver.init_model(**solver_config.kwargs)
-        # solve
-        stats_cb = BasicStatsCallback()
-        result_store = solver.solve(
-            callbacks=[stats_cb],
-            **solver_config.kwargs)
+        if "milp" in config_name or "gurobi" in config_name:
+            with gp.Env() as env:
+                solver = solver_config.cls(problem, **solver_config.kwargs)
+                solver.init_model(**solver_config.kwargs)
+                # solve
+                stats_cb = BasicStatsCallback()
+                result_store = solver.solve(
+                    callbacks=[stats_cb],
+                    **solver_config.kwargs)
+        else:
+            solver = solver_config.cls(problem, **solver_config.kwargs)
+            solver.init_model(**solver_config.kwargs)
+            # solve
+            stats_cb = BasicStatsCallback()
+            result_store = solver.solve(
+                callbacks=[stats_cb],
+                **solver_config.kwargs)
         # get metrics and solver status
         sol = result_store[-1][0]
         print("satisfy", problem.satisfy(sol))
