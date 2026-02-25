@@ -11,7 +11,7 @@ from discrete_optimization.binpack.solvers.cpsat import ModelingBinPack
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
 from discrete_optimization.generic_tools.cp_tools import ParametersCp
 from discrete_optimization.generic_tools.do_problem import Solution
-from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import CategoricalHyperparameter, FloatHyperparameter
 from discrete_optimization.generic_tools.lp_tools import GurobiMilpSolver, ParametersMilp
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage
 from discrete_optimization.generic_tools.do_solver import WarmstartMixin
@@ -599,6 +599,10 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
 
     This formulation is analogous to the `UNIT_FLOW` model in the Cpsat solver.
     """
+    hyperparameters = [CategoricalHyperparameter("restrict_to_shortest_paths", choices=[True, False],
+                                                 default=False),
+                       FloatHyperparameter("shortest_path_tolerance", low=0, high=10, default=10,
+                                           depends_on=[("restrict_to_shortest_paths", True)])]
     problem: MultibatchingProblem
 
     def __init__(self, problem: MultibatchingProblem, **kwargs: Any):
