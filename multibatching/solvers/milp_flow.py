@@ -52,7 +52,7 @@ class GurobiMultibatchingSolver(GurobiMilpSolver):
         self.variables: Dict[str, Any] = {}
         self.single_batching: bool = False
         print(kwargs)
-        self.scaling_factor = kwargs.get("scaling_factor", 1000)
+        self.scaling_factor = kwargs.get("scaling_factor", 1)
 
     def init_model(self, single_batching: bool = False, **kwargs: Any) -> None:
         """

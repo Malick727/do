@@ -61,7 +61,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver,
         self.modeling: ModelingMultiBatch = None
         self.single_batching: bool = None
         self.verbose_logs = kwargs.get("verbose", 0)
-        self.scaling_factor = kwargs.get("scaling_factor", 10**3)
+        self.scaling_factor = kwargs.get("scaling_factor", 1)
 
     def set_warm_start_from_prev_solve(self):
         if self.solver is not None:
