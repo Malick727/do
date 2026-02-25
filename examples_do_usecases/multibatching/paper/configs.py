@@ -1,3 +1,9 @@
+import os
+import sys
+
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../../"))
+
 from discrete_optimization.generic_tools.hyperparameters.hyperparameter import SubBrick
 from discrete_optimization.generic_tools.sequential_metasolver import SequentialMetasolver
 from discrete_optimization.generic_tools.study import SolverConfig

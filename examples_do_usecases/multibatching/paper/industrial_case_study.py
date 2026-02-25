@@ -1,5 +1,10 @@
 import os
 import logging
+import sys
+
+
+this_folder = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.join(this_folder, "../../../"))
 
 from discrete_optimization.generic_tools.callbacks.stats_retrievers import BasicStatsCallback
 from discrete_optimization.generic_tools.study import Hdf5Database, Experiment, SolverConfig
