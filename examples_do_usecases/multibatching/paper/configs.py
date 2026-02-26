@@ -58,20 +58,26 @@ def subbricks_flow(timeout):
              asp=SubBrick(cls=ClingconMultibatchingSolver, kwargs={"time_limit": int(timeout)}))
     return c
 
-def subbricks_third_step(timeout):
-    return dict(cp_no_delta = SubBrick(CpsatMultibatchingSolver, dict(modeling=ModelingMultiBatch.UNIT_FLOW,
-                                                             time_limit=int(timeout),
-                                                             ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
-                                                             parameters_cp=p)),
+
+
+def subbricks_third_step(timeout, verbose: bool = False):
+    return dict(cp_no_delta = SubBrick(CpsatMultibatchingSolver,
+                                       kwargs=dict(modeling=ModelingMultiBatch.UNIT_FLOW,
+                                                   time_limit=int(timeout),
+                                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=verbose),
+                                                   parameters_cp=p),
+                                       kwargs_from_solution={"max_trips": lambda sol: sol.problem.get_max_nb_trips(sol)}
+                                       ),
                 cp_delta = SubBrick(CpsatMultibatchingSolver,
                                        dict(modeling=ModelingMultiBatch.UNIT_FLOW,
                                             time_limit=int(timeout),
-                                            ortools_cpsat_solver_kwargs=dict(log_search_progress=False),
+                                            ortools_cpsat_solver_kwargs=dict(log_search_progress=verbose),
                                             parameters_cp=p,
                                             delta_to_solution=2),
                                        kwargs_from_solution={"solution": lambda sol: sol}),
                 milp_no_delta = SubBrick(GurobiMultibatchingSolverUnitFlow,
-                                         dict(time_limit=int(timeout))),
+                                         kwargs=dict(time_limit=int(timeout)),
+                                         kwargs_from_solution={"max_trips_per_link": lambda sol: sol.problem.get_max_nb_trips(sol)}),
                 milp_delta = SubBrick(GurobiMultibatchingSolverUnitFlow,
                          dict(time_limit=int(timeout),
                               delta_to_solution=2),

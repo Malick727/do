@@ -133,6 +133,11 @@ class MultibatchingProblem(Problem):
         return {'transport': transport_cost,
                 'emission': emission_co2,
                 'capital': compound}
+    def get_max_nb_trips(self, solution: MultibatchingSolution) -> int:
+        nb_trips_per_link = defaultdict(lambda: 0)
+        for flow in solution.list_flows:
+            nb_trips_per_link[flow.transport_link.id] += flow.nb_packing
+        return max(nb_trips_per_link.values())
 
     def check_feasibility_per_product(self, verbose=False) -> bool:
         """
