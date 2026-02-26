@@ -1,24 +1,20 @@
 import os
 import logging
 import sys
-
 from examples_do_usecases.multibatching.paper.callback import StatsCallbackForExpe
-
 this_folder = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(this_folder, "../../../"))
-
-from discrete_optimization.generic_tools.callbacks.stats_retrievers import BasicStatsCallback
 from discrete_optimization.generic_tools.study import Hdf5Database, Experiment, SolverConfig
 from examples_do_usecases.multibatching.paper.configs import all_configs
 from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
-
+logging.basicConfig(level=logging.INFO)
 
 def main():
     study_name = "multibatching-airbus"
     problem = parse_problem(False, False,
                             scale_co2=1 / 1000000)
-    overwrite = False  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-    solver_configs = all_configs(timeout=100)
+    overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
+    solver_configs = all_configs(timeout=500, verbose=True)
     sc = {}
     for key in solver_configs:
         if isinstance(key, tuple):

@@ -805,6 +805,7 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver,
         sol: MultibatchingSolution = args.get("solution", None)
         delta: int = args.get("delta_to_solution", 1)
         max_nb_trips_per_link = args.get("max_trips", 50)
+        logger.info(f"Max trips : {max_nb_trips_per_link}")
         max_nb_trip_per_transport_link = None
         if sol is not None:
             max_nb_trip_per_transport_link = defaultdict(lambda: delta)

@@ -726,6 +726,7 @@ class GurobiMultibatchingSolverUnitFlow(GurobiMilpSolver):
                                       to define the variable space.
         """
         logger.info("Initializing Gurobi model (Unit Flow)...")
+        logger.info(f"Max trips : {max_trips_per_link}")
         use_shortest_path = kwargs.get("restrict_to_shortest_paths", False)
         sp_tolerance = kwargs.get("shortest_path_tolerance", 0.0)  # 0.0 = Strict, 0.2 = +20% length allowed
         # Option B: No incoming flow at producers

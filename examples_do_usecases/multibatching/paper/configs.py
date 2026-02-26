@@ -64,7 +64,7 @@ def subbricks_third_step(timeout, verbose: bool = False):
     return dict(cp_no_delta = SubBrick(CpsatMultibatchingSolver,
                                        kwargs=dict(modeling=ModelingMultiBatch.UNIT_FLOW,
                                                    time_limit=int(timeout),
-                                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=verbose),
+                                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=True),
                                                    parameters_cp=p),
                                        kwargs_from_solution={"max_trips": lambda sol: sol.problem.get_max_nb_trips(sol)}
                                        ),
@@ -113,9 +113,9 @@ def config_2step(timeout):
     return c
 
 
-def config_3steps(timeout):
+def config_3steps(timeout, verbose=False):
     c = config_2step(timeout//2)
-    c_3steps = subbricks_third_step(timeout//2)
+    c_3steps = subbricks_third_step(timeout//2, verbose=verbose)
     configs = {}
     for flow in ["cp", "milp", "cp_short", "milp_short"]:
         for third_step in c_3steps:
@@ -129,11 +129,11 @@ def config_3steps(timeout):
 
 
 
-def all_configs(timeout):
+def all_configs(timeout, verbose: bool=False):
     c = dict()
     c.update(configs_direct_solve(timeout))
     c.update(config_2step(timeout))
-    c.update(config_3steps(timeout))
+    c.update(config_3steps(timeout, verbose))
     return c
 
 if __name__ == "__main__":
