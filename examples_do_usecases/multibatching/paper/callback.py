@@ -36,7 +36,8 @@ class StatsCallbackForExpe(BasicStatsCallback):
                         "abstime": t,
                     }
             )
-            self.stats[-1].update(solver.problem.evaluate(res[-1][0]))
+            if len(res) > 0:
+                self.stats[-1].update(solver.problem.evaluate(res[-1][0]))
             #self.stats[-1].update(res[-1][0]._intern_obj)
             #if len(res) > 0:
             #    sol = res[-1][0]
