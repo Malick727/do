@@ -11,13 +11,13 @@ from examples_do_usecases.multibatching.solve_industrial_use_case import parse_p
 logging.basicConfig(level=logging.INFO)
 
 def main():
-    study_name = "multibatching-airbus"
+    study_name = "multibatching-airbus-final"
     problem = parse_problem(False, False,
                             scale_co2=1 / 1000000)
     overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-    solver_configs = all_configs(timeout=80,
+    solver_configs = all_configs(timeout=500,
                                  add_col_gen=False,
-                                 verbose=True)
+                                 verbose=False)
     sc = {}
     for key in solver_configs:
         if isinstance(key, tuple):

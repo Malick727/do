@@ -53,8 +53,8 @@ def subbricks_flow(timeout):
                                                                            "shortest_path_tolerance": 1.2,
                                                                            "parameters_cp": p}),
              milp_short=SubBrick(cls=GurobiMultibatchingSolver, kwargs={"time_limit": int(timeout),
-                                                                          "restrict_to_shortest_paths": True,
-                                                                          "shortest_path_tolerance": 1.2}),
+                                                                        "restrict_to_shortest_paths": True,
+                                                                        "shortest_path_tolerance": 1.2}),
              asp=SubBrick(cls=ClingconMultibatchingSolver, kwargs={"time_limit": int(timeout)}))
     return c
 
