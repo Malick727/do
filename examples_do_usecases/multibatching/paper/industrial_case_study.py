@@ -15,8 +15,8 @@ def main():
     problem = parse_problem(False, False,
                             scale_co2=1 / 1000000)
     overwrite = True  # do we overwrite previous study with same name or not? if False, we possibly add duplicates
-    solver_configs = all_configs(timeout=100,
-                                 add_col_gen=True,
+    solver_configs = all_configs(timeout=80,
+                                 add_col_gen=False,
                                  verbose=True)
     sc = {}
     for key in solver_configs:

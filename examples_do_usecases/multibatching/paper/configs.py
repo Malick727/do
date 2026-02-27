@@ -154,7 +154,6 @@ def all_configs(timeout,
     c.update(config_3steps(timeout, verbose))
     if add_col_gen:
         c.update(config_column_generation(timeout))
-        c = config_column_generation(timeout)
     return c
 
 if __name__ == "__main__":
