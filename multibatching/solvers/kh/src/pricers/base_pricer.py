@@ -46,6 +46,9 @@ class BasePricer(Pricer):
         self.mode = mode
         self.transformed_constraints = {}
         self.pattern_registry = {}
+        self.pattern_set = set()
+        self.options: dict = {}
+        self.run_initial = False
 
     def pricerinit(self):
         """Initialize transformed constraints map for fast dual retrieval."""
@@ -93,12 +96,16 @@ class BasePricer(Pricer):
         """Standardized SCIP callback."""
         duals = self.get_duals()
         new_patterns = self.find_patterns(duals)
-
+        filtered_new_patters = []
+        for data in new_patterns:
+            if (str(data['route']), str(data['pattern'])) not in self.pattern_set:
+                filtered_new_patters.append(data)
+                self.pattern_set.add((str(data['route']), str(data['pattern'])))
+                #print((str(data['route']), str(data['pattern'])))
         if not new_patterns:
             return {"result": SCIP_RESULT.SUCCESS}
-
         columns_added = 0
-        for data in new_patterns:
+        for data in filtered_new_patters:
             self.add_new_column(
                 data['route'], 
                 data['pattern'], 
@@ -109,6 +116,39 @@ class BasePricer(Pricer):
 
         logger.info(f"[{self.__class__.__name__}] Added {columns_added} columns.")
         return {"result": SCIP_RESULT.SUCCESS}
+
+    def generate_initial_patterns(self):
+        """
+        Generates 'single-batching' patterns for each product-route combination.
+        These are added to the Master Problem at the very beginning.
+        """
+        initial_patterns = []
+
+        for route in self.routes:
+            # Reusing your existing data prep logic
+            cap, dur, f_cost, valid_prods = self.prepare_subproblem_data(route)
+
+            for p in valid_prods:
+                if p.size <= 0:
+                    continue
+
+                # Calculate the maximum number of this single product that fits
+                max_qty = int(cap // p.size)
+
+                if max_qty > 0:
+                    pattern_data = {p: max_qty}
+
+                    # Calculate reduced cost for logging/tracking if needed,
+                    # though usually these are just added as feasible starting columns.
+                    initial_patterns.append({
+                        'route': route,
+                        'pattern': pattern_data,
+                        'duration': dur,
+                        'fixed_cost': f_cost
+                    })
+
+        logger.info(f"Generated {len(initial_patterns)} initial single-batching patterns.")
+        return initial_patterns
 
     def find_patterns(self, duals):
         """ABSTRACT METHOD."""

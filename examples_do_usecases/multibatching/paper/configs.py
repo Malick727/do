@@ -127,13 +127,34 @@ def config_3steps(timeout, verbose=False):
                                                                             c_3steps[third_step]]))
     return configs
 
+def config_column_generation(timeout):
+    from multibatching.solvers.kh.src.pricers.pricer_do import HeuristicMIPPricer
+    from multibatching.solvers.kh.src.pricers.pricer_greedy import GreedyPricer
+    from multibatching.solvers.kh.src.pricers.pricer_cpsat import CpSatKnapsackPricer # To run in parallel.
+    configs_dict = dict()
+    for pricer in [GreedyPricer, CpSatKnapsackPricer, HeuristicMIPPricer]:
+        for add_single_batch in [True, False]:
+            c = SolverConfig(cls=MultibatchingMasterWrapper,
+                             kwargs=dict(pricer_class=pricer,
+                                         mode="ip",
+                                         time_limit=timeout,
+                                         kwargs_pricer={"time_limit": 0.5,
+                                                        "add_single_batch": add_single_batch})
+                             )
+            configs_dict[str(pricer.__name__)+"-sglbtc-"+str(add_single_batch)] = c
+    return configs_dict
 
 
-def all_configs(timeout, verbose: bool=False):
+def all_configs(timeout,
+                add_col_gen: bool = True,
+                verbose: bool=False):
     c = dict()
     c.update(configs_direct_solve(timeout))
     c.update(config_2step(timeout))
     c.update(config_3steps(timeout, verbose))
+    if add_col_gen:
+        c.update(config_column_generation(timeout))
+        c = config_column_generation(timeout)
     return c
 
 if __name__ == "__main__":

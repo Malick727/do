@@ -12,8 +12,10 @@ class GreedyPricer(BasePricer):
     """
 
     def find_patterns(self, duals):
+        if not self.run_initial and self.options.get("add_single_batch", True):
+            self.run_initial = True
+            return self.generate_initial_patterns()
         found_patterns = []
-
         for route in self.routes:
             # Use BasePricer helper
             capacity, duration, fixed_cost, valid_products = self.prepare_subproblem_data(route)

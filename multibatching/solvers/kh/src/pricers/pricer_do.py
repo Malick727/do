@@ -157,4 +157,6 @@ class HeuristicMIPPricer(BasePricer):
 
         self.already_run = True
         logger.info(f"Injecting {len(found_patterns)} columns from Gurobi solution.")
+        if self.options.get("add_single_batch", True):
+            found_patterns.extend(self.generate_initial_patterns())
         return found_patterns

@@ -1,5 +1,9 @@
 import logging
+from typing import Type
+
 from pyscipopt import Model
+
+from multibatching.problem import MultibatchingProblem
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +91,21 @@ class MasterProblem:
                 )
                 self.demand_constraints[(link, product)] = c
 
-    def solve(self, pricer_class, original_problem, mode="lp", export_lp=True, time_limit=600):
+    def solve(self, pricer_class: Type,
+              original_problem: MultibatchingProblem,
+              mode="lp",
+              export_lp=True,
+              kwargs_pricer: dict = None,
+              time_limit=600):
         """
         Solves the master problem using Column Generation.
         Args:
             pricer_class: The pricer class to use (e.g. ScipKnapsackPricer).
+            original_problem: the original MultibatchingProblem.
             mode: 'lp' for continuous relaxation, 'ip' for integer solution.
             time_limit: The maximum time in seconds to run the problem.
             export_lp: If True, writes 'master_problem.lp' to disk before solving.
+            kwargs_pricer: workaround to pass some params to pricer.
         """
         self.pricer = pricer_class(
             self.demand_constraints, 
@@ -104,12 +115,13 @@ class MasterProblem:
             self.settings,
             mode=mode
         )
+        self.pricer.options = kwargs_pricer
         self.pricer.problem_instance = original_problem
         
         self.model.includePricer(self.pricer, "Pricer", "Column Generation", delay=True)
 
         #if "ip" in mode:
-        #    self.model.setLongintParam("limits/nodes", 2)
+        #    self.model.setLongintParam("limits/nodes", 1)
         self.model.setParam('limits/time', time_limit)
         if export_lp:
             logger.info("Exporting LP formulation to 'master_problem.lp'...")

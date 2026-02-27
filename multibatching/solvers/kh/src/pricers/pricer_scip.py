@@ -3,25 +3,22 @@ import logging
 from pyscipopt import Model
 from multibatching.solvers.kh.src.logic import CostCalculator
 from multibatching.solvers.kh.src.pricers.base_pricer import BasePricer
-
+from functools import partial
 logger = logging.getLogger(__name__)
 
-def solve_subproblem_worker(task_data):
+def solve_subproblem_worker(task_data, time_limit=2):
     """
     Worker to solve the Knapsack Subproblem.
     """
     route = task_data['route']
     valid_products = task_data['valid_products'] 
     duals = task_data['duals']
-    
     capacity = task_data['capacity']
     duration = task_data['duration']
     fixed_cost = task_data['fixed_cost']
     settings = task_data['settings']
-    
     if not valid_products:
         return None
-    
     sub_scip = Model(f"sub_parallel")
     sub_scip.hideOutput()
 
@@ -33,20 +30,15 @@ def solve_subproblem_worker(task_data):
     sub_scip.addCons(
         sum(vars_dict[p] * p.size for p in valid_products) <= capacity
     )
-
-    obj_expr = fixed_cost  
-    
+    obj_expr = fixed_cost
     for p in valid_products:
         interest_per_unit = CostCalculator.calculate_interest(p.value, duration, settings)
         mu_val = duals.get((route.transport_link, p), 0.0)
         obj_expr += vars_dict[p] * (interest_per_unit - mu_val)
-
     sub_scip.setObjective(obj_expr, sense="minimize")
-    sub_scip.setParam('limits/time', 2)
+    sub_scip.setParam('limits/time', time_limit)
     sub_scip.optimize()
-    
     min_rc = sub_scip.getObjVal()
-    
     # Check Result using settings.epsilon
     if min_rc < -settings.epsilon:
         pattern = {p.id: sub_scip.getVal(vars_dict[p]) for p in valid_products}
@@ -79,10 +71,10 @@ class ScipKnapsackPricer(BasePricer):
                 'duals': duals,
                 'settings': self.settings
             })
-
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-            results = pool.map(solve_subproblem_worker, tasks)
-
+        print(len(tasks))
+        with multiprocessing.Pool(processes=1) as pool: #multiprocessing.cpu_count()) as pool:
+            results = pool.map(partial(solve_subproblem_worker, time_limit=self.options.get("time_limit", 2)),
+                               tasks)
         formatted_results = []
         prod_map = {p.id: p for p in self.products}
         best_rc = 0.0
@@ -91,9 +83,7 @@ class ScipKnapsackPricer(BasePricer):
             if res and res['reduced_cost'] < -self.settings.epsilon:
                 if res['reduced_cost'] < best_rc:
                     best_rc = res['reduced_cost']
-
                 pattern_obj = {prod_map[p_id]: qty for p_id, qty in res['pattern_data'].items()}
-                
                 formatted_results.append({
                     'route': res['route'],
                     'pattern': pattern_obj,

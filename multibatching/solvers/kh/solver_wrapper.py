@@ -162,7 +162,8 @@ class MultibatchingMasterWrapper(SolverDO):
             original_problem=self.problem,
             mode=mode,
             time_limit=time_limit,
-            export_lp=kwargs.get("export_lp", True)
+            export_lp=kwargs.get("export_lp", True),
+            kwargs_pricer=kwargs.get("kwargs_pricer", {})
         )
         self.model.print_results()
         # Retrieve result using the exact logic from 'print_results'
@@ -283,11 +284,16 @@ def main():
     #                                         seed=51)
     #multibatching_problem_to_json(problem, 80, "example_3.json")
     from examples_do_usecases.multibatching.solve_industrial_use_case import parse_problem
-    problem = parse_problem(False, False)
+    problem = parse_problem(False, False, 1/1000000)
     solver = MultibatchingMasterWrapper(problem=problem)
     from multibatching.solvers.kh.src.pricers.pricer_scip import ScipKnapsackPricer
     from multibatching.solvers.kh.src.pricers.pricer_do import HeuristicMIPPricer
-    results = solver.solve(pricer_class=HeuristicMIPPricer, mode="ip", time_limit=600)
+    from multibatching.solvers.kh.src.pricers.pricer_greedy import GreedyPricer
+    from multibatching.solvers.kh.src.pricers.pricer_cpsat import CpSatKnapsackPricer # To run in parallel.
+    results = solver.solve(pricer_class=GreedyPricer,
+                           mode="ip",
+                           time_limit=2000,
+                           kwargs_pricer={"time_limit": 0.1})
     if results:
         sol: MultibatchingSolution = results[-1][0]
         print(f"Satisfy : {problem.satisfy(sol)}")
