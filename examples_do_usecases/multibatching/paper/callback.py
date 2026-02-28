@@ -10,6 +10,9 @@ from discrete_optimization.generic_tools.result_storage.result_storage import Re
 class StatsCallbackForExpe(BasicStatsCallback):
     metric_columns = BasicStatsCallback.metric_columns + [#"obj",
                                                           #"bound",
+                                                          "transport",
+                                                          "emission",
+                                                          "capital",
                                                           "abstime"]
     def __init__(self):
         super().__init__()

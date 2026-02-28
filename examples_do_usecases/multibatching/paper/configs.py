@@ -64,7 +64,7 @@ def subbricks_third_step(timeout, verbose: bool = False):
     return dict(cp_no_delta = SubBrick(CpsatMultibatchingSolver,
                                        kwargs=dict(modeling=ModelingMultiBatch.UNIT_FLOW,
                                                    time_limit=int(timeout),
-                                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=True),
+                                                   ortools_cpsat_solver_kwargs=dict(log_search_progress=verbose),
                                                    parameters_cp=p),
                                        kwargs_from_solution={"max_trips": lambda sol: sol.problem.get_max_nb_trips(sol)}
                                        ),
