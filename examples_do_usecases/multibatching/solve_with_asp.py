@@ -11,12 +11,14 @@ from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMul
 
 def parse_problem(fix_problem: bool = False,
                   harbor_constraint: bool = False,
-                  filter_transport_types:bool = False):
+                  filter_transport_types:bool = False,
+                  scale_co2: float = 1):
     this_folder = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(this_folder,
                                "../../multibatching/datalocal/config-local.json")
     d = json.load(open(config_file, "r"))
-    problem = parse_json_to_problem(d, harbor_constraint=harbor_constraint)
+    problem = parse_json_to_problem(d, harbor_constraint=harbor_constraint,
+                                    scale_co2=scale_co2)
 
     # Temporary fix = section2 transportable by any means..
     if fix_problem:
@@ -39,13 +41,13 @@ def script():
                                              seed=51)
 
     problem = parse_problem(harbor_constraint=False,
-                            filter_transport_types=True)
+                            filter_transport_types=True, scale_co2=1/1000000)
     solver = ClingconMultibatchingSolver(problem)
-    solver.set_cap_size_divide(1)
+
     # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)
-    time_limit=100
+    time_limit=10
     print(f"Starting solve with {time_limit}s timeout...")
     result_storage = solver.solve(callbacks=[BasicStatsCallback()],
                                   time_limit=time_limit)
@@ -54,7 +56,7 @@ def script():
     if solution == None:
         print("UNSAT") 
     else:
-
+        pass
         print("Check flows", problem.check_flows(solution))
         fit = solver.aggreg_from_sol(solution)
         total_costs = solver.compute_costs()

@@ -129,7 +129,7 @@ def solve_clingcon(programs, max_models=0, ngo=False):
             print("aggregates selection:")
             print([f'{key}={val}' for key, val in thy.assignment(mdl.thread_id) if key.name == "route_freq" and val!=0])
             processAggregates(assignment_data, idx)   
-            processModel(idx)         
+            #processModel(idx)         
     ctl.cleanup()
 
 def processAggregates(assignment_data, idx):

@@ -17,6 +17,7 @@ from multibatching.problem import (
     TransportLink
 )
 
+import sys
 import pandas as pd
 import os
 import csv
@@ -25,127 +26,44 @@ import math
 logger = logging.getLogger(__name__)
 
 
+lp_name = "clingcon_all_req322"
 
+def get_programs_by_categories(categories: list[str]):
+    programs = []
+    for category in categories:
+        if os.path.isfile(category):
+            programs += [category]
+        else:
+            print(f"Folder or file \'{category}\' does not exist.")
+            sys.exit()
+    return programs
+
+def read_files_to_string(file_list, separator="\n"):
+    accumulated_content = []
+
+    for filename in file_list:
+        # Check if the file name (ignoring parent folders) starts with a dot
+        if os.path.basename(filename).startswith('.'):
+            print(f"Skipping hidden file: {filename}")
+            continue
+
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                accumulated_content.append(f.read())
+        except FileNotFoundError:
+            print(f"Warning: File '{filename}' not found. Skipping.")
+        except Exception as e:
+            print(f"Error reading '{filename}': {e}")
+    return separator.join(accumulated_content)
+
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+program_folder = os.path.join(f"asp_files/{lp_name}.lp")
+categories = [f"{dir_path}/{program_folder}"]
+programs = get_programs_by_categories(categories)
+print("programs", programs)
 # Logic Program Content
-ASP_MODEL_CONTENT = """
-harbor(naplesHarbor;marseilleHarbor;montoirHarbor;tunisHarbor;mobileHarbor;dunkerqueHarbor;gruenendeichHarbor;taichungHarbor;shanghaiHarbor;hamburgHarbor;gibraltarHarbor;portoHarbor;tianjinHarbor;casablancaHarbor;sacheonHarbor;stNazaire;houstonHarbor;savannaHarbor).
-ship(kugelbake;feederContainerShip;truckGeneralCargo;oversizedTianjinRoRoShip;truckonRoRoShip;smallContainerShip;airbusMobileExpressRoRoShip;oversizedRiverTransport;seaLargeContainerShip;oversizedUnderDeckRoRoShip).
-
-totalSupply(P, Max) :- Max = #sum {V : demandOffer(P,_,V), V > 0; -1 * V : demandOffer(P,_,V), V < 0}, product(P).
-
-hasDemand(P, L) :- demandOffer(P, L, V), V < 0.
-hasOffer(P, L)  :- demandOffer(P, L, V), V > 0.
-
-demand(P, L, Val * -1) :- demandOffer(P, L, Val), Val < 0.
-demand(P, L, 0)        :- product(P), location(L), not hasDemand(P, L).
-
-offer(P, L, Val) :- demandOffer(P, L, Val), Val > 0.
-offer(P, L, 0)   :- product(P), location(L), not hasOffer(P, L).
-
-requiredNet(P, L, Net) :- demand(P,L,D), offer(P,L,O), Net = D - O.
-requiredNet(P, L, 0) :- not demand(P,L,_), not offer(P,L,_), location(L), product(P).
-&dom { N..N } = req(P,L) :- requiredNet(P, L, N).
-
-validFromNode(L) :- demandOffer(_, L, M), M>0.
-validToNode(L) :- demandOffer(_, L, M), M<0.
-validToNode(L) :- harbor(L).
-validFromNode(L) :- harbor(L).
-noShipBetweenHarbors(From, To, TR) :- harbor(From), harbor(To), not ship(TR), transportResource(TR).
-
-possibleFlow(From, To, TR, P) :- route(_, From, To, TR, _,Cost), 
-validFromNode(From), validToNode(To),  
-not noShipBetweenHarbors(From, To, TR), 
-productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap.
-
-tRCapSmall(TR,Cap) :- transportCapacity(TR,CapB), Cap=CapB/10000.
-productSizeSmall(P,S) :- productSize(P,SB), S = SB/10000.
-
-smallDistance(From,To,TR,D) :- route(_,From,To,TR,Dis,_), D=Dis/10.
-smallEmission(TR,E) :- transportCO2(TR,Em), E=Em/10.
-
-%invalidProductTR(P, TR) :- tRCapSmall(TR, Cap), productSizeSmall(P,S), S>Cap, productTR(P,TR).
-%#show invalidProductTR/2.   
-
-max_possible_load(F, T, TR, P, Bound) :- 
-    possibleFlow(F, T, TR, P),
-    totalSupply(P, MaxSupply),
-    tRCapSmall(TR, Cap),
-    MaxFreq = 30,
-    TotalRouteCap = (Cap * MaxFreq),
-    % The bound is the smaller of the two
-    Bound = MaxSupply,
-    MaxSupply <= TotalRouteCap.
-
-max_possible_load(F, T, TR, P, Bound) :- 
-    possibleFlow(F, T, TR, P),
-    totalSupply(P, MaxSupply),
-    tRCapSmall(TR, Cap),
-    MaxFreq = 30,
-    TotalRouteCap = (Cap * MaxFreq),
-    % The bound is the smaller of the two
-    Bound = TotalRouteCap,
-    MaxSupply > TotalRouteCap.
-
-% Apply the tightened domain
-&dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
-
-
-% If a node cannot reach a demand for product P, its outgoing load must be 0
-%&dom { 0..0 } = load(F, T, TR, P) :- possibleFlow(F, T, TR, P), not can_reach_demand(T, P).
-
-&sum {  
-    load(From, L, TR, P) : possibleFlow(From, L, TR, P); 
-    -1 * load(L, To, TR, P) : possibleFlow(L, To, TR, P) 
-} = Net :- requiredNet(P, L, Net).
-
-%&sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
-%&sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
-
-%&sum { flow_in(P,L); -1 * flow_out(P,L)} = Net :- requiredNet(P, L, Net).
-
-%:- &sum{ load(From, L, TR, P) : possibleFlow(From, L, TR, P)} < Net, demandOffer(P, L, Net), Net < 0.
-%:- &sum{ load(L, To, TR, P) : possibleFlow(L, To, TR, P)} < Net, demandOffer(P, L, Net), Net > 0.
-
-%:- &sum{load(From,To, TR, P): possibleFlow(From, To, TR, P)} > Max, totalSupply(P, Max), possibleFlow(From, _, _,P).
-%:- &sum{load(From, To, TR, P): possibleFlow(From, To, TR, P)} > Max, totalSupply(P, Max), possibleFlow(_, To, _,P).
-
-activeFlow(From,To,TR) :-  &sum { load(From, To, TR, P):possibleFlow(From, To, TR, P)} > 0,possibleFlow(From, To, TR, _).
-%#minimize{1, From, To, TR: activeFlow(From,To,TR)}.
-
-&minimize{freq_var(F, T, TR) * D * E: route(_,F,T,TR,D,C), smallEmission(TR,E); freq_var(F, T, TR) * C: route(_,F,T,TR,_,C)}.
-
-% 2. Integrated Frequency Variable 
-&dom { 1..30 } = f_var(F, T, TR) :- possibleFlow(F, T, TR, _), activeFlow(F,T,TR).
-&dom { 0..0 } = f_var(F, T, TR) :- possibleFlow(F, T, TR, _), not activeFlow(F,T,TR).
-
-% 3. Link Load to Frequency (Capacity)
-&sum { S * load(F, T, TR, P) : productSizeSmall(P, S) } <= Cap * f_var(F, T, TR) 
-    :- possibleFlow(F, T, TR, _), tRCapSmall(TR, Cap).
-
-&sum { S * load(F, T, TR, P) : productSizeSmall(P, S), possibleFlow(F, T, TR, P) } 
-     > Cap * (freq_var(F, T, TR) - 1)
-     :- possibleFlow(F, T, TR, _), tRCapSmall(TR, Cap), &sum{freq_var(F, T, TR)} > 0.
-
-% 4. Tighten f_var: if load exists, frequency must be at least 1
-&sum { load(F, T, TR, P) : possibleFlow(F, T, TR, P) } > 0 :- &sum{f_var(F, T, TR)} > 0, possibleFlow(F, T, TR, _) .
-
-%freq(1..30).
-%1{routeFreq(From, To, TR, Freq, C*Freq) : freq(Freq), tRCapSmall(TR,C) }1 :- activeFlow(From,To,TR).
-
-% upper bound
-%&sum{S*load(F, T, TR, P) : possibleFlow(F, T, TR, P),productSizeSmall(P,S)} <= TotalCap :-
-%routeFreq(F, T, TR, Freq, TotalCap).
-% lower bound
-%&sum{S*load(F, T, TR, P) :possibleFlow(F, T, TR, P),productSizeSmall(P,S)} >= Minus1 :-
-%routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C*10, Freq>1.
-
-%costPerActiveFlow(From, To, TR,Freq*C) :- routeFreq(From, To, TR, Freq, TotalCap), route(_, From, To, TR, _, C).
-%emissionPerActiveFlow(From, To, TR,Freq*E*D) :- routeFreq(From, To, TR, Freq, _),route(_, From, To, TR,D, _),transportCO2(TR,E).
-
-%#minimize{C,From,To,TR: costPerActiveFlow(From,To,TR,C)}.
-%#minimize{C,From,To,TR: emissionPerActiveFlow(From,To,TR,C)}.
-
-"""
+ASP_MODEL_CONTENT = read_files_to_string(programs) 
 
 class ClingconMultibatchingSolver(SolverDO):
     problem: MultibatchingProblem
@@ -159,7 +77,7 @@ class ClingconMultibatchingSolver(SolverDO):
                 {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
                 {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
                 {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq','maxcapacity']}, #,'maxcapacity', 'minus1'
-                {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+                {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource',"product"]},
                 {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
                 #{'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
                 {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
@@ -194,10 +112,6 @@ class ClingconMultibatchingSolver(SolverDO):
         self.name_to_transport_type: Dict[str, Any] = {}
         self.name_to_product: Dict[str, Any] = {}
         self.route_key_to_link: Dict[tuple, TransportLink] = {}
-        self.cap_size_divide = 1
-
-    def set_cap_size_divide(self, val):
-        self.cap_size_divide = val
 
     def sanitize(self, s: str) -> str:
             s = str(s).replace(".", "").replace("-", "").replace(" ", "")
@@ -215,7 +129,10 @@ class ClingconMultibatchingSolver(SolverDO):
         path_symbols = []
         for name in [next(iter(d.values())) for d in self.modelAtomTemplates]:
             path_symbols += list(filter(lambda s: s.name == name, model.symbols(atoms=True)))
-        
+
+            with open(f"output/model_{self.modelIndex}/model.txt", "w") as model_file:
+                model_file.write(str(model))
+
         for modelAtomTemplate in self.modelAtomTemplates:
             dataName = modelAtomTemplate['name']
             filteredSymbols = list(filter(modelAtomTemplate['filter'], path_symbols))
@@ -230,9 +147,7 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
-        clingo_args = kwargs.get("clingo_args", [
-                                                "--parallel-mode=4"# "--opt-mode=opt", #"--configuration=many" #,
-                                                #" --opt-strategy=bb" ,
+        clingo_args = kwargs.get("clingo_args",  [f"--models=0", "--opt-mode=opt"#,
                                                  #"--heuristic=Domain"
                                                  ])
       #  clingo_args = kwargs.get("clingo_args", 
@@ -313,10 +228,10 @@ class ClingconMultibatchingSolver(SolverDO):
             res.append((sol, fit))
             stopping = callbacks_list.on_step_end(step=len(res), res=res, solver=self)
 
-            print("total costs (estimate without frequencies):", fit, f"({fit:.2e})")
+            #print("total costs (estimate without frequencies):", fit, f"({fit:.2e})")
             #print('satisfy', self.problem.satisfy(sol))
             #print("Check flows ", self.problem.check_flows(sol))
-            print("stopping", stopping)
+            #print("stopping", stopping)
             
             return not stopping
         
@@ -434,12 +349,7 @@ class ClingconMultibatchingSolver(SolverDO):
             list_flows.append(PackingTransport(link, packing, freq))
 
         sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-        #kpis = self.problem.evaluate(sol)
-        #print("kpis", kpis)
-        #logger.info(f"cost of current sol : kpis={kpis}")
-        return sol #MultibatchingSolution(problem=self.problem, list_flows=list_flows)
-
-
+        return sol 
         
     def _generate_facts(self) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
@@ -458,14 +368,17 @@ class ClingconMultibatchingSolver(SolverDO):
             s_name = self.sanitize(tt.name if tt.name else f"tr{tt.id}")
             self.name_to_transport_type[s_name] = tt
             facts.append(f"transportResource({s_name}).")
-            facts.append(f"transportCO2({s_name},{self.sanitize_num(tt.emissions)}).")
+            # 1000000
+            co2 = int(tt.emissions * 100000)
+            facts.append(f"transportCO2({s_name},{co2}).")
             facts.append(f"transportCost({s_name},{max(0,self.sanitize_num(tt.cost))}).")
-            scaled_cap = max(0, int(tt.capacity / self.cap_size_divide))
+            scaled_cap = max(0, int(tt.capacity))
             facts.append(f"transportCapacity({s_name},{scaled_cap}).")
             facts.append(f"transportSpeed({s_name},{self.sanitize_num(tt.speed)}).")
 
         # Routes 
         self.route_key_to_link = {}
+        distNew = 6000
         for idx, tl in enumerate(self.problem.transport_links):
             source = self.sanitize(tl.location_l1.name)
             dest = self.sanitize(tl.location_l2.name)
@@ -474,14 +387,14 @@ class ClingconMultibatchingSolver(SolverDO):
             dist = int(tl.distance)
             cost = int(self.sanitize_num(tl.transport_type.cost) * dist)
             facts.append(f"route({idx},{source},{dest},{tr_name},{dist},{cost}).")
-
+            
         # Products
         self.name_to_product = {}
         for p in self.problem.products:
             s_name = self.sanitize(p.name if p.name else f"p{p.id}")
             self.name_to_product[s_name] = p
             facts.append(f"product({s_name}).")
-            scaled_size = int(p.size / self.cap_size_divide)
+            scaled_size = int(p.size)
             facts.append(f"productSize({s_name},{scaled_size}).")
             for valid_tr in p.valid_transports:
                 tr_s_name = self.sanitize(valid_tr.name if valid_tr.name else f"tr{valid_tr.id}")
@@ -500,45 +413,51 @@ class ClingconMultibatchingSolver(SolverDO):
             file_out.writelines("\n".join(facts))
         return "\n".join(facts)
     
+
+
+    def extract_clingo_number(self, val):
+        # Case A: It's a Clingo Symbol (has .number attribute)
+        if hasattr(val, 'number'):  
+            return val.number
+        # Case B: It's already a Python int or float
+        if isinstance(val, (int, float)):
+            return val
+        # Case C: It's a string that looks like a number ("6")
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return 0  # Default fallback if data is bad
+            
     def compute_active_flows(self):
         
-        active_flows_df = self.all_dataframes["activeFlow"]
-        print(f"Total active flows for model: {active_flows_df.shape[0]}")
+        #active_flows_df = self.all_dataframes["activeFlow"]
+        #print(f"Total active flows (wrt individual product) for model: {active_flows_df.shape[0]}")
+        route_freq_df = self.all_dataframes["routeFreq"]
+        route_freq_df['freq'] = route_freq_df['freq'].values
+        route_freq_df['freq'] = route_freq_df['freq'].apply(self.extract_clingo_number)
+        print(f"Total active flows including frequencies for model: {route_freq_df['freq'].sum()}")
 
     def compute_costs(self):
         
 
-        def extract_clingo_number(val):
-            # Case A: It's a Clingo Symbol (has .number attribute)
-            if hasattr(val, 'number'):  
-                return val.number
-            # Case B: It's already a Python int or float
-            if isinstance(val, (int, float)):
-                return val
-            # Case C: It's a string that looks like a number ("6")
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return 0  # Default fallback if data is bad
-
         route_df = self.all_dataframes["route"]
         route_df['cost'] = route_df['cost'].values
-        route_df['cost'] = route_df['cost'].apply(extract_clingo_number)
+        route_df['cost'] = route_df['cost'].apply(self.extract_clingo_number)
 
         route_df['distance'] = route_df['distance'].values
-        route_df['distance'] = route_df['distance'].apply(extract_clingo_number)
+        route_df['distance'] = route_df['distance'].apply(self.extract_clingo_number)
 
         route_freq_df = self.all_dataframes["routeFreq"]
         route_freq_df['freq'] = route_freq_df['freq'].values
-        route_freq_df['freq'] = route_freq_df['freq'].apply(extract_clingo_number)
+        route_freq_df['freq'] = route_freq_df['freq'].apply(self.extract_clingo_number)
         
         transportCost_df = self.all_dataframes["transportCost"]
         transportCost_df['transportationCost'] = transportCost_df['transportationCost'].values
-        transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(extract_clingo_number)
+        transportCost_df['transportationCost'] = transportCost_df['transportationCost'].apply(self.extract_clingo_number)
 
         co2Cost_df = self.all_dataframes["transportCO2"]
         co2Cost_df['CO2'] = co2Cost_df['CO2'].values
-        co2Cost_df['CO2'] = co2Cost_df['CO2'].apply(extract_clingo_number)
+        co2Cost_df['CO2'] = co2Cost_df['CO2'].apply(self.extract_clingo_number)
 
         merged_df1 = pd.merge(
             route_freq_df, 
