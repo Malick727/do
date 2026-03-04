@@ -47,7 +47,7 @@ def script():
     # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)
-    time_limit=10
+    time_limit=100
     print(f"Starting solve with {time_limit}s timeout...")
     result_storage = solver.solve(callbacks=[BasicStatsCallback()],
                                   time_limit=time_limit)

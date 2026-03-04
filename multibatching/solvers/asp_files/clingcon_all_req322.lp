@@ -65,18 +65,21 @@ routeFreq(F, T, TR, Freq, TotalCap), tRCapSmall(TR,C), Minus1=TotalCap-C, Freq>1
 
 
 &dom { 0..TotalCap } = used_space(F,T,TR) :- routeFreq(F,T,TR,_,TotalCap).
-&dom { 0..0 } = used_space(F,T,TR) :- not routeFreq(F,T,TR,_,_), possibleFlow(F,T,TR,_).
+:- &sum{used_space(F,T,TR)} != 0, not routeFreq(F,T,TR,_,_), possibleFlow(F,T,TR,_).
+:- &sum{empty_space(F,T,TR)} != 0, not routeFreq(F,T,TR,_,_), possibleFlow(F,T,TR,_).
+:- &sum{used_space(F,T,TR);empty_space(F,T,TR)} != TotalCap, routeFreq(F,T,TR,_,TotalCap).
 
 &sum { S*load(F,T,TR,P) : possibleFlow(F,T,TR,P), productSizeSmall(P,S) } >= used_space(F,T,TR)
     :- routeFreq(F,T,TR,Freq,TotalCap).
 
+%&maximize{used_space(F,T,TR) :possibleFlow(F,T,TR,_)}.
 &sum {TotalCap; -1 * used_space(F,T,TR)} = empty_space(F,T,TR) 
     :- routeFreq(F,T,TR,Freq,TotalCap).
 
+&minimize{empty_space(F,T,TR) :possibleFlow(F,T,TR,_)}.
 
 % scale_co2 = 1/1000000
 #minimize{C*Freq,From,To,TR: routeFreq(From, To, TR, Freq, TotalCap),route(_, From, To, TR, _, C)}.
 #minimize{(D*Freq*E)/100000,From,To,TR: routeFreq(From, To, TR, Freq, _),route(_, From, To, TR,D, _),transportCO2(TR,E)}.
 
 
-&minimize{empty_space(F,T,TR) :possibleFlow(F,T,TR,_)}.

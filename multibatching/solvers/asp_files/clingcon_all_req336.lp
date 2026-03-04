@@ -34,7 +34,6 @@ productTR(P,TR), tRCapSmall(TR, Cap), productSizeSmall(P,S), S<Cap. %, not inval
 tRCapSmall(TR,Cap) :- transportCapacity(TR,CapB), Cap=CapB/cap_size_divide.
 productSizeSmall(P,S) :- productSize(P,SB), S = SB/cap_size_divide.
 
-
 &dom { 0..Max } = load(From, To, TR, P) :- possibleFlow(From, To, TR,P), totalSupply(P, Max).
 &sum { load(From, L, TR, P): possibleFlow(From, L, TR, P)} = flow_in(P, L) :-  location(L), product(P).
 &sum { load(L, To, TR, P): possibleFlow(L, To, TR, P)} = flow_out(P, L) :-  location(L), product(P).
