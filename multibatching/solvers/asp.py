@@ -185,7 +185,8 @@ class ClingconMultibatchingSolver(SolverDO):
             parse_string(ASP_MODEL_CONTENT, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
             # Generate and parse facts
-            facts_str = self._generate_facts()
+            facts_str = self._generate_facts(scale_emission_cost=
+                                             kwargs.get("scale_emission_cost", 100000))
             logger.debug("Generated ASP Facts:\n" + facts_str)
             parse_string(facts_str, lambda ast: self.theory.rewrite_ast(ast, bld.add))
 
@@ -351,7 +352,7 @@ class ClingconMultibatchingSolver(SolverDO):
         sol = MultibatchingSolution(problem=self.problem, list_flows=list_flows)
         return sol 
         
-    def _generate_facts(self) -> str:
+    def _generate_facts(self, scale_emission_cost: float=100000.) -> str:
         # Same generation logic as before, ensure it returns a valid ASP string
         facts = []
 
@@ -369,7 +370,7 @@ class ClingconMultibatchingSolver(SolverDO):
             self.name_to_transport_type[s_name] = tt
             facts.append(f"transportResource({s_name}).")
             # 1000000
-            co2 = int(tt.emissions * 100000)
+            co2 = int(tt.emissions * scale_emission_cost)
             facts.append(f"transportCO2({s_name},{co2}).")
             facts.append(f"transportCost({s_name},{max(0,self.sanitize_num(tt.cost))}).")
             scaled_cap = max(0, int(tt.capacity))
