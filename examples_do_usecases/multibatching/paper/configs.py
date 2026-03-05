@@ -147,11 +147,17 @@ def config_column_generation(timeout):
 
 def all_configs(timeout,
                 add_col_gen: bool = True,
+                add_1step: bool = True,
+                add_2step: bool = True,
+                add_3steps: bool = True,
                 verbose: bool=False):
     c = dict()
-    c.update(configs_direct_solve(timeout))
-    c.update(config_2step(timeout))
-    c.update(config_3steps(timeout, verbose))
+    if add_1step:
+        c.update(configs_direct_solve(timeout))
+    if add_2step:
+        c.update(config_2step(timeout))
+    if add_3steps:
+        c.update(config_3steps(timeout, verbose))
     if add_col_gen:
         c.update(config_column_generation(timeout))
     return c

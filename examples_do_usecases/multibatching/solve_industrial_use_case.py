@@ -337,7 +337,7 @@ def run_milp_single():
     print(problem.evaluate(sol), problem.satisfy(sol))
 
 def run_milp_2step():
-    problem = parse_problem(False)
+    problem = parse_problem(False, scale_co2=1/1000000)
     from multibatching.solvers.milp_flow import GurobiMultibatchingSolver
     from discrete_optimization.generic_tools.lp_tools import ParametersMilp
     solver = GurobiMultibatchingSolver(problem)
@@ -592,7 +592,8 @@ def run_cp_debug_flows():
 
 if __name__ == "__main__":
     # run_cpoptal_2steps()
-    run_cp_2steps()
+    run_milp_2step()
+    #run_cp_2steps()
     # run_milp_2step()
     # run_milp_lazy()
     # run_milp_2step()
