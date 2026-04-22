@@ -395,155 +395,74 @@ class CpsatMultibatchingSolver(OrtoolsCpSatSolver,
         # Option B: No incoming flow at producers
         no_incoming_at_source = args.get("prevent_incoming_at_source", False)
 
-        valid_links_map = None
-        if use_shortest_path:
-            logger.info(f"Computing valid links (Shortest Path Heuristic, tol={sp_tolerance})...")
-            valid_links_map = self.precompute_valid_links(tolerance=sp_tolerance)
-        # Could provide non-hardcoded upper bound for our variables...
-        model = cp_model.CpModel()
-        transport_links = self.problem.transport_links
-        flows_variables = {}
-        nb_trips_per_link = {}
-        keys_inflow_location_product = dict()
-        keys_outflow_location_product = dict()
-        for index_tl in range(self.problem.nb_transport_links):
-            flows_variables[index_tl] = {}
-            tl = transport_links[index_tl]
-            loc1 = tl.location_l1
-            loc2 = tl.location_l2
-            if loc1.id not in keys_outflow_location_product:
-                keys_outflow_location_product[loc1.id] = defaultdict(lambda: set())
-            if loc2.id not in keys_inflow_location_product:
-                keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
-            tr: TransportType = tl.transport_type
-            nb_trips_per_link[index_tl] = model.NewIntVar(lb=0,
-                                                          ub=max_nb_trip,
-                                                          name=f'num_trips_{index_tl}')
-            list_var_weight = []
-            # for index_product in range(self.problem.nb_products):
-            for index_product in range(self.problem.nb_products):
-                product: Product = self.problem.products[index_product]
-                # Heuristic A: Skip if link is not on a shortest path
-                if use_shortest_path and valid_links_map:
-                    if index_tl not in valid_links_map.get(product.id, set()):
-                        continue
 
-                # Heuristic B: Skip if destination is a Producer (NetSupply > 0)
-                # "On node that produce product, you should not have incoming flows"
-                if no_incoming_at_source:
-                    if loc2.net_supply.get(product, 0) > 0:
-                        continue
-                # ---------------------------------
+        def sanitize(s: str) -> str:
+                s = str(s).replace(".", "").replace("-", "").replace(" ", "")
+                return s[0].lower() + s[1:] 
+
+        import os
+        this_folder = os.path.abspath(os.path.dirname(__file__))
+        with open(os.path.join(this_folder, "possible_flows_new.lp"), 'w') as file_out:
+        
+            lines = ""
+            valid_links_map = None
+            if use_shortest_path:
+                logger.info(f"Computing valid links (Shortest Path Heuristic, tol={sp_tolerance})...")
+                valid_links_map = self.precompute_valid_links(tolerance=sp_tolerance)
+            # Could provide non-hardcoded upper bound for our variables...
+            model = cp_model.CpModel()
+            transport_links = self.problem.transport_links
+            flows_variables = {}
+            nb_trips_per_link = {}
+            keys_inflow_location_product = dict()
+            keys_outflow_location_product = dict()
+            for index_tl in range(self.problem.nb_transport_links):
+                flows_variables[index_tl] = {}
+                tl = transport_links[index_tl]
+                loc1 = tl.location_l1
+                loc2 = tl.location_l2
+                if loc1.id not in keys_outflow_location_product:
+                    keys_outflow_location_product[loc1.id] = defaultdict(lambda: set())
+                if loc2.id not in keys_inflow_location_product:
+                    keys_inflow_location_product[loc2.id] = defaultdict(lambda: set())
+                tr: TransportType = tl.transport_type
+                nb_trips_per_link[index_tl] = model.NewIntVar(lb=0,
+                                                            ub=max_nb_trip,
+                                                            name=f'num_trips_{index_tl}')
+                list_var_weight = []
+                # for index_product in range(self.problem.nb_products):
+                for index_product in range(self.problem.nb_products):
+                    product: Product = self.problem.products[index_product]
+                    # Heuristic A: Skip if link is not on a shortest path
+                    if use_shortest_path and valid_links_map:
+                        if index_tl not in valid_links_map.get(product.id, set()):
+                            continue
+
+                    # Heuristic B: Skip if destination is a Producer (NetSupply > 0)
+                    # "On node that produce product, you should not have incoming flows"
+                    if no_incoming_at_source:
+                        if loc2.net_supply.get(product, 0) > 0:
+                            continue
+                    # ---------------------------------
 
 
-                max_flow_product = max(supply_per_product[product],
-                                       demand_per_product[product])
-                # Create flow of product when the current transport type is valid for this product.
-                if tr in product.valid_transports:
-                    if tr.capacity > product.size:
-                        flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
-                                                                                   ub=max_flow_product,
-                                                                                   name=f"flow_{index_tl}_{index_product}")
-                        keys_outflow_location_product[loc1.id][product.id].add((index_tl, index_product))
-                        keys_inflow_location_product[loc2.id][product.id].add((index_tl, index_product))
-                        list_var_weight.append((flows_variables[index_tl][index_product],
-                                                int(product.size)))
+                    max_flow_product = max(supply_per_product[product],
+                                        demand_per_product[product])
+                    # Create flow of product when the current transport type is valid for this product.
+                    if tr in product.valid_transports:
+                        if tr.capacity > product.size:
+                            flows_variables[index_tl][index_product] = model.NewIntVar(lb=0,
+                                                                                    ub=max_flow_product,
+                                                                                    name=f"flow_{index_tl}_{index_product}")
+                            keys_outflow_location_product[loc1.id][product.id].add((index_tl, index_product))
+                            keys_inflow_location_product[loc2.id][product.id].add((index_tl, index_product))
+                            list_var_weight.append((flows_variables[index_tl][index_product],
+                                                    int(product.size)))
 
-            # Global capacity constraint
-            model.Add(cp_model.LinearExpr.weighted_sum([x[0] for x in list_var_weight],
-                                                       [x[1] for x in list_var_weight])
-                      <= nb_trips_per_link[index_tl]*tl.transport_type.capacity)
-        if args["detailed_capacity_constraint"]:
-            nb_trips_min_for_product_flows = {}
-            for index_product in range(self.problem.nb_products):
-                product = self.problem.products[index_product]
-                size_product = product.size
-                for tl in range(self.problem.nb_transport_types):
-                    tt: TransportType = self.problem.transport_types[tl]
-                    capa_transport = tt.capacity
-                    nb_trips_min_for_product_flows[(index_product, tt)] = [0]
-                    current_greedy_bins = defaultdict(lambda: 0)
-                    current_bin = 0
-                    current_greedy_bins[0] = 0
-                    for i in range(demand_per_product[product]):
-                        if current_greedy_bins[current_bin] + size_product <= capa_transport:
-                            current_greedy_bins[current_bin] += size_product
-                        else:
-                            current_bin += 1
-                            current_greedy_bins[current_bin] = size_product
-                        nb_trips_min_for_product_flows[(index_product, tt)].append(current_bin+1)
-            for index_tl in flows_variables:
-                transport_link = self.problem.transport_links[index_tl]
-                transport_type = transport_link.transport_type
-                for index_product in flows_variables[index_tl]:
-                    nb_trips_min = nb_trips_min_for_product_flows[(index_product, transport_type)]
-                    # binary_indicators = [model.NewBoolVar(f'flow_{index_tl}_{index_product}_equal_{k}')
-                    #                      for k in range(len(nb_trips_min))]
-                    # model.add_map_domain(flows_variables[index_tl][index_product],
-                    #                     binary_indicators)
-                    # for j in range(1, len(binary_indicators)):
-                    #     (model.add(nb_trips_per_link[index_tl] >= nb_trips_min[j])
-                    #     .OnlyEnforceIf(binary_indicators[j]))
-                    # For a given number of product flow NB, we force nb_trips_per_link to be >= nb_trips_min[NB]
-                    model.AddForbiddenAssignments([flows_variables[index_tl][index_product],
-                                                   nb_trips_per_link[index_tl],
-                                                   ],
-                                                  [(j, nb_min)
-                                                   for j in range(1, min(5, len(nb_trips_min)))
-                                                   for nb_min in range(nb_trips_min[j])])
-
-        if args["add_lb_constraint_nb_trips"]:
-            print("add_lb_constraint_nb_trips")
-            #self.add_advanced_capacity_constraints(model=model, flows_variables=flows_variables,
-            #                                       nb_trips_per_link=nb_trips_per_link,
-            #                                       solver_type="cpsat")
-            self.add_advanced_capacity_constraints2(model=model, flows_variables=flows_variables,
-                                                    nb_trips_per_link=nb_trips_per_link,
-                                                    solver_type="cpsat")
-            self.add_global_flow_limit_constraints(model, flows_variables, "cpsat", 3)
-        # Flows constraint
-        for location in self.problem.locations:
-            loc_id = location.id
-            debug_mode = args.get("debug_mode", False)
-            index_products = args.get("debug_settings", {}).get("index_products", range(len(self.problem.products)))
-            for index_product in index_products:
-                product = self.problem.products[index_product]
-                net_supply = location.net_supply.get(product, 0)
-                # Linear expressions (not constraint)
-                flow_in = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
-                                                   for x in
-                                                   keys_inflow_location_product.get(loc_id, {}).get(product.id,
-                                                                                                    set())])
-                #flow_in = sum([flows_variables[x[0]][x[1]]
-                #               for x in keys_inflow_location_product.get(loc_id, {}).get(product.id, set())])
-                flow_out = cp_model.LinearExpr.Sum([flows_variables[x[0]][x[1]]
-                                                    for x in
-                                                    keys_outflow_location_product.get(loc_id, {}).get(product.id,
-                                                                                                      set())])
-                model.Add(flow_in+net_supply-flow_out == 0)
-        transport_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl]
-                                                  * int(transport_links[index_tl].distance
-                                                        * transport_links[index_tl].transport_type.cost)
-                                                  for index_tl in range(self.problem.nb_transport_links)])
-        emission_cost = self.scaling_factor*sum([nb_trips_per_link[index_tl]
-                                                 * int(transport_links[index_tl].distance
-                                                       * transport_links[index_tl].transport_type.emissions)
-                                                 for index_tl in range(self.problem.nb_transport_links)])
-        estimated_compound = []
-        for index_tl in range(self.problem.nb_transport_links):
-            tl = self.problem.transport_links[index_tl]
-            time = tl.distance/tl.transport_type.speed
-            value = sum(flows_variables[index_tl][index_product]*int(self.problem.products[index_product].value)
-                        for index_product in flows_variables[index_tl])
-            estimated_compound.append(value*int(self.scaling_factor*((1+self.problem.capital_factor)**time-1)))
-        self.variables["total_obj"] = transport_cost+emission_cost+sum(estimated_compound)
-        model.Minimize(self.variables["total_obj"])
-        self.variables["objs"] = {"transport": transport_cost,
-                                  "emission": emission_cost,
-                                  "capital": sum(estimated_compound)}
-        self.cp_model = model
-        self.variables["flows"] = flows_variables
-        self.variables["nb_trips"] = nb_trips_per_link
+                        lines += f"possibleFlow({sanitize(loc1.name)},{sanitize(loc2.name)},{sanitize(tr.name)},{sanitize(product.name)}).\n"
+            print(lines)
+            file_out.write(lines)    
+        
 
     def init_model_flows_single_batching(self, **args: Any) -> None:
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}

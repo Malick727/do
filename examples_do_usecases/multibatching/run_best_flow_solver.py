@@ -17,7 +17,7 @@ from examples_do_usecases.multibatching.solve_industrial_use_case import parse_p
 import logging
 logging.basicConfig(level=logging.INFO)
 def run_best():
-import pickle
+    import pickle
 
 def run():
     solver_config = SolverConfig(cls=SequentialMetasolver,

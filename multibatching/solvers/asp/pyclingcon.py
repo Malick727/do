@@ -9,6 +9,7 @@ from clingo import Control
 from clingcon import ClingconTheory
 
 
+
 import matplotlib
 import pandas as pd
 import numpy as np
@@ -64,7 +65,7 @@ modelAtomTemplates = [
         {'name':'route', 'filter':lambda s: s.name=='route', 'columns':['idx','from' ,'to', 'transportresource', 'distance','cost']},
         {'name':'routeCostTotal', 'filter':lambda s: s.name=='routeCostTotal', 'columns':['from' ,'to', 'transportresource', 'cost']},
         {'name':'routeFreq','filter':lambda s: s.name=='routeFreq', 'columns':['from', 'to', 'transportresource','freq','maxcapacity']}, #,'maxcapacity', 'minus1'
-        {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource']},
+        {'name':'activeFlow','filter':lambda s: s.name=='activeFlow', 'columns':['from', 'to', 'transportresource','part']},
         {'name':'demandOffer','filter':lambda s: s.name=='demandOffer', 'columns':['product', 'location', 'amount']},
         #{'name':'requiredNet','filter':lambda s: s.name=='requiredNet', 'columns':['product', 'location', 'amount']},
         {'name':'productTR','filter':lambda s: s.name=='productTR', 'columns':['product', 'transportresource']},
@@ -92,7 +93,11 @@ def solve_clingcon(programs, max_models=0, ngo=False):
 
     thy = ClingconTheory()
     # , "--parallel-mode=12"
-    clingo_args = [f"--models={max_models}", "--opt-mode=opt"]
+    clingo_args = [f"--models=0", "--opt-mode=opt", "--configuration=frumpy"#,
+                                                 #"--heuristic=Domain"
+                                                 ]
+    
+    #[f"--models={max_models}", "--opt-mode=opt"]
 
     ctl = clingo.Control(clingo_args)
     ctl.configuration.solve.models = 0  # Search for better models

@@ -6,7 +6,7 @@ tr_name_id_mapping = {}
 product_name_id_mapping = {}
 tr_id_cost_mapping = {}
 
-alternative_names = False
+alternative_names = True
 folder = '../../../multibatching/datalocal'
 file_name = 'config-local' # 'oneheart-kerosene-aircraft' #'config-local.json' # 
 input_file = f'{file_name}.json'
@@ -147,6 +147,17 @@ def json2asp(file_out):
 
 
 
+
+this_folder = os.path.abspath(os.path.dirname(__file__))
+output_folder = os.path.join(this_folder, "")
+with open(os.path.join(output_folder, "req.lp"), 'w') as file_out:
+    lines = ""
+#    
+    with open(f"/Users/thd7as/Documents/GitHub/discrete-optimisation-use-cases/multibatching/solvers/asp/requiredNet.csv", 'r') as filehandle:
+        for flow in filehandle:
+            lines += f"requiredNet({flow.strip()}).\n"
+    file_out.write(lines)
+
 #this_folder = os.path.abspath(os.path.dirname(__file__))
 #output_folder = os.path.join(this_folder, "lps/airbus/")
 #if not os.path.exists(output_folder):
@@ -155,15 +166,15 @@ def json2asp(file_out):
 #    json2asp(file_out)
 #    print(f"successfully parsed ./{folder}/{input_file} and created {output_file} saved in {output_folder}.")
 
-this_folder = os.path.abspath(os.path.dirname(__file__))
-output_folder = os.path.join(this_folder, "lps/airbus/")
-with open(os.path.join(output_folder, "possible_flows_new.lp"), 'w') as file_out:
-    lines = ""
-    
-    with open(f"/Users/thd7as/Documents/GitHub/discrete-optimisation-use-cases/multibatching/solvers/asp/lps/airbus/possibleFlows.lp", 'r') as filehandle:
-        for flow in filehandle:
-            lines += f"possibleFlow({flow.strip()}).\n"
-    file_out.write(lines)
+#this_folder = os.path.abspath(os.path.dirname(__file__))
+#output_folder = os.path.join(this_folder, "lps/airbus/")
+#with open(os.path.join(output_folder, "possible_flows_new.lp"), 'w') as file_out:
+#    lines = ""
+#    
+#    with open(f"/Users/thd7as/Documents/GitHub/discrete-optimisation-use-cases/multibatching/solvers/asp/lps/airbus/possibleFlows.lp", 'r') as filehandle:
+#        for flow in filehandle:
+#            lines += f"possibleFlow({flow.strip()}).\n"
+#    file_out.write(lines)
 #def mapToAsp(predicateConstantsDict):
 #    aspString = "".join(f"{predicate}({','.join(str(n) for n in constants)}).\n" for predicate, constants in predicateConstantsDict.items())
 #    return aspString

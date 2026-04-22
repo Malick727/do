@@ -23,10 +23,11 @@ import os
 import csv
 import time 
 import math
+
 logger = logging.getLogger(__name__)
 
 
-lp_name = "clingcon_all_req322"
+lp_name = "shortestPaths_266"
 
 def get_programs_by_categories(categories: list[str]):
     programs = []
@@ -147,8 +148,11 @@ class ClingconMultibatchingSolver(SolverDO):
 
     def init_model(self, **kwargs: Any) -> None:
         # Default options
-        clingo_args = kwargs.get("clingo_args",  [f"--models=0", "--opt-mode=opt"#,
-                                                 #"--heuristic=Domain"
+        clingo_args = kwargs.get("clingo_args",  [f"--models=0", "--opt-mode=opt", "--configuration=handy", "--parallel-mode=4,split",
+                                               #  "--parallel-mode=4,compete",  # Use 4 CPU cores (adjust to your machine) competing against each other
+  # "--configuration=jumpy" #,       # Equip each core with a different solving strategy
+   # "--restart-on-model",         # THE MAGIC BULLET: Restart the search tree when a better bound is found
+  #  "--opt-strategy=bb",          # Use Branch and Bound for cost optimization
                                                  ])
       #  clingo_args = kwargs.get("clingo_args", 
                                #  [
@@ -220,9 +224,9 @@ class ClingconMultibatchingSolver(SolverDO):
             self.modelIndex += 1
             logger.info(f"Model [{self.modelIndex}] found after {round((time.process_time() - self.start_solving) / 60, 2)} minutes of solving.")
 
-            self.processModelAtoms(model)
-            self.compute_active_flows()
-            self.compute_costs()
+            #self.processModelAtoms(model)
+            #self.compute_active_flows()
+            #self.compute_costs()
             sol = self.retrieve_solution(model)
             fit = self.aggreg_from_sol(sol)
 
@@ -249,13 +253,6 @@ class ClingconMultibatchingSolver(SolverDO):
                 if not finished:
                     logger.info(f"Time limit of {time_limit}s reached.")
                     handle.cancel()
-                stats = self.ctl.statistics
-                # Some clingo versions/configurations expose the lower bound in stats
-                if 'solve' in stats and 'lower_bound' in stats['solve']:
-                    self.lower_bound = stats['solve']['lower_bound']
-                    if self.lower_bound > 0:
-                        gap = self.lower_bound
-                        print(f"Lower bound: {gap:.2f}%")
         if len(res) > 0:
             self.status_solver = StatusSolver.SATISFIED
         else:
@@ -387,7 +384,7 @@ class ClingconMultibatchingSolver(SolverDO):
             self.route_key_to_link[(source, dest, tr_name)] = tl
             dist = int(tl.distance)
             cost = int(self.sanitize_num(tl.transport_type.cost) * dist)
-            facts.append(f"route({idx},{source},{dest},{tr_name},{dist},{cost}).")
+            facts.append(f"route({source},{dest},{tr_name},{dist},{cost}).")
             
         # Products
         self.name_to_product = {}

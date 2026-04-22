@@ -8,14 +8,14 @@ import json
 from multibatching.parse_config_data import parse_json_to_problem
 from multibatching.solvers.two_steps import (TwoStepMultibatchingSolver, NetxMultibatchingSolver,
                                              PackingViaBinPacking, GreedyPackingForMultibatching)
-
+import time
 def parse_problem(fix_problem: bool = False,
                   harbor_constraint: bool = False,
                   filter_transport_types:bool = False,
                   scale_co2: float = 1):
     this_folder = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(this_folder,
-                               "../../multibatching/datalocal/config-local.json")
+                               "../../multibatching/datalocal/anonymized.json")
     d = json.load(open(config_file, "r"))
     problem = parse_json_to_problem(d, harbor_constraint=harbor_constraint,
                                     scale_co2=scale_co2)
@@ -43,7 +43,7 @@ def script():
     problem = parse_problem(harbor_constraint=False,
                             filter_transport_types=True, scale_co2=1/1000000)
     solver = ClingconMultibatchingSolver(problem)
-
+ 
     # 2. Initialize the solver
     solver.init_model()  # Initialize the ASP/Clingcon model
     # 3. Solve with a time limit (e.g., 30 seconds)
@@ -59,10 +59,11 @@ def script():
         pass
         print("Check flows", problem.check_flows(solution))
         fit = solver.aggreg_from_sol(solution)
-        total_costs = solver.compute_costs()
+        #total_costs = solver.compute_costs()
+        #time.sleep(2)
         print("total costs considered solution (estimate without frequencies):", fit, f"({fit:.2e})")
-        print("total costs considered solution:", total_costs, f"({total_costs:.2e})")
-
+        #print("total costs considered solution:", total_costs, f"({total_costs:.2e})")
+        
         pack = PackingViaBinPacking(problem)
         pack.init_from_solution(solution)
         res = pack.solve(time_limit_per_link=1)
