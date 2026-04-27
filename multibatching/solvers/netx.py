@@ -8,13 +8,24 @@ from discrete_optimization.generic_tools.result_storage.result_storage import Re
 from multibatching.problem import MultibatchingProblem, MultibatchingSolution, Product, PackingTransport, TransportType, \
     Location, TransportLink
 from discrete_optimization.generic_tools.do_solver import SolverDO
-
+from discrete_optimization.generic_tools.hyperparameters.hyperparameter import FloatHyperparameter, CategoricalHyperparameter
+import logging
+logger = logging.getLogger(__name__)
 
 class NetxMultibatchingSolver(SolverDO):
-
     problem: MultibatchingProblem
-
-    def compute_optimal_flow_for_product(self, product: Product):
+    hyperparameters = [CategoricalHyperparameter(name="restrict_to_shortest_paths",
+                                                 choices=[True, False], default=False),
+                       FloatHyperparameter(name="shortest_path_tolerance", depends_on=[("restrict_to_shortest_paths",
+                                                                                        [True])],
+                                           default=1.2, low=0, high=5),
+                       FloatHyperparameter(name="weight_on_transport",
+                                           default=1, low=0, high=1000),
+                       FloatHyperparameter(name="weight_on_emission",
+                                           default=1, low=0, high=1000)]
+    def compute_optimal_flow_for_product(self, product: Product,
+                                         weight_on_transport: float,
+                                         weight_on_emission: float):
         problem = self.problem
         G = nx.DiGraph()
         # source = 'source'
@@ -56,14 +67,21 @@ class NetxMultibatchingSolver(SolverDO):
                            weight=0)
                 #print(f"adding link from {loc} to sink")
 
-        for link in problem.transport_links:
+        for index_link in range(problem.nb_transport_links):
+            if self.use_shortest_path:
+                if index_link not in self.valid_links[product.id]:
+                    continue
+            link = problem.transport_links[index_link]
             if link.transport_type in product.valid_transports:
                 if link.transport_type.capacity == 0:
                     continue
                 if link.transport_type.capacity < product.size:
                     continue
-                coefficient = (max(1, product.size / link.transport_type.capacity) *
-                               (link.transport_type.cost + link.transport_type.emissions) * link.distance)
+                #coefficient = (max(1, product.size / link.transport_type.capacity) *
+                #               (link.transport_type.cost + link.transport_type.emissions) * link.distance)
+                coefficient = product.size / link.transport_type.capacity*(weight_on_transport*
+                                                                           link.transport_type.cost
+                                                                           +weight_on_emission*link.transport_type.emissions)*link.distance
                 intermediary_node = (link.location_l1.id,
                                      link.location_l2.id,
                                      link.transport_type.id)
@@ -87,28 +105,29 @@ class NetxMultibatchingSolver(SolverDO):
                                      capacity="capacity",
                                      weight="weight")
         cost_of_flow = nx.cost_of_flow(G, flowDict=dict_flow, weight="weight")
-        # print("cost of flow", cost_of_flow)
-        if False:
-            for n0 in dict_flow:
-                for n1 in dict_flow[n0]:
-                    if dict_flow[n0][n1] > 0:
-                        print("flow between ", n0, " and ", n1, " : ", dict_flow[n0][n1])
-                        print("Cost : ", dict_flow[n0][n1] * G[n0][n1]["weight"])
-        #print(cost_of_flow)
         return G, dict_flow, cost_of_flow
 
     def solve(self, callbacks: Optional[list[Callback]] = None, **kwargs: Any) -> ResultStorage:
+        kwargs = self.complete_with_default_hyperparameters(kwargs)
+        use_shortest_path = kwargs.get("restrict_to_shortest_paths", False)
+        sp_tolerance = kwargs.get("shortest_path_tolerance", 0.0)
+        self.use_shortest_path = use_shortest_path
+        if use_shortest_path:
+            self.valid_links = self.problem.precompute_valid_links(tolerance=sp_tolerance)
         supply_per_product = {p: self.problem.get_total_supply(p) for p in self.problem.products}
         demand_per_product = {p: self.problem.get_total_demand(p) for p in self.problem.products}
         flow_per_product = defaultdict(lambda: set())
         packs: dict[TransportLink, PackingTransport] = {}
         total_cost_of_flow = 0
         for product in supply_per_product:
-            size_product = product.size
+            print("Doing product : ", product, supply_per_product[product],
+                  demand_per_product[product])
             if supply_per_product[product] == 0:
                 continue
-            graph, flow, cost_of_flow = self.compute_optimal_flow_for_product(product=product)
-            print(product.name, " cost of flow : ", cost_of_flow)
+            graph, flow, cost_of_flow = self.compute_optimal_flow_for_product(product=product,
+                                                                              weight_on_transport=kwargs["weight_on_transport"],
+                                                                              weight_on_emission=kwargs["weight_on_emission"])
+            logger.info(f"{product.name}, cost of flow : , {cost_of_flow}")
             total_cost_of_flow += cost_of_flow
             for node_1 in flow:
                 type_node_1 = graph.nodes[node_1]["type"]
@@ -130,7 +149,7 @@ class NetxMultibatchingSolver(SolverDO):
                                                            product_packing={product: value},
                                                            nb_packing=1)
                                 packs[transport_link] = packing
-        print(total_cost_of_flow, " total cost flow")
+        logger.info(f"{total_cost_of_flow} total cost flow")
         sol = MultibatchingSolution(problem=self.problem,
                                     list_flows=list(packs.values()))
         fit = self.aggreg_from_sol(sol)

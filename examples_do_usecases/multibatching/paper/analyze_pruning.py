@@ -121,6 +121,42 @@ def plot_isolated_convergence(df, solver_name, include_bound=True):
     plt.show()
 
 
+def plot_solver_comparison_baseline(df):
+    """
+    Directly compares the objective convergence of MILP vs CP,
+    strictly for the baseline runs where no pruning is applied.
+    """
+    # Filter for the baseline configuration (no pruning)
+    df_baseline = df[df['pruning'] == 'False'].copy()
+
+    plt.figure(figsize=(9, 6))
+
+    # Using errorbar=None to keep the lines clean and focused on the average trend
+    sns.lineplot(
+        data=df_baseline,
+        x='time_s',
+        y='obj',
+        hue='solver',
+        errorbar=None,
+        linewidth=2.5,
+        palette='Set1'
+    )
+
+    #plt.yscale('log')
+    plt.title("Convergence Speed: MILP vs CP", fontsize=14)
+    plt.ylabel("Average Objective Function", fontsize=12)
+    plt.xlabel("Time (s)", fontsize=12)
+
+    # Improve the legend readability
+    handles, labels = plt.gca().get_legend_handles_labels()
+    plt.legend(handles=handles, labels=[l.upper() for l in labels], title="Flow Solver")
+
+    plt.grid(True, which="both", linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig("step1_milp_vs_cp_baseline.pdf")
+    plt.show()
+
+
 def plot_gap_evolution(df):
     """
     Plots the convergence of the absolute optimality gap.
@@ -145,11 +181,9 @@ def generate_convergence_latex_table(df_timeseries, df_stats, filename="step1_co
     """
     Generates a cleanly formatted LaTeX table analyzing the final state and time to first solution.
     """
-    # Filter to the end of the time horizon
     max_t = df_timeseries['time_s'].max()
     df_final = df_timeseries[df_timeseries['time_s'] == max_t].copy()
 
-    # Merge final time-series stats with the exact first solution times
     df_merged = pd.merge(df_final, df_stats, on=['solver', 'pruning', 'run'])
 
     summary = df_merged.groupby(['solver', 'pruning']).agg(
@@ -162,14 +196,11 @@ def generate_convergence_latex_table(df_timeseries, df_stats, filename="step1_co
         Mean_T1=('first_sol_time', 'mean')
     ).reset_index()
 
-    # Sort lexicographically
     summary = summary.sort_values(by=['solver', 'pruning'])
 
-    # Find best mean obj (lowest) and best mean bound (highest)
     min_obj = summary['Mean_Obj'].min()
     max_bound = summary['Mean_Bound'].max()
 
-    # Format values, bolding the best objective and best bound
     summary['Runs'] = summary['Runs'].astype(int).astype(str)
 
     summary['Mean_Obj'] = summary['Mean_Obj'].apply(
@@ -186,7 +217,6 @@ def generate_convergence_latex_table(df_timeseries, df_stats, filename="step1_co
 
     summary['Mean_T1'] = summary['Mean_T1'].apply(lambda x: f"{x:.1f}" if pd.notnull(x) else "-")
 
-    # Clean headers
     summary = summary.rename(columns={
         'solver': 'Flow Solver',
         'pruning': 'Pruning',
@@ -198,7 +228,6 @@ def generate_convergence_latex_table(df_timeseries, df_stats, filename="step1_co
         'Mean_T1': 'Time to 1st Sol (s)'
     })
 
-    # Set MultiIndex to trigger LaTeX multirow grouping
     summary = summary.set_index(['Flow Solver', 'Pruning'])
 
     latex_table = summary.to_latex(
@@ -215,19 +244,24 @@ def generate_convergence_latex_table(df_timeseries, df_stats, filename="step1_co
 
 if __name__ == "__main__":
     print("Loading and interpolating time series data...")
-    df_timeseries, df_stats = load_and_interpolate_timeseries(study_name="multibatching-airbus-shortest-path",
+    df_timeseries, df_stats = load_and_interpolate_timeseries(study_name="multibatching-airbus-shortest-path-2",
                                                               max_time=200)
 
-    # Generate separated MILP plots
+    # 1. Generate the new direct comparison plot (MILP vs CP)
+    print("Generating baseline MILP vs CP comparison plot...")
+    plot_solver_comparison_baseline(df_timeseries)
+
+    # 2. Generate separated MILP plots
     print("Generating MILP plots...")
     plot_isolated_convergence(df_timeseries, solver_name='milp', include_bound=True)
     plot_isolated_convergence(df_timeseries, solver_name='milp', include_bound=False)
 
-    # Generate separated CP plots
+    # 3. Generate separated CP plots
     print("Generating CP plots...")
     plot_isolated_convergence(df_timeseries, solver_name='cp', include_bound=True)
     plot_isolated_convergence(df_timeseries, solver_name='cp', include_bound=False)
 
+    # 4. Generate gap and table
     print("Generating gap evolution plot...")
     plot_gap_evolution(df_timeseries)
 

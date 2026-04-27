@@ -2,7 +2,8 @@ from abc import abstractmethod
 from typing import Any, Optional
 import optalcp as cp
 from discrete_optimization.generic_tools.callbacks.callback import Callback, CallbackList
-from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, SignEnum, StatusSolver
+from discrete_optimization.generic_tools.cp_tools import CpSolver, ParametersCp, SignEnum
+from discrete_optimization.generic_tools.do_solver import StatusSolver
 from discrete_optimization.generic_tools.do_problem import Solution
 from discrete_optimization.generic_tools.exceptions import SolveEarlyStop
 from discrete_optimization.generic_tools.result_storage.result_storage import ResultStorage

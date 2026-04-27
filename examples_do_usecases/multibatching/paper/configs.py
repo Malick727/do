@@ -27,7 +27,7 @@ time_limit = 100
 p = ParametersCp.default_cpsat()
 p.nb_process = 8
 
-def subbricks_packing(timeout):
+def subbricks_packing(timeout, add_asp: bool = True):
     greedy = SubBrick(GreedyPackingForMultibatching, {})
     cpsat = SubBrick(CpsatPackingSubproblem, {"time_limit": int(timeout), "parameters_cp": p})
     cpsat_binpack = SubBrick(cls=PackingViaBinPacking, kwargs={"bin_packing_solver":
@@ -35,11 +35,14 @@ def subbricks_packing(timeout):
                                                                         kwargs=dict(modeling=ModelingBinPack.SCHEDULING,
                                                                                     parameters_cp=p)),
                                                                "time_limit_per_link": 1})
-    asp_binpack = SubBrick(cls=PackingViaBinPacking,
-                           kwargs={"time_limit_per_link": 1,
-                                   "bin_packing_solver": SubBrick(cls=AspBinPackingSolver,
-                                                                  kwargs={})})
-    return {"greedy": greedy, "cp": cpsat, "cp-binpack": cpsat_binpack, "asp-binpack": asp_binpack}
+    solvers = {"greedy": greedy, "cp": cpsat, "cp-binpack": cpsat_binpack}
+    if add_asp:
+        asp_binpack = SubBrick(cls=PackingViaBinPacking,
+                               kwargs={"time_limit_per_link": 1,
+                                       "bin_packing_solver": SubBrick(cls=AspBinPackingSolver,
+                                                                      kwargs={})})
+        solvers["asp-binpack"] = asp_binpack
+    return solvers
 
 def subbricks_flow(timeout):
     c = dict(networkx=SubBrick(cls=NetxMultibatchingSolver, kwargs={}),
@@ -95,11 +98,11 @@ def configs_direct_solve(timeout):
                                                               "parameters_cp": p})
     return c
 
-def config_2step(timeout):
+def config_2step(timeout, add_asp: bool=True):
     c = {}
     flows = subbricks_flow(int(0.75*timeout))
     flows_full_timeout = subbricks_flow(timeout)
-    packings = subbricks_packing(int(0.25*timeout))
+    packings = subbricks_packing(int(0.25*timeout), add_asp=add_asp)
     for flow_method in flows:
         for packing_method in packings:
             if packing_method == "greedy":
@@ -149,13 +152,14 @@ def all_configs(timeout,
                 add_col_gen: bool = True,
                 add_1step: bool = True,
                 add_2step: bool = True,
+                add_asp: bool = True,
                 add_3steps: bool = True,
                 verbose: bool=False):
     c = dict()
     if add_1step:
         c.update(configs_direct_solve(timeout))
     if add_2step:
-        c.update(config_2step(timeout))
+        c.update(config_2step(timeout, add_asp=add_asp))
     if add_3steps:
         c.update(config_3steps(timeout, verbose))
     if add_col_gen:

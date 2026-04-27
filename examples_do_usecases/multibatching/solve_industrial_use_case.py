@@ -25,7 +25,8 @@ from multibatching.solvers.packing_subproblem import (CpsatPackingSubproblem,
 from multibatching.solvers.netx import NetxMultibatchingSolver
 from discrete_optimization.generic_tools.callbacks.loggers import ObjectiveLogger
 from multibatching.solvers.cpmpy import CpmpyMultibatchingSolver
-from discrete_optimization.generic_tools.cp_tools import ParametersCp, StatusSolver
+from discrete_optimization.generic_tools.cp_tools import ParametersCp
+from discrete_optimization.generic_tools.do_solver import StatusSolver
 import json
 import os
 #from examples_do_usecases.multibatching.instance import init_instance
