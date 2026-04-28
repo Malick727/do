@@ -24,7 +24,8 @@ class AssemblyLine:
     """Final Assembly Line (FAL) where aircraft are assembled"""
     id: str
     takt_pace: int  # Time between aircraft starts (in days)
-    location: str
+    location: str # tls, hamburg, mobile, tianjin
+
 
 
 @dataclass(frozen=True)
@@ -40,12 +41,19 @@ class MSN:
 
 @dataclass(eq=False)
 class PreparationFactory:
-    """Factory that prepares engines before installation"""
+    """Factory that prepares engines before installation
+    Podder
+    """
     id: str
     location: str
-    compatible_engine_types: Set[str]  # Types of engines this factory can prepare
+    default_assembly_line: AssemblyLine
+    compatible_engine_types: Set[str]
+    # Types of engines this factory can prepare; in practice it's 1 type only
     preparation_durations: Dict[str, int]  # engine_type -> preparation duration (days)
-    capacity: Optional[int] = None  # Max engines that can be in preparation simultaneously (cumulative constraint)
+    capacity: Optional[int] = None
+    # Max engines that can be in preparation simultaneously (cumulative constraint)
+    calendar: list[tuple[int, int, int]] = None # [(Start, end, capacity) ]
+    # not needed.
     takt: Optional[int] = None  # Takt time: divider of preparation time for well-paced scheduling
 
     def can_prepare(self, engine_type: str) -> bool:
@@ -64,15 +72,29 @@ class PreparationFactory:
             return False
         return self.id == other.id
 
+@dataclass
+class EngineType:
+    id: str
+    value_engine: int
+    cost_storage_per_time: int
+    supplier: Set["EngineSupplier"]
+
+@dataclass
+class EngineSupplier:
+    capacity_delivery_per_week: int
+
 
 @dataclass(frozen=True)
 class Engine:
     """Engine instance to be allocated and scheduled"""
     id: str
     engine_type: str
-    delivery_time: int  # When unprepared engine is delivered (earliest prep can start)
-
+    engine_type_object: EngineType
+    engine_supplier: EngineSupplier
+    # When unprepared engine is delivered (earliest prep can start)
     # Baseline pre-allocations (for minimizing changes)
+    # Not necessary but used to fix some schedule part
+    delivery_time: Optional[int] = None
     baseline_msn_id: Optional[str] = None
     baseline_factory_id: Optional[str] = None
     baseline_prep_start: Optional[int] = None
@@ -85,7 +107,7 @@ class TravelInfo:
     factory_id: str
     assembly_line_id: str
     travel_time: int  # Days
-    travel_cost: float  # Cost per engine
+    travel_cost: float  # Cost per engine that travels
 
 
 class EnginePreparationSolution(Solution):
@@ -108,6 +130,7 @@ class EnginePreparationSolution(Solution):
         prep_start_times: Dict[Engine, int],
         prep_end_times: Dict[Engine, int],
         fal_arrival_times: Dict[Engine, int],
+        delivery_time: Dict[Engine, int],
     ):
         super().__init__(problem)
         self.engine_to_msn = engine_to_msn

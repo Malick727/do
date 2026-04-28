@@ -76,7 +76,7 @@ def compute_timeline_data(problem, solution):
 
 
 def create_gantt_chart(problem, solution, current_time):
-    """Create Gantt chart showing engine preparation timeline"""
+    """Create Gantt chart showing engine preparation timeline with vertical lanes for overlaps"""
 
     fig = go.Figure()
 
@@ -91,6 +91,11 @@ def create_gantt_chart(problem, solution, current_time):
         "GE90": "#e74c3c",
     }
 
+    # Build y-axis positions and labels
+    y_labels = []
+    y_positions = []
+    current_y = 0
+
     for factory_idx, factory in enumerate(factories_sorted):
         # Find all engines prepared at this factory
         engines_at_factory = [
@@ -99,10 +104,43 @@ def create_gantt_chart(problem, solution, current_time):
             if engine in solution.engine_to_factory and solution.engine_to_factory[engine] == factory
         ]
 
+        if not engines_at_factory:
+            continue
+
         # Sort by start time
         engines_at_factory.sort(key=lambda x: x[1])
 
+        # Assign lanes to avoid overlaps (greedy lane assignment)
+        engine_lanes = []  # List of (engine, start, end, lane)
+        lanes = []  # List of lanes, each lane stores the end time of last engine
+
         for engine, start, end in engines_at_factory:
+            # Find first available lane
+            assigned_lane = None
+            for lane_idx, lane_end_time in enumerate(lanes):
+                if start >= lane_end_time:  # No overlap
+                    assigned_lane = lane_idx
+                    lanes[lane_idx] = end  # Update lane end time
+                    break
+
+            # If no available lane, create new one
+            if assigned_lane is None:
+                assigned_lane = len(lanes)
+                lanes.append(end)
+
+            engine_lanes.append((engine, start, end, assigned_lane))
+
+        # Number of lanes needed for this factory
+        num_lanes = len(lanes)
+
+        # Create y-axis positions for this factory
+        factory_y_start = current_y
+        factory_y_end = current_y + num_lanes - 1
+
+        # Add bars for each engine
+        for engine, start, end, lane in engine_lanes:
+            y_pos = current_y + lane
+
             # Determine if engine is currently active
             is_active = start <= current_time < end
 
@@ -120,7 +158,7 @@ def create_gantt_chart(problem, solution, current_time):
 
             fig.add_trace(go.Bar(
                 x=[end - start],
-                y=[factory.id],
+                y=[y_pos],
                 base=[start],
                 orientation='h',
                 marker=dict(
@@ -144,6 +182,21 @@ def create_gantt_chart(problem, solution, current_time):
                 showlegend=False,
             ))
 
+        # Add factory label at the middle of its lanes
+        factory_y_center = (factory_y_start + factory_y_end) / 2
+        y_labels.append(f"{factory.id} ({num_lanes})")
+        y_positions.append(factory_y_center)
+
+        # Add separator line between factories
+        if factory_idx < len(factories_sorted) - 1:
+            fig.add_hline(
+                y=factory_y_end + 0.5,
+                line=dict(color="gray", width=1, dash="dot"),
+                layer="below"
+            )
+
+        current_y += num_lanes
+
     # Add vertical line for current time
     fig.add_vline(
         x=current_time,
@@ -155,8 +208,8 @@ def create_gantt_chart(problem, solution, current_time):
     fig.update_layout(
         title=f"<b>Engine Preparation Gantt Chart</b>",
         xaxis_title="<b>Time (days)</b>",
-        yaxis_title="<b>Factory</b>",
-        height=max(400, len(factories_sorted) * 40),
+        yaxis_title="<b>Factory (lanes)</b>",
+        height=max(400, current_y * 30 + 100),
         barmode='overlay',
         hovermode='closest',
         plot_bgcolor='#ecf0f1',
@@ -170,6 +223,9 @@ def create_gantt_chart(problem, solution, current_time):
         yaxis=dict(
             title_font=dict(size=16),
             tickfont=dict(size=13),
+            tickmode='array',
+            tickvals=y_positions,
+            ticktext=y_labels,
             autorange="reversed"
         ),
     )
@@ -392,7 +448,13 @@ def main():
         help="Slide to see the system state at different times"
     )
 
+    # Gantt chart
+    st.subheader("📊 Engine Preparation Timeline")
+    gantt_fig = create_gantt_chart(problem, solution, current_time)
+    st.plotly_chart(gantt_fig, use_container_width=True)
+
     # Main dashboard
+    st.subheader("📈 Real-Time Metrics")
     fig = create_dashboard(problem, solution, current_time)
     st.plotly_chart(fig, use_container_width=True)
 
