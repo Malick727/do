@@ -3,6 +3,10 @@ Streamlit Dashboard for Engine Preparation and Allocation
 
 Run with: streamlit run part_preparation/dashboard_streamlit.py
 """
+import os
+import sys
+this_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.join(this_dir, "../"))
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
