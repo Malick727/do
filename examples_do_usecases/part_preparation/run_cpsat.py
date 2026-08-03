@@ -14,10 +14,11 @@ import argparse
 import pickle
 import subprocess
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, ObjectiveHandling, ModeOptim
-from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition
+from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition,generate_instance_from_csv
 from part_preparation.solvers.cpsat import CPSatEngineSolver
 logging.basicConfig(level=logging.INFO)
 
+from datetime import datetime
 
 def main():
     # Example: Manual factory definitions for precise control over bottlenecks
@@ -68,6 +69,11 @@ def main():
         flexible_delivery_prob=0
     )
     problem = generate_instance(params)
+    start_filter = datetime(2026, 9, 15, 0, 0)
+    end_filter = datetime(2027, 10, 1, 23, 59)
+    problem = generate_instance_from_csv(csv_file_path =  "examples_do_usecases\part_preparation\contour-export-06-07-2026.csv",
+     start_date =start_filter ,
+     end_date = end_filter)
     print(f"\nProblem size:")
     print(f"  - {len(problem.assembly_lines_list)} assembly lines")
     print(f"  - {len(problem.msns_list)} MSNs")

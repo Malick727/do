@@ -55,22 +55,38 @@ def compute_jit_theoretical_load(problem):
 
 
 def compute_optimized_load(problem, solution):
-    """Compute actual production load from CP-SAT solution"""
-    factory_load = defaultdict(lambda: defaultdict(int))
+    """
+    Calcule la charge (load) de chaque usine au fil du temps pour la solution donnée.
+    Gère de façon sécurisée les moteurs non alloués (None).
+    """
+    # 1. Initialisation de la charge à 0 pour chaque usine et chaque jour
+    # On s'assure que time_horizon est bien un entier
+    time_horizon = int(problem.time_horizon)
+    optimized_load = {f.id: [0] * time_horizon for f in problem.factories_list}
 
+    # 2. Remplissage de la charge
     for engine in problem.engines_list:
-        if engine not in solution.engine_to_factory:
+        prep_start = solution.prep_start_times.get(engine)
+        prep_end = solution.prep_end_times.get(engine)
+        factory = solution.engine_to_factory.get(engine)
+
+        # 🔴 SÉCURITÉ 1 : On ignore les moteurs non alloués (ce qui causait ton erreur)
+        if prep_start is None or prep_end is None or factory is None:
             continue
 
-        factory = solution.engine_to_factory[engine]
-        prep_start = solution.prep_start_times[engine]
-        prep_end = solution.prep_end_times[engine]
+        start_t = int(prep_start)
+        end_t = int(prep_end)
 
-        for t in range(prep_start, prep_end):
-            factory_load[factory.id][t] += 1
+        # 🔴 SÉCURITÉ 2 : On empêche les erreurs "IndexError" si CP-SAT
+        # a planifié une fin au-delà de l'horizon de temps maximum
+        start_t = max(0, start_t)
+        end_t = min(end_t, time_horizon)
 
-    return factory_load
+        # 3. Ajout de la charge sur l'intervalle
+        for t in range(start_t, end_t):
+            optimized_load[factory.id][t] += 1
 
+    return optimized_load
 
 def count_factory_switches(problem, solution):
     """Count engines sent to non-preferred factories"""

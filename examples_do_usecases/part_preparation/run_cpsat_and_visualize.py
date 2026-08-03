@@ -14,9 +14,10 @@ import pickle
 import subprocess
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, ObjectiveHandling, ModeOptim
 
-from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition
+from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition, generate_instance_from_csv
 from part_preparation.solvers.cpsat import CPSatEngineSolver
 
+from datetime import datetime
 
 def main():
     parser = argparse.ArgumentParser(description="Run CP-SAT solver and visualize results")
@@ -38,51 +39,40 @@ def main():
     print("=" * 80)
 
     manual_factories = [
-        # EngineType_1 factories
-        FactoryDefinition(engine_type="EngineType_1",
-                          home_fal_index=0, capacity=3,
-                          preparation_duration=11, location="Derby"),
-        FactoryDefinition(engine_type="EngineType_1",
-                          home_fal_index=1,
-                          capacity=2,
-                          preparation_duration=10,
-                          location="Toulouse"),  # BOTTLENECK!
-        FactoryDefinition(engine_type="EngineType_1",
-                          home_fal_index=2,
-                          capacity=2,
-                          preparation_duration=13,
+        FactoryDefinition(engine_type="EngineType_1", home_fal_index=0, capacity=3, preparation_duration=11,
+                          location="Derby"),
+        FactoryDefinition(engine_type="EngineType_1", home_fal_index=1, capacity=2, preparation_duration=10,
+                          location="Toulouse"),
+        FactoryDefinition(engine_type="EngineType_1", home_fal_index=2, capacity=2, preparation_duration=13,
                           location="Virginia"),
-        FactoryDefinition(engine_type="EngineType_1",
-                          home_fal_index=None,
-                          capacity=1,
-                          preparation_duration=14,
-                          location="Singapore"),  # Distant from all
-
-        # EngineType_2 factories
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=0, capacity=4,
-                          preparation_duration=15, location="Durham"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=1, capacity=3,
-                          preparation_duration=15, location="Bordeaux"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=2, capacity=1,
-                          preparation_duration=15, location="Cincinnati"),  # BOTTLENECK!
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=3, capacity=2,
-                          preparation_duration=12, location="Shanghai"),
+        FactoryDefinition(engine_type="EngineType_1", home_fal_index=None, capacity=1, preparation_duration=14,
+                          location="Singapore"),
+        FactoryDefinition(engine_type="EngineType_2", home_fal_index=0, capacity=4, preparation_duration=15,
+                          location="Durham"),
+        FactoryDefinition(engine_type="EngineType_2", home_fal_index=1, capacity=3, preparation_duration=15,
+                          location="Bordeaux"),
+        FactoryDefinition(engine_type="EngineType_2", home_fal_index=2, capacity=1, preparation_duration=15,
+                          location="Cincinnati"),
+        FactoryDefinition(engine_type="EngineType_2", home_fal_index=3, capacity=2, preparation_duration=12,
+                          location="Shanghai"),
     ]
+
+    n_msns = 80 if args.instance == 'large' else 40
+    time_horizon = 1000 if args.instance == 'large' else 300
 
     params = InstanceParams(
         n_fals=4,
-        n_msns_per_fal=60,
+        n_msns_per_fal=n_msns,
         n_engine_types=2,
-        time_horizon=300,
+        time_horizon=time_horizon,
         fal_takt_paces=[2, 2, 5, 5],
-        factory_definitions=manual_factories,  # Use manual factory definitions
-        engine_to_msn_ratio={"EngineType_1": 1.1,
-                             "EngineType_2": 0.95},
+        factory_definitions=manual_factories,
+        engine_to_msn_ratio={"EngineType_1": 1.1, "EngineType_2": 0.95},
         supplier_regularity={"EngineType_1": 1.0, "EngineType_2": 0.8},
         supplier_production_rate={"EngineType_1": 1.0, "EngineType_2": 0.9},
         flexible_delivery_prob=0
     )
-    problem = generate_instance(params)
+
     params_objective = ParamsObjectiveFunction(
         objective_handling=ObjectiveHandling.AGGREGATE,
         objectives=[  # "baseline_changes",
@@ -93,6 +83,12 @@ def main():
         weights=[1.0, 1.0, 0., 1000000.0],  # High penalty for delays and unallocated MSNs
         sense_function=ModeOptim.MINIMIZATION
     )
+    problem = generate_instance(params)
+    # start_filter = datetime(2026, 9, 15, 0, 0)
+    # end_filter = datetime(2027, 10, 1, 23, 59)
+    # problem = generate_instance_from_csv(csv_file_path =  "examples_do_usecases\part_preparation\contour-export-06-07-2026.csv",
+    #  start_date =start_filter ,
+    #  end_date = end_filter)
     print("\nObjective weights:")
     for obj, weight in zip(params_objective.objectives, params_objective.weights):
         print(f"  - {obj}: {weight}")

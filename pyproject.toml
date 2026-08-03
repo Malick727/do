@@ -1,0 +1,17 @@
+[project]
+name = "discrete-optimisation-use-cases-ld"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "deap>=1.4.4",
+    "discrete-optimization>=0.9.0",
+    "gurobipy>=13.0.2",
+    "matplotlib>=3.10.8",
+    "notebook>=7.6.1",
+    "ortools>=9.14.6206",
+    "plotly>=6.5.2",
+    "streamlit>=1.58.0",
+    "torch>=2.13.0",
+]

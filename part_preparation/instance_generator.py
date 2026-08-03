@@ -6,7 +6,8 @@ Creates realistic instances with controllable difficulty
 from dataclasses import dataclass
 from typing import List, Dict, Set, Tuple, Optional
 import random
-
+import csv
+from datetime import datetime
 from part_preparation.problem import (
     EnginePreparationProblem,
     AssemblyLine,
@@ -80,6 +81,140 @@ class InstanceParams:
     # Random seed
     seed: int = 42
 
+
+def generate_instance_from_csv(
+    csv_file_path: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    allowed_engine_types: Optional[List[str]] = None
+) -> EnginePreparationProblem:
+    """
+    Parses a Skywise PDP export CSV file to generate an EnginePreparationProblem instance.
+    Includes capability to filter records by engine type and an installation date range.
+    """
+    raw_records = []
+    
+    # 1. Read, filter, and parse the CSV file
+    with open(csv_file_path, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Focus on Engine Installation events
+            if row.get('planning_event_name') == 'Engine_inst' or 'Engine Installation' in row.get('reference_point_name', ''):
+                try:
+                    inst_date = datetime.strptime(row['start_time'], '%Y-%m-%d %H:%M:%S')
+                    engine_type = row['ac_engine'] # e.g., LEAP-1A33
+                    
+                    # ---- FILTER 1: Predefined Engine Types ----
+                    if allowed_engine_types is not None and engine_type not in allowed_engine_types:
+                        continue
+                        
+                    # ---- FILTER 2: Date Range Windows ----
+                    if start_date is not None and inst_date < start_date:
+                        continue
+                    if end_date is not None and inst_date > end_date:
+                        continue
+                    
+                    # Record passes all filters
+                    raw_records.append({
+                        'msn': row['msn'],
+                        'engine_type': engine_type,
+                        'fal_id': f"FAL_{row['fal']}" if row['fal'] else f"FAL_{row['responsible_site']}",
+                        'fal_location': row['responsible_site'],
+                        'calendar_date': inst_date
+                    })
+                except (ValueError, KeyError):
+                    # Skip malformed rows or missing fields safely
+                    continue
+
+    if not raw_records:
+        raise ValueError("No records matched the filter criteria or the CSV dataset is empty.")
+
+    # 2. Establish baseline timeline offset (Relative day zero calculated from remaining records)
+    min_date = min(rec['calendar_date'] for rec in raw_records)
+    
+    # 3. Identify unique infrastructure entities
+    unique_fals = {}
+    unique_engine_types = set()
+    for rec in raw_records:
+        unique_fals[rec['fal_id']] = rec['fal_location']
+        unique_engine_types.add(rec['engine_type'])
+
+    # 4. Create Domain Objects (FALs, Engine Types, and Mock Suppliers)
+    assembly_lines = [
+        AssemblyLine(id=fal_id, takt_pace=5, location=loc) 
+        for fal_id, loc in unique_fals.items()
+    ]
+
+    engine_type_objects = {}
+    suppliers = {}
+    for etype in unique_engine_types:
+        supplier = EngineSupplier(capacity_delivery_per_week=5)
+        suppliers[etype] = supplier
+        engine_type_objects[etype] = EngineType(
+            id=etype, value_engine=120000, cost_storage_per_time=50, supplier={supplier}
+        )
+
+    # 5. Populate filtered MSNs and matching Engine allocations
+    msns = []
+    engines = []
+    for idx, rec in enumerate(raw_records):
+        relative_install_day = (rec['calendar_date'] - min_date).days
+        
+        msn_obj = MSN(
+            id=f"MSN_{rec['msn']}",
+            assembly_line_id=rec['fal_id'],
+            engine_type=rec['engine_type'],
+            entry_time=max(0, relative_install_day - 15),
+            end_time=relative_install_day + 10,
+            engine_installation_date=relative_install_day
+        )
+        msns.append(msn_obj)
+    for idx, rec in enumerate(raw_records):
+        
+        relative_install_day = (rec['calendar_date'] - min_date).days
+        engine_obj = Engine(
+            id=f"ENG_{rec['engine_type']}_{idx:03d}",
+            engine_type=rec['engine_type'],
+            engine_type_object=engine_type_objects[rec['engine_type']],
+            engine_supplier=suppliers[rec['engine_type']],
+            delivery_time=max(0, relative_install_day - 20),
+            baseline_msn_id=msn_obj.id,
+            baseline_factory_id=f"Factory_{rec['engine_type']}_Default",
+            baseline_prep_start=max(0, relative_install_day - 19),
+            baseline_prep_end=max(0, relative_install_day - 5)
+        )
+        engines.append(engine_obj)
+
+    # 6. Generate fallback co-located preparation hub structures 
+    factories = []
+    travel_info = []
+    for etype in unique_engine_types:
+        factory = PreparationFactory(
+            id=f"Factory_{etype}_Default",
+            location="Co-located Hub",
+            default_assembly_line=assembly_lines[0],
+            compatible_engine_types={etype},
+            preparation_durations={etype: 14},
+            default_capacity=10,
+            calendar=None,
+            takt=None
+        )
+        factories.append(factory)
+        for fal in assembly_lines:
+            travel_info.append(TravelInfo(
+                factory_id=factory.id, assembly_line_id=fal.id, travel_time=2, travel_cost=500
+            ))
+
+    max_day = max(m.end_time for m in msns)
+
+    return EnginePreparationProblem(
+        assembly_lines=assembly_lines,
+        msns=msns,
+        factories=factories,
+        engines=engines,
+        travel_info=travel_info,
+        time_horizon=max_day + 10
+    )
 
 def generate_instance(params: InstanceParams) -> EnginePreparationProblem:
     """
@@ -620,6 +755,44 @@ def generate_instance(params: InstanceParams) -> EnginePreparationProblem:
     print("=" * 80)
 
     return problem
+
+
+def generate_training_dataset(num_problems=50, solutions_per_problem=100):
+    dataset = []
+
+    for p in range(num_problems):
+        # 1. Générer une nouvelle instance
+        problem = generate_instance(MEDIUM_INSTANCE)
+
+        # 2. Générer N solutions aléatoires ou heuristiques
+        solutions = generate_random_solutions(problem, solutions_per_problem)
+
+        # 3. Calculer la vraie Fitness (l'opération lourde qu'on veut remplacer plus tard)
+        for sol in solutions:
+            sol.true_cost = calculate_exact_cost(sol, problem)
+
+        # 4. Créer des paires pour le réseau siamois
+        for i in range(len(solutions)):
+            # On compare chaque solution avec 5 autres (par exemple)
+            for j in range(i + 1, min(i + 6, len(solutions))):
+                sol_A = solutions[i]
+                sol_B = solutions[j]
+
+                # Extraction des variables (les tableaux de chiffres)
+                features_A = extract_features(sol_A, problem)
+                features_B = extract_features(sol_B, problem)
+
+                # Label : 1.0 si A est meilleure (coût plus faible), sinon 0.0
+                label = 1.0 if sol_A.true_cost < sol_B.true_cost else 0.0
+
+                dataset.append({
+                    "features_A": features_A,
+                    "features_B": features_B,
+                    "label": label
+                })
+
+    return dataset
+
 
 
 # Predefined instance configurations
