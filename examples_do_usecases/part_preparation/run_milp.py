@@ -11,6 +11,7 @@ from discrete_optimization.generic_tools.do_problem import (
     ObjectiveHandling,
     ModeOptim,
 )
+from part_preparation.paths import SKYWISE_CSV
 from part_preparation.instance_generator import (
     generate_instance,
     InstanceParams,
@@ -34,7 +35,7 @@ def main():
 
     # 1. Load or Generate Problem Instance
     if args.use_csv and False:
-        csv_file_path = "examples_do_usecases/part_preparation/contour-export-06-07-2026.csv"
+        csv_file_path = str(SKYWISE_CSV)
         start_filter = datetime(2026, 9, 15, 0, 0)
         end_filter = datetime(2027, 10, 1, 23, 59)
 

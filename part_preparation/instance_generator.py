@@ -5,6 +5,7 @@ Creates realistic instances with controllable difficulty
 """
 from dataclasses import dataclass
 from typing import List, Dict, Set, Tuple, Optional
+import logging
 import random
 import csv
 from datetime import datetime
@@ -17,7 +18,13 @@ from part_preparation.problem import (
     EngineType,
     EngineSupplier,
     TravelInfo,
+    STORAGE_COST_RATE_PER_YEAR,
+    daily_rate,
 )
+
+
+import numpy as np
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -150,8 +157,15 @@ def generate_instance_from_csv(
     for etype in unique_engine_types:
         supplier = EngineSupplier(capacity_delivery_per_week=5)
         suppliers[etype] = supplier
+        value_engine = 120000
         engine_type_objects[etype] = EngineType(
-            id=etype, value_engine=120000, cost_storage_per_time=50, supplier={supplier}
+            id=etype,
+            value_engine=value_engine,
+            # Dérivé du prix du moteur au taux annuel de possession, au lieu d'une constante
+            # arbitraire : des types de prix différents obtiennent automatiquement des coûts
+            # de stockage cohérents entre eux.
+            cost_storage_per_time=daily_rate(STORAGE_COST_RATE_PER_YEAR, value_engine),
+            supplier={supplier},
         )
 
     # 5. Populate filtered MSNs and matching Engine allocations
@@ -356,10 +370,11 @@ def generate_instance(params: InstanceParams) -> EnginePreparationProblem:
         suppliers[etype] = supplier
 
         # Create engine type
+        value_engine = 100000  # Base value (arbitrary)
         engine_type_obj = EngineType(
             id=etype,
-            value_engine=100000,  # Base value (arbitrary)
-            cost_storage_per_time=50,  # Storage cost per day
+            value_engine=value_engine,
+            cost_storage_per_time=daily_rate(STORAGE_COST_RATE_PER_YEAR, value_engine),
             supplier={supplier}
         )
         engine_type_objects[etype] = engine_type_obj

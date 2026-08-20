@@ -9,6 +9,7 @@ from datetime import datetime
 root_path = Path(__file__).parent.parent.parent
 sys.path.append(str(root_path))
 
+from part_preparation.paths import SKYWISE_CSV
 from part_preparation.instance_generator import generate_instance_from_csv
 from part_preparation.problem import (
     EnginePreparationProblem,
@@ -161,7 +162,7 @@ def solve_full_decomposition_lagrangian(problem: EnginePreparationProblem, max_i
 # ── 2. Script de Run de Test Principal ─────────────────────────────────────────
 
 def main():
-    csv_path = "examples_do_usecases/part_preparation/contour-export-06-07-2026.csv"
+    csv_path = str(SKYWISE_CSV)
     start_filter = datetime(2026, 9, 15, 0, 0)
     end_filter = datetime(2027, 10, 1, 23, 59)
     

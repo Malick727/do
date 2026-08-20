@@ -158,30 +158,60 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 self.prep_intervals[(engine, factory)] = interval
 
         # ====================================================================
-        # Create reusable both_assigned variables (engine, factory, msn)
-        # These represent: engine assigned to factory AND engine assigned to msn
-        # Used in: arrival time constraints, travel cost, storage cost
+        # both_assigned, indexé par (moteur, usine, FAL) et NON par (moteur, usine, MSN)
+        #
+        # Les trois endroits qui consomment ces booléens -- coût de transport, date d'arrivée,
+        # stockage après préparation -- ne lisent du MSN que `msn.assembly_line_id`, puis
+        # appellent get_travel_cost / get_travel_time sur le couple (usine, FAL). Aucun ne
+        # dépend d'une propriété propre au MSN. Or il y a 998 MSN pour 4 FAL sur xlarge.
+        #
+        # Indexer par MSN créait donc 2 042 216 booléens portant l'information de 16 368, avec
+        # deux contraintes de réification chacun : 11.8 M de contraintes, 134 s de construction
+        # pour une limite de résolution de 20 s, et un modèle qui ne tenait pas en mémoire.
+        #
+        # Le passage par is_fal_assigned coûte 4 092 booléens supplémentaires (moteurs x FAL) et
+        # une disjonction chacun -- négligeable devant ce qu'il évite.
         # ====================================================================
-        self.both_assigned_vars: Dict[tuple[Engine, PreparationFactory, MSN], Any] = {}
+        self.is_fal_assigned_vars: Dict[tuple[Engine, AssemblyLine], Any] = {}
+        for engine in self.problem.engines_list:
+            compatible_msns = self.problem.engine_compatible_msns.get(engine, [])
+            msns_by_fal: Dict[str, List[MSN]] = {}
+            for msn in compatible_msns:
+                msns_by_fal.setdefault(msn.assembly_line_id, []).append(msn)
+
+            for fal_id, msns in msns_by_fal.items():
+                assembly_line = self.problem.assembly_lines[fal_id]
+                is_fal_assigned = self.cp_model.new_bool_var(f"fal_{engine.id}_{fal_id}")
+                msn_literals = [self.engine_to_msn_vars[(engine, msn)] for msn in msns]
+
+                # is_fal_assigned <=> au moins un MSN de cette FAL est affecté a ce moteur.
+                # L'unicite (un moteur -> au plus un MSN) est garantie ailleurs, donc ce OU
+                # designe bien la FAL du MSN retenu.
+                self.cp_model.add_bool_or(msn_literals).only_enforce_if(is_fal_assigned)
+                for literal in msn_literals:
+                    self.cp_model.add_implication(literal, is_fal_assigned)
+                self.is_fal_assigned_vars[(engine, assembly_line)] = is_fal_assigned
+
+        self.both_assigned_vars: Dict[tuple[Engine, PreparationFactory, AssemblyLine], Any] = {}
         for engine in self.problem.engines_list:
             compatible_factories = self.problem.engine_compatible_factories.get(engine, [])
-            compatible_msns = self.problem.engine_compatible_msns.get(engine, [])
-            is_allocated = self.engine_allocated_vars[engine]
 
             for factory in compatible_factories:
-                for msn in compatible_msns:
-                    is_factory_assigned = self.engine_to_factory_vars[(engine, factory)]
-                    is_msn_assigned = self.engine_to_msn_vars[(engine, msn)]
+                is_factory_assigned = self.engine_to_factory_vars[(engine, factory)]
 
-                    # Create both_assigned variable with proper bidirectional reification
+                for assembly_line in self.problem.assembly_lines_list:
+                    is_fal_assigned = self.is_fal_assigned_vars.get((engine, assembly_line))
+                    if is_fal_assigned is None:
+                        continue    # aucun MSN compatible sur cette FAL
+
                     both_assigned = self.cp_model.new_bool_var(
-                        f"both_{engine.id}_{factory.id}_{msn.id}"
-                    )
-
-                    # Bidirectional reification: both_assigned <=> (is_factory_assigned AND is_msn_assigned)
-                    self.cp_model.add_bool_and([is_factory_assigned, is_msn_assigned]).only_enforce_if(both_assigned)
-                    self.cp_model.add_bool_or([is_factory_assigned.negated(), is_msn_assigned.negated()]).only_enforce_if(both_assigned.negated())
-                    self.both_assigned_vars[(engine, factory, msn)] = both_assigned
+                        f"both_{engine.id}_{factory.id}_{assembly_line.id}")
+                    self.cp_model.add_bool_and(
+                        [is_factory_assigned, is_fal_assigned]).only_enforce_if(both_assigned)
+                    self.cp_model.add_bool_or(
+                        [is_factory_assigned.negated(), is_fal_assigned.negated()]
+                    ).only_enforce_if(both_assigned.negated())
+                    self.both_assigned_vars[(engine, factory, assembly_line)] = both_assigned
 
         # Optional takt interval variables for no-overlap constraints
         # These represent the first takt period of each engine's preparation
@@ -353,14 +383,15 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
             # Preparation duration: prep_end = prep_start + duration (enforced by interval)
             # Already handled by the optional interval variables
 
-            # Arrival time depends on factory and MSN
+            # Arrival time depends on the factory and the MSN's FAL -- not on the MSN itself,
+            # which is why both_assigned is indexed by FAL. One constraint per (factory, FAL)
+            # instead of one per (factory, MSN).
             for factory in compatible_factories:
-                for msn in compatible_msns:
-                    assembly_line = self.problem.assembly_lines[msn.assembly_line_id]
+                for assembly_line in self.problem.assembly_lines_list:
+                    both_assigned = self.both_assigned_vars.get((engine, factory, assembly_line))
+                    if both_assigned is None:
+                        continue
                     travel_time = self.problem.get_travel_time(factory, assembly_line)
-
-                    # Reuse pre-computed both_assigned variable
-                    both_assigned = self.both_assigned_vars[(engine, factory, msn)]
 
                     # If both assigned: arrival = prep_end + travel_time
                     self.cp_model.add(
@@ -448,6 +479,37 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 name: doc.default_weight
                 for name, doc in obj_register.dict_objective_to_doc.items()
             }
+
+        # Un terme de poids nul ne peut déplacer aucun optimum : construire ses variables et ses
+        # contraintes est du travail pur perdu, payé deux fois -- à la construction du modèle,
+        # puis en présolve, qui doit les éliminer.
+        #
+        # Ce n'est pas une micro-optimisation. storage_cost pèse 0 dans l'objectif canonique
+        # (cf. problem.AGGREGATED_WEIGHTS) et son bloc boucle sur les couples (usine, MSN) de
+        # CHAQUE moteur : il représente à lui seul 43% des contraintes du modèle sur `medium`
+        # (297k -> 169k), et de l'ordre de 5 M contraintes sur `xlarge`, où la seule
+        # construction du modèle prend déjà plus de deux minutes.
+        #
+        # Conséquence assumée : la variable correspondante reste None, donc l'objectif ne figure
+        # plus dans get_lexico_objectives_available(). C'est cohérent -- un terme de poids nul
+        # n'est pas un critère -- et l'API lexico gère déjà le cas None. Pour optimiser un
+        # objectif en lexico, il faut donc lui donner un poids non nul.
+        weighted_out = {
+            name for name in objectives_to_include if int(objective_weights[name]) == 0
+        }
+        for name in sorted(weighted_out):
+            # Les poids sont utilisés via int() dans le terme d'objectif ci-dessous, donc un
+            # poids de 0.5 est DÉJÀ ignoré silencieusement aujourd'hui. On le dit, au lieu de
+            # laisser croire que le terme est pris en compte.
+            if objective_weights[name] != 0:
+                logger.warning(
+                    "Objectif %r de poids %s tronqué à 0 par int() : il est ignoré. "
+                    "Utiliser un poids entier non nul, ou remettre à l'échelle les autres.",
+                    name, objective_weights[name],
+                )
+        if weighted_out:
+            logger.info("Objectifs de poids nul, non construits : %s", sorted(weighted_out))
+        objectives_to_include = objectives_to_include - weighted_out
 
         # Component 1: Baseline changes (if requested)
         if "baseline_changes" in objectives_to_include:
@@ -547,13 +609,12 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 compatible_msns = self.problem.engine_compatible_msns.get(engine, [])
 
                 for factory in compatible_factories:
-                    for msn in compatible_msns:
-                        assembly_line = self.problem.assembly_lines[msn.assembly_line_id]
+                    for assembly_line in self.problem.assembly_lines_list:
+                        both_assigned = self.both_assigned_vars.get((engine, factory, assembly_line))
+                        if both_assigned is None:
+                            continue
                         cost = int(self.problem.get_travel_cost(factory, assembly_line) * cost_scale)
-
                         if cost > 0:
-                            # Reuse pre-computed both_assigned variable
-                            both_assigned = self.both_assigned_vars[(engine, factory, msn)]
                             cost_vars.append(cost * both_assigned)
 
             self.travel_cost_var = self.cp_model.new_int_var(0, len(self.problem.engines_list) * 10000 * cost_scale, "travel_cost")
@@ -614,12 +675,12 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 compatible_msns = self.problem.engine_compatible_msns.get(engine, [])
 
                 for factory in compatible_factories:
-                    for msn in compatible_msns:
-                        # Reuse pre-computed both_assigned variable
-                        both_assigned = self.both_assigned_vars[(engine, factory, msn)]
+                    for assembly_line in self.problem.assembly_lines_list:
+                        both_assigned = self.both_assigned_vars.get((engine, factory, assembly_line))
+                        if both_assigned is None:
+                            continue
 
                         # If both assigned: departure_time = arrival - travel_time
-                        assembly_line = self.problem.assembly_lines[msn.assembly_line_id]
                         travel_time = self.problem.get_travel_time(factory, assembly_line)
                         departure_time = self.arrival_vars[engine] - travel_time
 
@@ -694,6 +755,20 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 self.cp_model.add(self.unallocated_msns_var == sum(unallocated_msn_indicators))
             else:
                 self.cp_model.add(self.unallocated_msns_var == 0)
+
+            # Coupe REDONDANTE, mais indispensable à la borne inférieure. Elle est valide par
+            # pigeonnier : un moteur de type T ne convient qu'aux MSN de type T, donc au moins
+            # max(0, #MSN_T - #moteurs_T) MSN de chaque type restent découverts dans TOUTE
+            # solution faisable (cf. EnginePreparationProblem.uncoverable_msns).
+            #
+            # Sans elle, CP-SAT ignore ce plancher alors que l'objectif retranche déjà
+            # `uncoverable_msns` : le minimum théorique du terme de couverture descend donc à
+            # -1e6 * uncoverable_msns, et la borne rendue est cette valeur négative absurde. Elle
+            # reste correcte, mais si lâche que le gap d'optimalité qu'on en tire ne mesure plus
+            # rien -- or c'est précisément ce que le modèle complet apporte face à un GA, qui ne
+            # sait produire aucune borne. La recherche, elle, est inchangée : la coupe ne retire
+            # aucune solution faisable.
+            self.cp_model.add(self.unallocated_msns_var >= self.problem.uncoverable_msns)
         else:
             self.unallocated_msns_var = None
 
@@ -714,7 +789,14 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
                 # Unallocated engines cost MORE (time_horizon - delivery_time)
                 objective_terms.append(weight * self.storage_cost_var)
             elif objective_name == "unallocated_msns" and self.unallocated_msns_var is not None:
-                objective_terms.append(weight * self.unallocated_msns_var)
+                # On retranche le plancher structurel, exactement comme le fait le KPI
+                # "unallocated_msns_avoidable" côté problem.evaluate() : sans ça, l'objectif
+                # CP-SAT et la fitness du GA différeraient de weight * uncoverable_msns.
+                # C'est une constante, donc la recherche est inchangée -- seule la valeur
+                # rapportée l'est, et elle vaut désormais 0 quand tout le couvrable est couvert.
+                objective_terms.append(
+                    weight * (self.unallocated_msns_var - self.problem.uncoverable_msns)
+                )
 
         if objective_terms:
             total_objective = sum(objective_terms)
@@ -723,6 +805,92 @@ class CPSatEngineSolver(OrtoolsCpSatSolver):
             # No objectives specified - just minimize a dummy variable
             logger.warning("No objectives specified in params_objective_function!")
             self.cp_model.minimize(0)
+
+    # ========================================================================
+    # Fixation de l'allocation -- niveau INFÉRIEUR de la décomposition bilevel
+    # ========================================================================
+
+    def fix_allocation(
+        self, allocation: Dict[str, Dict[str, Optional[str]]]
+    ) -> None:
+        """
+        Fige l'allocation décidée par le niveau SUPÉRIEUR : moteur -> MSN et moteur -> usine.
+
+        C'est le point clé de l'architecture bilevel : le modèle du niveau inférieur n'est
+        PAS écrit à la main, il est DÉRIVÉ du modèle complet en y ajoutant des égalités sur
+        les binaires d'affectation. Un seul modèle CP-SAT à maintenir, donc aucun risque de
+        voir le niveau bas et le modèle complet diverger sur une contrainte -- ce qui rendrait
+        leurs scores incomparables.
+
+        Ce qui reste libre après fixation : prep_start / prep_end / arrival (et delivery_time
+        pour les moteurs à livraison flexible). Autrement dit l'ORDONNANCEMENT seul.
+
+        Args:
+            allocation: engine_id -> {"msn_id": str | None, "factory_id": str | None}.
+                `msn_id=None` signifie moteur NON alloué (et non "à décider") : le moteur est
+                explicitement désactivé via engine_allocated_vars. Un moteur absent du dict
+                est en revanche laissé LIBRE, ce qui permet de ne figer qu'une partie de
+                l'allocation.
+
+        Raises:
+            RuntimeError: si init_model() n'a pas été appelé avant.
+            ValueError: si l'allocation demandée est incompatible (type de moteur / usine),
+                car les binaires correspondants n'existent alors pas dans le modèle.
+
+        Note:
+            Les contraintes ajoutées ne sont PAS retirables (CP-SAT ne sait pas défaire une
+            contrainte postée). Pour évaluer une autre allocation, il faut réinstancier le
+            solveur et rappeler init_model().
+        """
+        if self.cp_model is None:
+            raise RuntimeError("fix_allocation() doit être appelé après init_model().")
+
+        for engine_id, decision in allocation.items():
+            engine = self.problem.engines.get(engine_id)
+            if engine is None:
+                raise ValueError(f"Moteur inconnu dans l'allocation : {engine_id}")
+
+            msn_id = decision.get("msn_id")
+            factory_id = decision.get("factory_id")
+            is_allocated_var = self.engine_allocated_vars[engine]
+
+            # --- moteur non alloué : on désactive, le reste suit par les contraintes
+            # d'assignation (allocated=0 ==> aucun MSN, aucune usine).
+            if msn_id is None:
+                self.cp_model.add(is_allocated_var == 0)
+                continue
+
+            self.cp_model.add(is_allocated_var == 1)
+
+            # --- MSN : on fixe le binaire visé à 1. Les contraintes d'assignation déjà
+            # postées (exactly-one par moteur, at-most-one par MSN) mettent les autres à 0,
+            # inutile de les énumérer.
+            msn = self.problem.msns.get(msn_id)
+            if msn is None:
+                raise ValueError(f"MSN inconnu dans l'allocation : {msn_id}")
+            if (engine, msn) not in self.engine_to_msn_vars:
+                raise ValueError(
+                    f"Allocation incompatible : moteur {engine_id} (type {engine.engine_type}) "
+                    f"-> MSN {msn_id} (type {msn.engine_type})"
+                )
+            self.cp_model.add(self.engine_to_msn_vars[(engine, msn)] == 1)
+
+            # --- usine : idem. Un moteur alloué DOIT avoir une usine, sinon le modèle
+            # devient infaisable de façon silencieuse -- on préfère l'erreur explicite.
+            if factory_id is None:
+                raise ValueError(
+                    f"Moteur {engine_id} alloué au MSN {msn_id} mais sans usine : "
+                    "le niveau supérieur doit décider les deux en décomposition 1."
+                )
+            factory = self.problem.factories.get(factory_id)
+            if factory is None:
+                raise ValueError(f"Usine inconnue dans l'allocation : {factory_id}")
+            if (engine, factory) not in self.engine_to_factory_vars:
+                raise ValueError(
+                    f"Allocation incompatible : usine {factory_id} ne peut pas préparer "
+                    f"un moteur de type {engine.engine_type} (moteur {engine_id})"
+                )
+            self.cp_model.add(self.engine_to_factory_vars[(engine, factory)] == 1)
 
     def retrieve_solution(self, cpsolvercb: CpSolverSolutionCallback) -> Solution:
         """

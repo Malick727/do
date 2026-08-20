@@ -2,8 +2,8 @@
 Run Genetic Algorithm solver on engine preparation problem and launch visualization dashboards
 
 Usage:
-    uv run python run_ga_and_visualize.py --instance medium --ngen 100 --pop-size 50 --eval-mode ia
-    uv run python run_ga_and_visualize.py --instance medium --ngen 100 --pop-size 50 --eval-mode cpsat
+    uv run python run_ga_and_visualize.py --instance medium --ngen 100 --pop-size 50 --ranker siamese
+    uv run python run_ga_and_visualize.py --instance medium --ngen 100 --pop-size 50 --ranker cpsat
 """
 import sys
 from pathlib import Path
@@ -15,19 +15,50 @@ import pickle
 import subprocess
 import torch
 
-from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition
-
-# Import des classes du solver IA
-from part_preparation.solvers.ga_solver import GAEngineSolver, SiameseAllocationNet
+from part_preparation import instances
+from part_preparation.paths import solution_file, ensure_dirs
+from part_preparation.solvers.bilevel.ga.surrogate.paths import SIAMESE_WEIGHTS
+from part_preparation.solvers.bilevel.ga.solver import BilevelGASolverD1
+from part_preparation.solvers.bilevel.ga.rankers import (
+    CpSatExactRanker, CpSatRanker, GreedyRanker, SiameseRanker,
+)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run Genetic Algorithm solver and visualize results")
-    parser.add_argument('--instance', choices=['medium', 'large'], default='medium', help='Instance size to solve')
-    parser.add_argument('--ngen', type=int, default=100, help='Number of generations for GA')
-    parser.add_argument('--pop-size', type=int, default=1000, help='Population size for GA')
-    # Ajout du choix du mode d'évaluation
-    parser.add_argument('--eval-mode', choices=['cpsat', 'greedy', 'ia'], default='ia', help='Evaluation engine to use')
+    parser = argparse.ArgumentParser(description="Run the bilevel D1 genetic algorithm and visualize results")
+    parser.add_argument('--instance', choices=sorted(instances.INSTANCES),
+                        default=instances.DEFAULT_INSTANCE, help='Instance to solve')
+    parser.add_argument('--ngen', type=int, default=100, help='Number of generations')
+    parser.add_argument('--pop-size', type=int, default=100, help='Population size')
+    # Le ranker EST la méthode de résolution du niveau inférieur : c'est le seul paramètre
+    # à faire varier pour comparer les approches de la décomposition 1.
+    parser.add_argument('--ranker', choices=['greedy', 'cpsat', 'siamese', 'gnn_siamese'],
+                        default='greedy', help='Lower-level solving method')
+    # `siamese` charge le MLP sur vecteur plat (51% en validation sur instances non vues) ;
+    # `gnn_siamese` charge l'encodeur GNN recalé (96.8%). Les deux cohabitent le temps de
+    # documenter la comparaison, cf. surrogate/__init__.py.
+    parser.add_argument('--gnn-weights', type=Path, default=None,
+                        help="Poids du siamois GNN. Défaut : MODELS_DIR/gnn_siamese_xlarge.pth")
+    parser.add_argument('--gnn-calibration', type=Path, default=None,
+                        help="Défaut : <gnn-weights>.calib.json, écrit par surrogate.calibration")
+    parser.add_argument('--replicate', type=int, default=None,
+                        help="Réplicat de l'instance. Indispensable avec un surrogate : sans "
+                             "lui on résout l'instance de BASE, et rien ne dit si le réseau "
+                             "l'avait vue à l'entraînement")
+    parser.add_argument('--referee', choices=['greedy', 'cpsat', 'cpsat_exact'], default='cpsat',
+                        help='Ranker used to arbitrate the finalists on a common scale')
+    parser.add_argument('--cpsat-time-limit', type=float, default=10.0)
+    # Budget en TEMPS de la boucle. C'est lui, et non --ngen, qui rend un run comparable à un
+    # run CP-SAT : à ngen fixé on ne mesure pas les méthodes mais leurs coûts unitaires (cf.
+    # le protocole détaillé dans solvers.compare). --ngen sert alors de plafond de sécurité.
+    parser.add_argument('--time-limit', type=float, default=None,
+                        help="Secondes allouées à la boucle du GA (l'arbitrage final s'y ajoute)")
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Graine du GA, pour rejouer un run à l\'identique')
+    # Sans ce drapeau le script se termine sur un `streamlit run` bloquant, donc il n'est
+    # exécutable ni dans un test ni dans un batch de comparaison.
+    parser.add_argument('--no-dashboard', action='store_true',
+                        help="Résout et sauvegarde, sans lancer Streamlit")
 
     args = parser.parse_args()
 
@@ -35,99 +66,121 @@ def main():
     print(f"GENERATING {args.instance.upper()} INSTANCE")
     print("=" * 80)
 
-    # Factory definitions
-    manual_factories = [
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=0, capacity=3, preparation_duration=11,
-                          location="Derby"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=1, capacity=2, preparation_duration=10,
-                          location="Toulouse"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=2, capacity=2, preparation_duration=13,
-                          location="Virginia"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=None, capacity=1, preparation_duration=14,
-                          location="Singapore"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=0, capacity=4, preparation_duration=15,
-                          location="Durham"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=1, capacity=3, preparation_duration=15,
-                          location="Bordeaux"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=2, capacity=1, preparation_duration=15,
-                          location="Cincinnati"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=3, capacity=2, preparation_duration=12,
-                          location="Shanghai"),
-    ]
-
-    n_msns = 80 if args.instance == 'large' else 40
-    time_horizon = 1000 if args.instance == 'large' else 300
-
-    params = InstanceParams(
-        n_fals=4,
-        n_msns_per_fal=n_msns,
-        n_engine_types=2,
-        time_horizon=time_horizon,
-        fal_takt_paces=[2, 2, 5, 5],
-        factory_definitions=manual_factories,
-        engine_to_msn_ratio={"EngineType_1": 1.1, "EngineType_2": 0.95},
-        supplier_regularity={"EngineType_1": 1.0, "EngineType_2": 0.8},
-        supplier_production_rate={"EngineType_1": 1.0, "EngineType_2": 0.9},
-        flexible_delivery_prob=0
-    )
-
-    problem = generate_instance(params)
+    problem = instances.build(args.instance, replicate_id=args.replicate)
 
     # ==========================================
-    # CHARGEMENT DU MODÈLE IA (si sélectionné)
+    # RANKER = niveau inférieur
     # ==========================================
-    ia_model = None
-    if args.eval_mode == 'ia':
+    def build_ranker(name):
+        if name == 'greedy':
+            return GreedyRanker()
+        if name == 'cpsat':
+            return CpSatRanker(time_limit=args.cpsat_time_limit)
+        if name == 'cpsat_exact':
+            return CpSatExactRanker(time_limit=600.0)
+        raise ValueError(name)
+
+    if args.ranker == 'gnn_siamese':
         print("\n" + "=" * 80)
-        print("LOADING SURROGATE AI MODEL")
+        print("LOADING GNN SURROGATE")
         print("=" * 80)
 
-        nb_features = 2 * len(problem.engines_list)
-        ia_model = SiameseAllocationNet(input_size=nb_features)
+        from part_preparation.solvers.bilevel.ga.rankers import GnnSiameseRanker
+        from part_preparation.solvers.bilevel.ga.surrogate.calibration import Calibration
+        from part_preparation.solvers.bilevel.ga.surrogate.paths import MODELS_DIR
 
-        # ---> ON FORCE LE CHEMIN ABSOLU EXACT DE TON PC <---
-        weights_path = Path(r"C:\Users\ESOWNN21\Documents\discrete-optimisation-use-cases-ld\siamese_weights_2cpu.pth")
+        weights = args.gnn_weights or (MODELS_DIR / "gnn_siamese_xlarge.pth")
+        calibration = args.gnn_calibration or Calibration.path_for(weights)
 
-        if weights_path.exists():
-            try:
-
-                ia_model.load_state_dict(torch.load(str(weights_path)))
-                ia_model.eval() # Mode évaluation (Inférence)
-                print(f"✅ Modèle chargé avec succès depuis : {weights_path}")
-            except RuntimeError as e:
-                if "size mismatch" in str(e):
-                    print("\n❌ ERREUR DE DIMENSION (Size Mismatch) ❌")
-                    print(f"Le fichier de poids '{weights_path}' contient une ancienne architecture.")
-                    print(f"Ton GA attend {nb_features} variables en entrée, mais le fichier .pth a été entraîné sur une autre taille.")
-                    print("\n👉 ACTION REQUISE :")
-                    print("1. Va dans ton dossier et SUPPRIME le fichier 'siamese_weights_cpu.pth'.")
-                    print("2. Relance le script d'entraînement pour recréer un modèle à la bonne taille :")
-                    print("   uv run python examples_do_usecases/part_preparation/solvers/siamese_model.py")
-                    print("3. Une fois terminé, relance cette commande GA.")
-                    sys.exit(1)
-                else:
-                    raise e
-        else:
-            print(f"❌ Erreur : Impossible de trouver le fichier de poids '{weights_path}'")
-            print("As-tu bien lancé l'entraînement au préalable ?")
+        if not Path(weights).exists():
+            print(f"Poids introuvables : {weights}")
+            print("Les produire d'abord :")
+            print("  uv run python -m part_preparation.solvers.bilevel.ga.surrogate.gnn_siamese \\")
+            print("    --dataset data/part_preparation/datasets/dataset_xlarge.jsonl \\")
+            print("    --target residual --epochs 20 --pairs-per-instance 100")
             sys.exit(1)
 
+        # Le recalage est vérifié SÉPARÉMENT des poids, et son absence est fatale : sans lui le
+        # ranker additionnerait des logits à des euros. Cf. GnnSiameseRanker.__init__.
+        if not Path(calibration).exists():
+            print(f"Recalage introuvable : {calibration}")
+            print("Le produire d'abord :")
+            print("  uv run python -m part_preparation.solvers.bilevel.ga.surrogate.calibration \\")
+            print(f"    --weights {weights} \\")
+            print("    --dataset data/part_preparation/datasets/dataset_xlarge.jsonl \\")
+            print("    --target residual --on val --seed 42")
+            sys.exit(1)
+
+        ranker = GnnSiameseRanker.from_files(weights, calibration)
+        print(f"Poids    : {weights}")
+        print(f"Recalage : {calibration} "
+              f"(pente {ranker.calibration.slope:,.1f} €/logit, "
+              f"R² intra {ranker.calibration.within_r2:.3f})")
+    elif args.ranker == 'siamese':
+        print("\n" + "=" * 80)
+        print("LOADING SURROGATE MODEL")
+        print("=" * 80)
+
+        from part_preparation.solvers.bilevel.ga.surrogate.features import (
+            NB_FEATURES_PER_ENGINE, NB_GLOBAL_FEATURES,
+        )
+        from part_preparation.solvers.bilevel.ga.surrogate.siamese import SiameseAllocationNet
+
+        nb_features = NB_FEATURES_PER_ENGINE * len(problem.engines_list) + NB_GLOBAL_FEATURES
+        model = SiameseAllocationNet(input_size=nb_features)
+
+        if not SIAMESE_WEIGHTS.exists():
+            print(f"Poids introuvables : {SIAMESE_WEIGHTS}")
+            print("Lancer d'abord l'entraînement :")
+            print("  uv run python -m part_preparation.solvers.bilevel.ga.surrogate.siamese")
+            sys.exit(1)
+
+        try:
+            model.load_state_dict(torch.load(str(SIAMESE_WEIGHTS)))
+        except RuntimeError as error:
+            if "size mismatch" not in str(error):
+                raise
+            print("\nERREUR DE DIMENSION")
+            print(f"Le GA attend {nb_features} features en entrée, mais {SIAMESE_WEIGHTS} a été "
+                  "entraîné sur une autre taille -- probablement une autre instance.")
+            print("Supprimer le fichier de poids et relancer l'entraînement.")
+            sys.exit(1)
+
+        model.eval()
+        print(f"Modèle chargé depuis : {SIAMESE_WEIGHTS}")
+        ranker = SiameseRanker(model)
+    else:
+        ranker = build_ranker(args.ranker)
 
     print("\n" + "=" * 80)
-    print(f"SOLVING WITH GA (pop: {args.pop_size}, ngen: {args.ngen}, mode: {args.eval_mode.upper()})")
+    print(f"SOLVING (pop: {args.pop_size}, ngen: {args.ngen}, "
+          f"ranker: {ranker.name}, arbitre: {args.referee})")
     print("=" * 80)
 
-    # Instantiation of our separated Solver, with new arguments
-    solver = GAEngineSolver(
+    solver = BilevelGASolverD1(
         problem=problem,
+        ranker=ranker,
         pop_size=args.pop_size,
         ngen=args.ngen,
-        evaluation_mode=args.eval_mode,
-        ia_model=ia_model
+        referee=build_ranker(args.referee),
+        seed=args.seed,
+        time_limit=args.time_limit,
     )
 
-    # Run resolution
-    solution, solution_history = solver.solve()
+    result = solver.solve()
+    solution = result.best_solution
+    solution_history = [
+        {
+            "generation": record.generation,
+            "best_true_score": record.best_true_score,
+            "mean_true_score": record.mean_true_score,
+            "rank_wall_time": record.rank_wall_time,
+            "ranker_meta": record.ranker_meta,
+        }
+        for record in result.history
+    ]
+    print(f"\nScore arbitré du vainqueur : {result.best_score:,.2f} "
+          f"(total {result.total_wall_time:.1f}s)")
 
     print("\n" + "=" * 80)
     print("SOLVER FINISHED")
@@ -160,10 +213,9 @@ def main():
     print(f"  - Unallocated MSNs: {kpis['unallocated_msns']:.0f}/{len(problem.msns_list)}")
 
     # Save problem and solution for dashboard
-    data_dir = Path(__file__).parent / "solution_data"
-    data_dir.mkdir(exist_ok=True)
+    ensure_dirs()
 
-    data_file = data_dir / f"{args.instance}_ga_solution.pkl"
+    data_file = solution_file(f"{args.instance}_ga")
     with open(data_file, 'wb') as f:
         pickle.dump({
             'problem': problem,
@@ -174,6 +226,9 @@ def main():
         }, f)
 
     print(f"\n✓ Solution saved to: {data_file}")
+
+    if args.no_dashboard:
+        return
 
     # Launch dashboard
     print("\n" + "=" * 80)
@@ -190,7 +245,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-data_file = Path(__file__).parent / "solution_data" / "{args.instance}_ga_solution.pkl"
+data_file = Path(r"{data_file}")
 with open(data_file, 'rb') as f:
     data = pickle.load(f)
 

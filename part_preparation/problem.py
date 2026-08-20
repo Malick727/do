@@ -14,9 +14,150 @@ from discrete_optimization.generic_tools.do_problem import (
     TypeObjective,
     ModeOptim,
     ObjectiveHandling,
+    ParamsObjectiveFunction,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ==========================================
+# TAUX DE COÛT (annuels, exprimés en fraction du prix du moteur)
+# ==========================================
+# Le temps du problème est en JOURS, ces taux sont ANNUELS : toute utilisation passe donc par
+# une division par DAYS_PER_YEAR. Les exprimer en fraction de `EngineType.value_engine` plutôt
+# qu'en euros absolus permet de faire coexister des types de moteurs de prix différents sans
+# retoucher les coefficients.
+STORAGE_COST_RATE_PER_YEAR = 0.20   # immobiliser un moteur coûte 20%/an de sa valeur
+DELAY_COST_RATE_PER_YEAR = 0.30     # retarder l'avion coûte 30%/an de la valeur du moteur
+DAYS_PER_YEAR = 365.0
+
+
+def daily_storage_cost(engine_type) -> int:
+    """Coût de stockage par jour d'un moteur de ce type."""
+    return daily_rate(STORAGE_COST_RATE_PER_YEAR, engine_type.value_engine)
+
+
+def daily_delay_cost(engine_type) -> int:
+    """Coût par jour de retard à la FAL, imputé au moteur qui cause le retard."""
+    return daily_rate(DELAY_COST_RATE_PER_YEAR, engine_type.value_engine)
+
+
+def daily_rate(annual_rate: float, value_engine: float) -> int:
+    """
+    Taux journalier ARRONDI À L'ENTIER. L'arrondi n'est pas cosmétique : CP-SAT n'accepte que
+    des coefficients entiers dans ses expressions linéaires. En arrondissant ici, un seul et
+    même barème sert au modèle CP-SAT et à problem.evaluate(), donc les deux ne peuvent pas
+    diverger -- ce qui arriverait si CP-SAT arrondissait de son côté un taux resté flottant.
+    """
+    return int(round(annual_rate * value_engine / DAYS_PER_YEAR))
+
+
+# ==========================================
+# OBJECTIF AGRÉGÉ PARTAGÉ (CP-SAT <-> GA)
+# ==========================================
+# Comparer une solution GA à une solution CP-SAT n'a de sens que si les deux MINIMISENT LA
+# MÊME FONCTION. Les termes et leurs poids sont donc définis ici une seule fois ; le GA
+# (via allocation_score) et le script CP-SAT les lisent depuis cette source unique au lieu
+# de redéclarer chacun les siens.
+AGGREGATED_OBJECTIVES = ["arrival_delays", "travel_cost", "storage_cost", "unallocated_msns"]
+AGGREGATED_WEIGHTS = [1.0, 1.0, 1.0, 1_000_000.0]
+
+# Quel KPI mesure chaque terme EXACTEMENT comme le modèle CP-SAT le compte.
+# Un seul terme demande une correspondance non triviale : arrival_delays. La variable CP-SAT
+# `arrival_delays_var` ne somme que les retards des moteurs ALLOUÉS, tandis que le KPI
+# "arrival_delays" y ajoute les jours d'attente des MSN non couverts -- or ceux-ci sont déjà
+# facturés par le terme unallocated_msns. Brancher le KPI brut sur le score du GA les
+# compterait deux fois et rendrait le GA plus sévère que CP-SAT sur les MSN découverts,
+# c'est-à-dire exactement le désalignement qu'on cherche à supprimer.
+OBJECTIVE_TO_KPI = {
+    "arrival_delays": "arrival_delays_engines",
+    "travel_cost": "travel_cost",
+    "storage_cost": "storage_cost",
+    # Compte ÉVITABLE et non brut : un MSN dont le type de moteur est épuisé est facturé 0
+    # (cf. EnginePreparationProblem.uncoverable_msns). L'écart entre les deux est une
+    # constante par instance, donc le classement à l'intérieur d'une instance est inchangé --
+    # en revanche les scores deviennent comparables ENTRE instances, ce dont le surrogate de
+    # régression a besoin puisqu'il apprend sur plusieurs instances à la fois.
+    "unallocated_msns": "unallocated_msns_avoidable",
+    "baseline_changes": "baseline_changes",
+    "delay_cost": "delay_cost",
+}
+
+
+def default_params_objective_function() -> ParamsObjectiveFunction:
+    """ParamsObjectiveFunction canonique, à passer à CPSatEngineSolver."""
+    return ParamsObjectiveFunction(
+        objective_handling=ObjectiveHandling.AGGREGATE,
+        objectives=list(AGGREGATED_OBJECTIVES),
+        weights=list(AGGREGATED_WEIGHTS),
+        sense_function=ModeOptim.MINIMIZATION,
+    )
+
+
+def aggregate_score(kpis: Dict[str, float], objectives=None, weights=None) -> float:
+    """
+    Somme pondérée des KPI reproduisant terme à terme l'objectif minimisé par CP-SAT.
+
+    C'est le pont entre les deux solveurs : CP-SAT minimise cette quantité à l'intérieur de
+    son modèle, le GA la recalcule a posteriori depuis problem.evaluate(). Les deux nombres
+    sont donc directement comparables.
+
+    Args:
+        kpis: sortie de EnginePreparationProblem.evaluate()
+        objectives/weights: pour évaluer une variante ; par défaut, l'objectif canonique.
+    """
+    objectives = AGGREGATED_OBJECTIVES if objectives is None else objectives
+    weights = AGGREGATED_WEIGHTS if weights is None else weights
+    if len(objectives) != len(weights):
+        raise ValueError(
+            f"{len(objectives)} objectifs pour {len(weights)} poids : "
+            "les deux listes doivent être alignées."
+        )
+    return float(sum(
+        weight * kpis[OBJECTIVE_TO_KPI[name]]
+        for name, weight in zip(objectives, weights)
+    ))
+
+
+# ------------------------------------------------------------------------------------------
+# Décomposition ANALYTIQUE / RÉSIDUEL, pour les surrogates (siamois, GNN)
+# ------------------------------------------------------------------------------------------
+# Certains termes de l'objectif ne dépendent QUE de l'allocation : on sait les calculer
+# exactement, en O(n), sans construire le moindre planning. Les faire prédire par un réseau
+# serait doublement perdant -- on remplace un calcul exact par une approximation, et on dépense
+# de la capacité pour ça. Avec la pondération actuelle ces termes pèsent >90% du score, donc un
+# réseau entraîné sur le score TOTAL apprend surtout à recompter les MSN non couverts.
+#
+# Un surrogate ne doit donc apprendre que le RÉSIDU (ce qui dépend du planning), et l'appelant
+# rajoute la part analytique exacte. Invariant garanti par construction :
+#
+#     aggregate_score(kpis) == analytic_score(kpis) + residual_score(kpis)
+#
+ANALYTIC_OBJECTIVES = ("travel_cost", "unallocated_msns")
+
+
+def _partial_score(kpis, keep_analytic: bool, objectives=None, weights=None) -> float:
+    objectives = AGGREGATED_OBJECTIVES if objectives is None else objectives
+    weights = AGGREGATED_WEIGHTS if weights is None else weights
+    return float(sum(
+        weight * kpis[OBJECTIVE_TO_KPI[name]]
+        for name, weight in zip(objectives, weights)
+        if (name in ANALYTIC_OBJECTIVES) == keep_analytic
+    ))
+
+
+def analytic_score(kpis, objectives=None, weights=None) -> float:
+    """Part du score calculable exactement depuis la seule allocation (transport + MSN découverts)."""
+    return _partial_score(kpis, True, objectives, weights)
+
+
+def residual_score(kpis, objectives=None, weights=None) -> float:
+    """
+    Part du score qui dépend du PLANNING, donc la seule qu'un surrogate ait un intérêt à
+    prédire. Avec la pondération actuelle : les retards des moteurs alloués (storage_cost est
+    dans le résidu mais son poids est 0).
+    """
+    return _partial_score(kpis, False, objectives, weights)
 
 
 @dataclass(frozen=True)
@@ -259,6 +400,30 @@ class EnginePreparationProblem(Problem):
             ]
             self.engine_compatible_msns[engine] = compatible
 
+        # ------------------------------------------------------------------------------
+        # Plancher structurel de MSN non couverts
+        # ------------------------------------------------------------------------------
+        # Un MSN dont le type de moteur est épuisé ne peut être couvert par AUCUNE allocation :
+        # le pénaliser revient à facturer au solveur une pénurie d'approvisionnement dont il
+        # n'est pas responsable. On retranche donc ce plancher, et le terme de couverture vaut
+        # 0 quand tout ce qui était couvrable l'a été.
+        #
+        # Le comptage par type suffit à donner le maximum EXACT : un moteur de type T convient
+        # à n'importe quel MSN de type T (cf. la boucle ci-dessus), donc le graphe de
+        # compatibilité est biparti COMPLET dans chaque type. La couverture maximale y vaut
+        # min(#moteurs, #MSN) par type -- pas besoin de calculer un couplage maximum.
+        engines_per_type: Dict[str, int] = {}
+        for engine in self.engines_list:
+            engines_per_type[engine.engine_type] = engines_per_type.get(engine.engine_type, 0) + 1
+        msns_per_type: Dict[str, int] = {}
+        for msn in self.msns_list:
+            msns_per_type[msn.engine_type] = msns_per_type.get(msn.engine_type, 0) + 1
+
+        self.uncoverable_msns: int = sum(
+            max(0, count - engines_per_type.get(engine_type, 0))
+            for engine_type, count in msns_per_type.items()
+        )
+
     def get_travel_time(self, factory: PreparationFactory, assembly_line: AssemblyLine) -> int:
         """Get travel time from factory to assembly line"""
         key = (factory, assembly_line)
@@ -286,6 +451,10 @@ class EnginePreparationProblem(Problem):
         """
         baseline_changes = 0
         arrival_delays = 0.0
+        # Retards des seuls moteurs alloués, sans les jours d'attente des MSN non couverts :
+        # c'est la définition de `arrival_delays_var` dans le modèle CP-SAT (cf. OBJECTIVE_TO_KPI).
+        arrival_delays_engines = 0.0
+        delay_cost = 0.0
         travel_cost = 0.0
         storage_cost = 0.0
         unallocated_msns_count = 0
@@ -298,6 +467,21 @@ class EnginePreparationProblem(Problem):
                 allocated_msns.add(msn.id)
 
         unallocated_msns_count = len(self.msns_list) - len(allocated_msns)
+
+        # Un MSN non alloué n'est pas pénalisé par un Big-M arbitraire : c'est un avion qui
+        # attend de sa date d'installation jusqu'à la fin de l'horizon. On lui impute donc un
+        # retard réel, monétisé au même taux que les autres. La priorisation de l'allocation
+        # devient une CONSÉQUENCE du modèle de coût au lieu d'un poids réglé à la main, et
+        # tous les termes de l'objectif restent commensurables (des euros).
+        engine_type_objects = {e.engine_type: e.engine_type_object for e in self.engines_list}
+        for msn in self.msns_list:
+            if msn.id in allocated_msns:
+                continue
+            missed_days = max(0, self.time_horizon - msn.engine_installation_date)
+            arrival_delays += missed_days
+            engine_type_object = engine_type_objects.get(msn.engine_type)
+            if engine_type_object is not None:
+                delay_cost += daily_delay_cost(engine_type_object) * missed_days
 
         for engine in self.engines_list:
             # Check if engine is allocated to MSN
@@ -327,6 +511,8 @@ class EnginePreparationProblem(Problem):
                 if arrival_time is not None:
                     delay = max(0, arrival_time - assigned_msn.engine_installation_date)
                     arrival_delays += delay
+                    arrival_delays_engines += delay
+                    delay_cost += daily_delay_cost(engine.engine_type_object) * delay
 
                 # Compute travel costs
                 if engine in solution.engine_to_factory:
@@ -370,9 +556,22 @@ class EnginePreparationProblem(Problem):
         return {
             "baseline_changes": float(baseline_changes),
             "arrival_delays": arrival_delays,
+            # Même grandeur que arrival_delays_var côté CP-SAT (moteurs alloués uniquement).
+            # C'est ce KPI, et non arrival_delays, qu'il faut agréger pour comparer les deux
+            # solveurs : cf. OBJECTIVE_TO_KPI.
+            "arrival_delays_engines": arrival_delays_engines,
+            "delay_cost": delay_cost,
             "travel_cost": travel_cost,
             "storage_cost": storage_cost,
             "unallocated_msns": float(unallocated_msns_count),
+            # MSN non couverts ÉVITABLES : on retranche ceux qu'aucune allocation ne pouvait
+            # couvrir (type de moteur épuisé, cf. self.uncoverable_msns). C'est ce KPI qui
+            # entre dans l'objectif agrégé, pour que le terme de couverture tombe à 0 quand
+            # tout le couvrable est couvert. `unallocated_msns` reste le compte BRUT, celui
+            # qu'attendent les tableaux de bord et les rapports.
+            "unallocated_msns_avoidable": float(
+                max(0, unallocated_msns_count - self.uncoverable_msns)
+            ),
         }
 
     def satisfy(self, solution: EnginePreparationSolution, debug: bool = False) -> bool:
@@ -558,6 +757,13 @@ class EnginePreparationProblem(Problem):
                 "arrival_delays": ObjectiveDoc(
                     type=TypeObjective.OBJECTIVE,
                     default_weight=10.0  # Medium priority: minimize delays
+                ),
+                # Version monétisée de arrival_delays (euros au lieu de jours). C'est celle à
+                # utiliser dans un objectif agrégé : sommer des jours et des euros avec des
+                # poids de 1 revenait à décréter qu'un jour de retard vaut un euro.
+                "delay_cost": ObjectiveDoc(
+                    type=TypeObjective.OBJECTIVE,
+                    default_weight=1.0
                 ),
                 "travel_cost": ObjectiveDoc(
                     type=TypeObjective.OBJECTIVE,

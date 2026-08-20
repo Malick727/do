@@ -14,18 +14,19 @@ import pickle
 import subprocess
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, ObjectiveHandling, ModeOptim
 
-from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition, generate_instance_from_csv
+from part_preparation import instances
+from part_preparation.paths import solution_file, ensure_dirs
+from part_preparation.problem import default_params_objective_function
 from part_preparation.solvers.cpsat import CPSatEngineSolver
 
-from datetime import datetime
 
 def main():
     parser = argparse.ArgumentParser(description="Run CP-SAT solver and visualize results")
     parser.add_argument(
         '--instance',
-        choices=['medium', 'large'],
-        default='medium',
-        help='Instance size to solve'
+        choices=sorted(instances.INSTANCES),
+        default=instances.DEFAULT_INSTANCE,
+        help='Instance size to solve (xlarge = 1000 MSN)'
     )
     parser.add_argument(
         '--time-limit',
@@ -33,62 +34,63 @@ def main():
         default=20,
         help='Time limit in seconds for CP-SAT solver'
     )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=12,
+        help='CP-SAT workers'
+    )
+    parser.add_argument(
+        '--replicate',
+        type=int,
+        default=None,
+        help='Replicate id of the named instance, so this run targets the SAME problem as '
+             'run_rl_and_visualize.py --replicate <id>. Without it both scripts solve the '
+             'base instance, and any comparison between their scores is meaningless'
+    )
+    parser.add_argument(
+        '--msns-per-fal',
+        type=int,
+        default=None,
+        help='Override the named instance size. Total MSNs = 4 x this value. '
+             'The time horizon is derived, never given (see instances.sized_params)'
+    )
+    parser.add_argument(
+        '--no-dashboard',
+        action='store_true',
+        help='Solve and save only, without launching streamlit'
+    )
     args = parser.parse_args()
     print("=" * 80)
     print(f"GENERATING {args.instance.upper()} INSTANCE")
     print("=" * 80)
 
-    manual_factories = [
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=0, capacity=3, preparation_duration=11,
-                          location="Derby"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=1, capacity=2, preparation_duration=10,
-                          location="Toulouse"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=2, capacity=2, preparation_duration=13,
-                          location="Virginia"),
-        FactoryDefinition(engine_type="EngineType_1", home_fal_index=None, capacity=1, preparation_duration=14,
-                          location="Singapore"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=0, capacity=4, preparation_duration=15,
-                          location="Durham"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=1, capacity=3, preparation_duration=15,
-                          location="Bordeaux"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=2, capacity=1, preparation_duration=15,
-                          location="Cincinnati"),
-        FactoryDefinition(engine_type="EngineType_2", home_fal_index=3, capacity=2, preparation_duration=12,
-                          location="Shanghai"),
-    ]
+    # L'instance vient du registre et n'est plus redéclarée ici. Les définitions recopiées dans
+    # ce script forçaient à corriger le nombre de MSN sans corriger l'horizon avec : à
+    # n_msns_per_fal=1000 sur 4 FAL, on demandait 4000 MSN à caser dans 300 jours, alors que la
+    # FAL la plus lente a un takt de 5. C'est exactement ce que part_preparation.instances est
+    # là pour empêcher -- et c'est aussi ce qui garantit que ce script et la comparaison
+    # d'approches (solvers.compare) tournent sur LA MÊME instance.
+    if args.msns_per_fal is None:
+        problem = instances.build(args.instance, replicate_id=args.replicate)
+    else:
+        from part_preparation.instance_generator import generate_instance
 
-    n_msns = 80 if args.instance == 'large' else 40
-    time_horizon = 1000 if args.instance == 'large' else 300
+        problem = generate_instance(instances.sized_params(args.msns_per_fal))
 
-    params = InstanceParams(
-        n_fals=4,
-        n_msns_per_fal=n_msns,
-        n_engine_types=2,
-        time_horizon=time_horizon,
-        fal_takt_paces=[2, 2, 5, 5],
-        factory_definitions=manual_factories,
-        engine_to_msn_ratio={"EngineType_1": 1.1, "EngineType_2": 0.95},
-        supplier_regularity={"EngineType_1": 1.0, "EngineType_2": 0.8},
-        supplier_production_rate={"EngineType_1": 1.0, "EngineType_2": 0.9},
-        flexible_delivery_prob=0
-    )
+    # Objectif lu depuis problem.py, source unique partagée avec la fitness du GA
+    # (bilevel.lower.score_solution) : les deux solveurs minimisent la même fonction et leurs
+    # valeurs sont directement comparables.
+    params_objective = default_params_objective_function()
 
-    params_objective = ParamsObjectiveFunction(
-        objective_handling=ObjectiveHandling.AGGREGATE,
-        objectives=[  # "baseline_changes",
-            "arrival_delays",
-            "travel_cost",
-            "storage_cost",
-            "unallocated_msns"],
-        weights=[1.0, 1.0, 0., 1000000.0],  # High penalty for delays and unallocated MSNs
-        sense_function=ModeOptim.MINIMIZATION
-    )
-    problem = generate_instance(params)
-    # start_filter = datetime(2026, 9, 15, 0, 0)
-    # end_filter = datetime(2027, 10, 1, 23, 59)
-    # problem = generate_instance_from_csv(csv_file_path =  "examples_do_usecases\part_preparation\contour-export-06-07-2026.csv",
-    #  start_date =start_filter ,
-    #  end_date = end_filter)
+    print(f"\nProblem size:")
+    print(f"  - {len(problem.assembly_lines_list)} assembly lines")
+    print(f"  - {len(problem.msns_list)} MSNs")
+    print(f"  - {len(problem.engines_list)} engines")
+    print(f"  - {len(problem.factories_list)} factories")
+    print(f"  - Time horizon: {problem.time_horizon} days")
+    print(f"  - Structurally uncoverable MSNs: {problem.uncoverable_msns}")
+
     print("\nObjective weights:")
     for obj, weight in zip(params_objective.objectives, params_objective.weights):
         print(f"  - {obj}: {weight}")
@@ -104,14 +106,25 @@ def main():
     )
 
     # Solve with time limit
-    solver.init_model()
+    import time
     from discrete_optimization.generic_tools.cp_tools import ParametersCp
+
+    # La construction du modèle est chronométrée à part : sur les grandes instances elle n'est
+    # plus négligeable devant la recherche (le nombre de booléens both_assigned croît en
+    # moteurs x usines x MSN compatibles), et un time_limit qui semble ignoré est presque
+    # toujours du temps passé ici, pas dans CP-SAT.
+    build_started = time.perf_counter()
+    solver.init_model()
+    print(f"Model built in {time.perf_counter() - build_started:.1f}s "
+          f"({len(solver.cp_model.proto.variables):,} variables, "
+          f"{len(solver.cp_model.proto.constraints):,} constraints)")
+
     p = ParametersCp.default_cpsat()
-    p.nb_process = 12
+    p.nb_process = args.workers
     print("\nSolving...")
     result_storage = solver.solve(
         parameters_cp=p,
-        time_limit=300,
+        time_limit=args.time_limit,
         ortools_cpsat_solver_kwargs={
             'log_search_progress': True,
         }
@@ -139,6 +152,22 @@ def main():
     feasible = problem.satisfy(solution)
 
     print(f"\nFeasible: {'✅ Yes' if feasible else '❌ No'}")
+
+    # Borne et gap : c'est le seul chiffre qui dise si la solution est BONNE, et pas seulement
+    # la meilleure trouvée dans le temps imparti. Sur les grandes instances il est fréquent que
+    # CP-SAT rende une solution en quelques secondes et n'ait toujours prouvé aucune borne utile
+    # à la fin -- un gap proche de 100% signale que le modèle complet ne passe pas à l'échelle,
+    # ce qui est précisément l'argument en faveur de la décomposition.
+    from part_preparation.problem import aggregate_score
+
+    score = aggregate_score(kpis)
+    bound = solver.solver.BestObjectiveBound()
+    print(f"\nStatus: {solver.status_solver}")
+    print(f"  - aggregate score : {score:,.2f}")
+    print(f"  - best bound      : {bound:,.2f}")
+    if score:
+        print(f"  - optimality gap  : {(score - bound) / abs(score):.2%}")
+
     print(f"\nObjective values:")
     for obj_name, obj_value in kpis.items():
         print(f"  - {obj_name}: {obj_value:.2f}")
@@ -169,10 +198,18 @@ def main():
     print(f"   ✓ Computed KPIs for all {len(solution_history)} solutions")
 
     # Save problem and solution for dashboard
-    data_dir = Path(__file__).parent / "solution_data"
-    data_dir.mkdir(exist_ok=True)
+    ensure_dirs()
 
-    data_file = data_dir / f"{args.instance}_solution.pkl"
+    # Une taille ad hoc n'écrase pas le pickle de l'instance nommée dont elle emprunte le nom :
+    # les dashboards liraient sinon un problème qui n'est pas celui qu'ils croient afficher.
+    # Le réplicat entre dans le nom : deux réplicats d'une même instance nommée sont deux
+    # problèmes différents, et sans ça le second écraserait le pickle du premier -- les
+    # dashboards afficheraient alors une solution qui n'est pas celle qu'ils annoncent.
+    label = (args.instance if args.msns_per_fal is None
+             else f"msns{args.msns_per_fal * 4}")
+    if args.replicate is not None:
+        label = f"{label}_r{args.replicate}"
+    data_file = solution_file(label)
     with open(data_file, 'wb') as f:
         pickle.dump({
             'problem': problem,
@@ -180,9 +217,14 @@ def main():
             'kpis': kpis,
             'feasible': feasible,
             'solution_history': solution_history,  # Add solution history for KPI evolution
+            # Lu par le dashboard : plusieurs solveurs ecrivent pour la meme instance.
+            'solver': f"CP-SAT ({args.time_limit}s, {solver.status_solver})",
         }, f)
 
     print(f"\n✓ Solution saved to: {data_file}")
+
+    if args.no_dashboard:
+        return
 
     # Launch dashboard(s)
     print("\n" + "=" * 80)
@@ -203,13 +245,14 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Load problem and solution
-data_file = Path(__file__).parent / "solution_data" / "{args.instance}_solution.pkl"
+data_file = Path(r"{data_file}")
 with open(data_file, 'rb') as f:
     data = pickle.load(f)
 
 st.session_state.problem = data['problem']
 st.session_state.solution = data['solution']
 st.session_state.solution_history = data.get('solution_history', [])
+st.session_state.solver = data.get('solver', 'solveur inconnu')
 
 # Import and run unified dashboard
 from part_preparation.unified_dashboard import main

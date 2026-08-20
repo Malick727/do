@@ -20,6 +20,7 @@ from discrete_optimization.generic_tools.do_problem import (
     ObjectiveHandling,
     ModeOptim,
 )
+from part_preparation.paths import SKYWISE_CSV, solution_file, ensure_dirs
 from part_preparation.instance_generator import (
     generate_instance,
     InstanceParams,
@@ -57,7 +58,7 @@ def main():
 
     # 1. Load or Generate Problem Instance
     if args.use_csv:
-        csv_file_path = "examples_do_usecases/part_preparation/contour-export-06-07-2026.csv"
+        csv_file_path = str(SKYWISE_CSV)
         start_filter = datetime(2026, 9, 15, 0, 0)
         end_filter = datetime(2027, 10, 1, 23, 59)
 
@@ -173,10 +174,9 @@ def main():
     }]
 
     # 5. Save Data for Streamlit Dashboard
-    data_dir = Path(__file__).parent / "solution_data"
-    data_dir.mkdir(exist_ok=True)
+    ensure_dirs()
 
-    data_file = data_dir / f"{args.instance}_solution.pkl"
+    data_file = solution_file(args.instance)
     with open(data_file, 'wb') as f:
         pickle.dump({
             'problem': problem,
@@ -204,7 +204,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Load problem and solution
-data_file = Path(__file__).parent / "solution_data" / "{args.instance}_solution.pkl"
+data_file = Path(r"{data_file}")
 with open(data_file, 'rb') as f:
     data = pickle.load(f)
 

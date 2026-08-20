@@ -58,31 +58,31 @@ def compute_optimized_load(problem, solution):
     """
     Calcule la charge (load) de chaque usine au fil du temps pour la solution donnée.
     Gère de façon sécurisée les moteurs non alloués (None).
+
+    Renvoie {factory_id: {t: nb_moteurs}}, c'est-à-dire EXACTEMENT la même forme que
+    compute_jit_theoretical_load. Les deux sorties sont consommées indifféremment par
+    create_comparison_chart (qui appelle .keys()) et par le tableau d'utilisation (qui appelle
+    .values()) : renvoyer ici une liste dense indexée par le temps faisait échouer les deux
+    avec "'list' object has no attribute 'keys'".
     """
-    # 1. Initialisation de la charge à 0 pour chaque usine et chaque jour
     # On s'assure que time_horizon est bien un entier
     time_horizon = int(problem.time_horizon)
-    optimized_load = {f.id: [0] * time_horizon for f in problem.factories_list}
+    optimized_load = defaultdict(lambda: defaultdict(int))
 
-    # 2. Remplissage de la charge
     for engine in problem.engines_list:
         prep_start = solution.prep_start_times.get(engine)
         prep_end = solution.prep_end_times.get(engine)
         factory = solution.engine_to_factory.get(engine)
 
-        # 🔴 SÉCURITÉ 1 : On ignore les moteurs non alloués (ce qui causait ton erreur)
+        # 🔴 SÉCURITÉ 1 : On ignore les moteurs non alloués
         if prep_start is None or prep_end is None or factory is None:
             continue
 
-        start_t = int(prep_start)
-        end_t = int(prep_end)
+        # 🔴 SÉCURITÉ 2 : on borne à l'horizon. Le greedy, lui, peut terminer bien au-delà
+        # (il empile les moteurs sans butée), donc cette troncature n'est pas théorique.
+        start_t = max(0, int(prep_start))
+        end_t = min(int(prep_end), time_horizon)
 
-        # 🔴 SÉCURITÉ 2 : On empêche les erreurs "IndexError" si CP-SAT
-        # a planifié une fin au-delà de l'horizon de temps maximum
-        start_t = max(0, start_t)
-        end_t = min(end_t, time_horizon)
-
-        # 3. Ajout de la charge sur l'intervalle
         for t in range(start_t, end_t):
             optimized_load[factory.id][t] += 1
 
@@ -385,7 +385,12 @@ def main():
         layout="wide"
     )
 
+    # Le nom du solveur vient du pickle, jamais d'un défaut codé ici : plusieurs solveurs
+    # écrivent des solutions pour la même instance, et un tableau de bord qui n'affiche pas
+    # laquelle il montre est le moyen le plus simple d'attribuer un résultat au mauvais.
+    solver_name = st.session_state.get('solver', 'solveur inconnu')
     st.title("✈️ Engine Preparation & Allocation - Unified Dashboard")
+    st.caption(f"Solution produite par **{solver_name}**")
 
     # Check if data is loaded
     if 'problem' not in st.session_state or 'solution' not in st.session_state:

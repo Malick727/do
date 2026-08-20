@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dataclasses>=0.8",
     "deap>=1.4.4",
     "discrete-optimization>=0.9.0",
     "gurobipy>=13.0.2",
@@ -15,3 +16,13 @@ dependencies = [
     "streamlit>=1.58.0",
     "torch>=2.13.0",
 ]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

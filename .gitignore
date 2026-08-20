@@ -55,3 +55,10 @@ Thumbs.db
 ### Local Environment ###
 .env
 .flaskenv
+### Données de part_preparation ###
+# Datasets, solutions picklées, poids entraînés et exports bruts : volumineux (~1 Go),
+# régénérables, et sans valeur en revue de code. Chemins définis dans part_preparation/paths.py
+data/
+
+# Lanceur Streamlit RÉÉCRIT à chaque exécution de run_*_and_visualize.py
+examples_do_usecases/part_preparation/launch_unified_dashboard.py

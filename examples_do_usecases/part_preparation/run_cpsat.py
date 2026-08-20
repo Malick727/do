@@ -14,6 +14,7 @@ import argparse
 import pickle
 import subprocess
 from discrete_optimization.generic_tools.do_problem import ParamsObjectiveFunction, ObjectiveHandling, ModeOptim
+from part_preparation.paths import SKYWISE_CSV
 from part_preparation.instance_generator import generate_instance, InstanceParams, FactoryDefinition,generate_instance_from_csv
 from part_preparation.solvers.cpsat import CPSatEngineSolver
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +72,7 @@ def main():
     problem = generate_instance(params)
     start_filter = datetime(2026, 9, 15, 0, 0)
     end_filter = datetime(2027, 10, 1, 23, 59)
-    problem = generate_instance_from_csv(csv_file_path =  "examples_do_usecases\part_preparation\contour-export-06-07-2026.csv",
+    problem = generate_instance_from_csv(csv_file_path =  str(SKYWISE_CSV),
      start_date =start_filter ,
      end_date = end_filter)
     print(f"\nProblem size:")
