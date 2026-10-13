@@ -209,6 +209,7 @@ def main():
              else f"msns{args.msns_per_fal * 4}")
     if args.replicate is not None:
         label = f"{label}_r{args.replicate}"
+    label = f"{label}_cpsat"
     data_file = solution_file(label)
     with open(data_file, 'wb') as f:
         pickle.dump({
@@ -233,7 +234,7 @@ def main():
 
     # Launch unified dashboard
     print("\nLaunching unified dashboard (JIT vs Optimized + Gantt Chart)...")
-    dashboard_launcher = Path(__file__).parent / "launch_unified_dashboard.py"
+    dashboard_launcher = Path(__file__).parent / "launch_cpsat_dashboard.py"
 
     launcher_code = f"""
 import streamlit as st

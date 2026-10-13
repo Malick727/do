@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "dataclasses>=0.8",
     "deap>=1.4.4",
+    "didppy>=0.10.1",
     "discrete-optimization>=0.9.0",
     "gurobipy>=13.0.2",
     "matplotlib>=3.10.8",

@@ -1,19 +1,3 @@
-"""
-Run the RL policy on the engine preparation problem and launch the visualization dashboards.
-
-Usage:
-    uv run python examples_do_usecases/part_preparation/run_rl_and_visualize.py --instance medium
-    uv run python examples_do_usecases/part_preparation/run_rl_and_visualize.py --instance xlarge --no-dashboard
-
-The policy decides which factory prepares which engine, and which MSN it serves. The problem
-splits exactly by engine type -- factories are type-exclusive, every MSN has a single type, and
-the FALs carry no capacity -- so one episode runs per type and the two are merged back into a
-single EnginePreparationSolution.
-
-Same objective as every other solver here: score = travel_cost + arrival_delays, storage having
-weight 0 and the coverage term being 0 by construction, since an episode ends exactly when no
-engine or no MSN is left, which is the maximum matching.
-"""
 import sys
 from pathlib import Path
 
@@ -31,29 +15,16 @@ import torch
 from part_preparation import instances
 from part_preparation.paths import solution_file, ensure_dirs
 from part_preparation.problem import aggregate_score, EnginePreparationSolution
-from part_preparation.solvers.bilevel.rl.agent import (
-    ActorCriticNetwork, ENGINE_FEATURES, MSN_FEATURES, FACTORY_BASE_FEATURES)
+from part_preparation.solvers.bilevel.rl import features
+from part_preparation.solvers.bilevel.rl.agent import Agent
 from part_preparation.solvers.bilevel.rl.environnement import Env
-from part_preparation.solvers.bilevel.rl.features import FeatureExtractor
-from part_preparation.solvers.bilevel.rl.training import run_episode
+from part_preparation.solvers.bilevel.rl.main import step
+from part_preparation.solvers.bilevel.rl.main_imitation import TAG, WEIGHTS_DIR
 
-# Absolute, so the script runs from any working directory. A path relative to the cwd only
-# worked when launched from the repository root.
-DEFAULT_WEIGHTS = PROJECT_ROOT / "part_preparation/solvers/bilevel/rl/policy_cloned.pt"
+DEFAULT_WEIGHTS = WEIGHTS_DIR / f"policy_final_{TAG}.pt"
 
 
 def build_solution(problem, states):
-    """
-    Merge the per-type episode states into one EnginePreparationSolution.
-
-    This is the piece the other run_*_and_visualize scripts do not need: a solver returns a
-    Solution, an episode returns a State. The State only records the preparation START, so
-    prep_end and fal_arrival are DERIVED here with the same formula the reward used -- keeping
-    one definition rather than storing a second copy that could drift.
-
-    Engines left without an MSN simply do not appear in the dicts. problem.evaluate treats a
-    missing key as unallocated, and their only cost is storage, whose weight is 0.
-    """
     engine_to_msn, engine_to_factory = {}, {}
     prep_start, prep_end, fal_arrival = {}, {}, {}
     delivery = {engine: engine.delivery_time for engine in problem.engines_list}
@@ -78,67 +49,49 @@ def build_solution(problem, states):
         prep_start, prep_end, fal_arrival, delivery)
 
 
-def policy_rollout(env, extractor, network):
-    """
-    Deterministic rollout: argmax at each of the three levels.
-
-    Note the vocabulary clash: run_episode's `greedy=True` means DETERMINISTIC (argmax instead
-    of sampling), which is unrelated to the myopic rule below. Sampling exists for training,
-    where the policy-gradient estimator needs actions drawn from pi_theta; for reporting a
-    score, argmax is both better and reproducible.
-    """
+def policy_rollout(env, agent):
+    state, cost = env.reset(), 0.0
     with torch.no_grad():
-        rewards = run_episode(env, network, extractor, greedy=True)[2]
-    return env.state, rewards
+        while True:
+            action = agent.act(env, state, deterministic=True)
+            if action is None:
+                break
+            state, reward, done, info = step(env, action)
+            cost -= reward
+            if done:
+                break
+    return state, cost
 
 
-def myopic_rule(env, extractor):
-    """
-    The one-line baseline: cheapest reachable MSN, then the factory with the best IMMEDIATE
-    reward (feature 5, which is exactly what env.step will pay).
-
-    Reported alongside the policy on purpose. Over three training seeds the policy averages
-    76,018 against 69,375 for this rule on held-out medium replicates, and the spread between
-    seeds is 21% -- so a policy score quoted alone, on one instance, cannot tell a good policy
-    from a lucky seed.
-    """
-    state, rewards = env.reset(), []
+def myopic_rule(env):
+    state, cost = env.reset(), 0.0
     while True:
-        _, engine_idx = extractor.engine_candidates(state)
+        _, engine_idx = features.engine_candidates(env, state)
         if len(engine_idx) == 0:
             break
         engine_i = int(engine_idx[0])
-        msn_feats, msn_idx = extractor.msn_candidates(state, engine_i)
+        msn_feats, msn_idx = features.msn_candidates(env, state, engine_i)
         if len(msn_idx) == 0:
             break
         msn_i = int(msn_idx[int(np.argmin(msn_feats[:, 2]))])
-        factory_feats, factory_idx = extractor.factory_candidates(state, engine_i, msn_i)
+        factory_feats, factory_idx = features.factory_candidates(env, state, engine_i, msn_i)
         factory_i = int(factory_idx[int(np.argmax(factory_feats[:, 5]))])
-        state, reward, done, _ = env.step((
-            env.engines[engine_i].id, env.factories[factory_i].id, env.msns[msn_i].id))
-        rewards.append(reward)
+        state, reward, done, _ = step(env, (engine_i, msn_i, factory_i))
+        cost -= reward
         if done:
             break
-    return state, rewards
+    return state, cost
 
 
-def solve(problem, network=None):
-    """
-    One episode per engine type, merged into a single solution.
-
-    network=None runs the myopic rule instead, so both decision rules go through exactly the
-    same environment, reward and solution reconstruction -- the comparison then measures the
-    rule and nothing else.
-    """
+def solve(problem, agent=None):
     states, cost = [], 0.0
     started = time.perf_counter()
     for engine_type in sorted({e.engine_type for e in problem.engines_list}):
         env = Env(problem, engine_type)
-        extractor = FeatureExtractor(env)
-        state, rewards = (myopic_rule(env, extractor) if network is None
-                          else policy_rollout(env, extractor, network))
+        state, episode_cost = (myopic_rule(env) if agent is None
+                               else policy_rollout(env, agent))
         states.append(state)
-        cost += -sum(rewards)
+        cost += episode_cost
     return build_solution(problem, states), cost, time.perf_counter() - started
 
 
@@ -155,9 +108,8 @@ def main():
                         help='Override the named instance size. Total MSNs = 4 x this value. '
                              'The horizon is derived, never given (see instances.sized_params)')
     parser.add_argument('--no-dashboard', action='store_true')
-    parser.add_argument('--greedy', type=bool, default=False,
-                        help='Override the named instance size. Total MSNs = 4 x this value. '
-                             'The horizon is derived, never given (see instances.sized_params)')
+    parser.add_argument('--greedy', action='store_true',
+                        help='Save and display the myopic greedy rule instead of the RL policy')
     args = parser.parse_args()
 
     print("=" * 80)
@@ -184,23 +136,18 @@ def main():
     print(f"SOLVING WITH THE RL POLICY ({args.weights})")
     print("=" * 80)
 
-    network = ActorCriticNetwork(
-        engine_input_dim=ENGINE_FEATURES,
-        msn_input_dim=MSN_FEATURES,
-        factory_input_dim=FACTORY_BASE_FEATURES + max(
-            f.default_capacity for f in problem.factories_list),
-        state_input_dim=44,
-        hidden_dim=64,
-    )
-    network.load_state_dict(torch.load(args.weights))
-    network.eval()
-    print(f"{sum(p.numel() for p in network.parameters()):,} parameters")
+    first_type = sorted({e.engine_type for e in problem.engines_list})[0]
+    agent = Agent(Env(problem, first_type), hidden_dim=64)
+    agent.network.load_state_dict(torch.load(args.weights), strict=False)
+    agent.network.eval()
+    print(f"{sum(p.numel() for p in agent.network.parameters()):,} parameters")
 
-    solution, episode_cost, elapsed = solve(problem, network)
+    solution, episode_cost, elapsed = solve(problem, agent)
     solution2, myopic_cost, myopic_elapsed = solve(problem, None)
     
+    method = "greedy" if greedy else "rl"
     if greedy:
-        solution = solution2
+        solution, episode_cost, elapsed = solution2, myopic_cost, myopic_elapsed
     kpis = problem.evaluate(solution)
     feasible = problem.satisfy(solution)
     score = aggregate_score(kpis)
@@ -208,8 +155,6 @@ def main():
     print("SOLUTION")
     print("=" * 80)
     print(f"\nFeasible: {'yes' if feasible else 'NO'}")
-    # These two must match. The episode reward IS the objective, not a proxy for it; a gap means
-    # the environment and problem.evaluate have drifted apart and every reported score is wrong.
     print(f"\n  - aggregate score  : {score:,.2f}")
     print(f"  - episode reward   : {episode_cost:,.2f}   (gap {abs(score - episode_cost):,.4f})")
     print(f"  - solve time       : {elapsed:.2f}s")
@@ -228,15 +173,11 @@ def main():
           f"({problem.uncoverable_msns} structurally uncoverable)")
 
     ensure_dirs()
-    # Suffixed so the RL run never overwrites the CP-SAT or GA pickle of the same instance --
-    # the dashboards would otherwise show a solution that is not the one they name.
-    # Le réplicat entre dans le nom, sinon deux réplicats d'une même instance nommée -- qui sont
-    # deux problèmes différents -- écrivent dans le même pickle et le second efface le premier.
     label = (args.instance if args.msns_per_fal is None
              else f"msns{args.msns_per_fal * 4}")
     if args.replicate is not None:
         label = f"{label}_r{args.replicate}"
-    label = f"{label}_rl"
+    label = f"{label}_{method}"
     data_file = solution_file(label)
     with open(data_file, 'wb') as f:
         pickle.dump({
@@ -244,11 +185,8 @@ def main():
             'solution': solution,
             'kpis': kpis,
             'feasible': feasible,
-            # One entry: unlike CP-SAT, a policy rollout has no intermediate solutions. The
-            # dashboard expects the key, so it gets the final one.
             'solution_history': [{'index': 0, 'fitness': score, 'kpis': kpis}],
-            # Lu par le dashboard : plusieurs solveurs ecrivent pour la meme instance.
-            'solver': f"RL ({Path(args.weights).name})",
+            'solver': "Greedy (myopic rule)" if greedy else f"RL ({Path(args.weights).name})",
         }, f)
     print(f"\nSolution saved to: {data_file}")
 
@@ -259,7 +197,7 @@ def main():
     print("LAUNCHING DASHBOARD")
     print("=" * 80)
 
-    dashboard_launcher = Path(__file__).parent / "launch_unified_dashboard.py"
+    dashboard_launcher = Path(__file__).parent / f"launch_{method}_dashboard.py"
     with open(dashboard_launcher, 'w') as f:
         f.write(f"""
 import streamlit as st

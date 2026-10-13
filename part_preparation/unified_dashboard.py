@@ -3,6 +3,12 @@ Unified Dashboard: JIT Analysis + Solution Visualization + Gantt Chart
 
 Run with: streamlit run part_preparation/unified_dashboard.py
 """
+import pickle
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -11,10 +17,89 @@ from collections import defaultdict
 import numpy as np
 from typing import Dict
 
+from part_preparation.paths import SOLUTIONS_DIR
+from part_preparation.solvers.bilevel.rl.utils import RL_RESULTS_DIR, list_runs, load_logs, plot_losses, plot_rewards
 from part_preparation.problem import (
+    AGGREGATED_OBJECTIVES,
+    AGGREGATED_WEIGHTS,
+    OBJECTIVE_TO_KPI,
     EnginePreparationProblem,
     EnginePreparationSolution,
+    aggregate_score,
 )
+
+LAUNCHER_OPTION = "Solution du launcher"
+
+
+@st.cache_resource
+def load_solution_file(path: str, mtime: float):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def objective_breakdown(kpis):
+    rows = []
+    for name, weight in zip(AGGREGATED_OBJECTIVES, AGGREGATED_WEIGHTS):
+        kpi_name = OBJECTIVE_TO_KPI[name]
+        rows.append({
+            "term": name,
+            "kpi": kpi_name,
+            "value": kpis[kpi_name],
+            "weight": weight,
+            "contribution": weight * kpis[kpi_name],
+        })
+    return pd.DataFrame(rows)
+
+
+def instance_fingerprint(problem):
+    return repr((
+        [(e.id, e.engine_type, e.delivery_time) for e in problem.engines_list],
+        [(m.id, m.assembly_line_id, m.engine_installation_date) for m in problem.msns_list],
+        [(f.id, f.default_capacity) for f in problem.factories_list],
+        problem.time_horizon,
+    ))
+
+
+@st.cache_resource
+def evaluate_solution_file(path: str, mtime: float):
+    data = load_solution_file(path, mtime)
+    kpis = data['problem'].evaluate(data['solution'])
+    return instance_fingerprint(data['problem']), data.get('solver') or 'solveur inconnu', kpis
+
+
+def solutions_of_same_instance(problem):
+    fingerprint = instance_fingerprint(problem)
+    rows = []
+    for path in sorted(SOLUTIONS_DIR.glob("*_solution.pkl")):
+        file_fingerprint, solver, kpis = evaluate_solution_file(str(path), path.stat().st_mtime)
+        if file_fingerprint != fingerprint:
+            continue
+        row = {"file": path.name, "solver": solver, "aggregate_score": aggregate_score(kpis)}
+        for name, weight in zip(AGGREGATED_OBJECTIVES, AGGREGATED_WEIGHTS):
+            row[name] = weight * kpis[OBJECTIVE_TO_KPI[name]]
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    if not table.empty:
+        table = table.sort_values("aggregate_score").reset_index(drop=True)
+        best = table["aggregate_score"].iloc[0]
+        table.insert(3, "gap_vs_best_%", 100 * (table["aggregate_score"] - best) / max(abs(best), 1e-9))
+    return table
+
+
+def choose_solution():
+    files = sorted(SOLUTIONS_DIR.glob("*_solution.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    options = [p.name for p in files]
+    if "problem" in st.session_state and "solution" in st.session_state:
+        options.insert(0, LAUNCHER_OPTION)
+
+    st.sidebar.header("📂 Solution")
+    if not options:
+        return None
+    choice = st.sidebar.selectbox("Fichier", options, help=f"Solutions sauvegardées dans {SOLUTIONS_DIR}")
+    if choice == LAUNCHER_OPTION:
+        return {key: st.session_state.get(key) for key in ("problem", "solution", "solution_history", "solver")}
+    path = SOLUTIONS_DIR / choice
+    return load_solution_file(str(path), path.stat().st_mtime)
 
 
 # ============================================================================
@@ -388,27 +473,36 @@ def main():
     # Le nom du solveur vient du pickle, jamais d'un défaut codé ici : plusieurs solveurs
     # écrivent des solutions pour la même instance, et un tableau de bord qui n'affiche pas
     # laquelle il montre est le moyen le plus simple d'attribuer un résultat au mauvais.
-    solver_name = st.session_state.get('solver', 'solveur inconnu')
+    data = choose_solution()
+    solver_name = (data or {}).get('solver') or 'solveur inconnu'
     st.title("✈️ Engine Preparation & Allocation - Unified Dashboard")
     st.caption(f"Solution produite par **{solver_name}**")
 
     # Check if data is loaded
-    if 'problem' not in st.session_state or 'solution' not in st.session_state:
+    if data is None or data.get('problem') is None or data.get('solution') is None:
         st.warning("⚠️ No solution loaded.")
-        st.info("""
-        Run the solver script to generate and load a solution:
+        st.info(f"""
+        No solution file in `{SOLUTIONS_DIR}`. Run a solver script to create one:
         ```bash
-        uv run python examples_do_usecases/part_preparation/run_cpsat_and_visualize.py --instance medium
+        uv run python examples_do_usecases/part_preparation/run_didp_and_visualize.py --instance small --no-dashboard
         ```
         """)
         return
 
-    problem = st.session_state.problem
-    solution = st.session_state.solution
+    problem = data['problem']
+    solution = data['solution']
+    solution_history = data.get('solution_history')
 
     # Sidebar metrics
     st.sidebar.header("📊 Solution Summary")
     kpis = problem.evaluate(solution)
+    breakdown = objective_breakdown(kpis)
+
+    st.sidebar.metric("🎯 Total objective (aggregate_score)", f"{aggregate_score(kpis):,.2f}")
+    with st.sidebar.expander("Objective breakdown"):
+        st.dataframe(breakdown, hide_index=True)
+    with st.sidebar.expander("All KPIs"):
+        st.dataframe(pd.DataFrame({"kpi": list(kpis), "value": list(kpis.values())}), hide_index=True)
 
     st.sidebar.metric("Baseline Changes", f"{kpis.get('baseline_changes', 0):.0f}")
     st.sidebar.metric("Arrival Delays", f"{kpis.get('arrival_delays', 0):.1f} days")
@@ -427,7 +521,39 @@ def main():
     st.sidebar.write(f"- {len(problem.msns_list)} MSNs")
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 JIT vs Optimized", "📊 Gantt Chart", "🎯 Analysis", "📉 KPI Evolution"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 JIT vs Optimized", "📊 Gantt Chart", "🎯 Analysis", "📉 KPI Evolution", "🏆 Objective", "🤖 RL training"])
+
+    with tab6:
+        st.header("RL training")
+        runs = list_runs()
+        if not runs:
+            st.info(f"No RL training log in `{RL_RESULTS_DIR}`. Train an agent to create one:\n\n"
+                    "`uv run python -m part_preparation.solvers.bilevel.rl.main_imitation train`")
+        else:
+            selected = st.multiselect("Runs", runs, default=runs)
+            window = st.slider("Moving average (episodes)", 1, 200, 20)
+            if selected:
+                st.plotly_chart(plot_rewards(selected, window), width='stretch')
+                st.plotly_chart(plot_losses(selected, window), width='stretch')
+                with st.expander("Raw logs"):
+                    for name in selected:
+                        rewards, losses = load_logs(name)
+                        st.subheader(name)
+                        st.dataframe(rewards.merge(losses, on=["episode", "phase"]), hide_index=True)
+
+    with tab5:
+        st.header("Total objective")
+        st.metric("aggregate_score of the displayed solution", f"{aggregate_score(kpis):,.2f}")
+        st.caption("aggregate_score = sum of weight x KPI over the terms below (problem.AGGREGATED_OBJECTIVES)")
+        st.dataframe(breakdown, hide_index=True, width='stretch')
+
+        st.subheader("All saved solutions of this instance")
+        comparison = solutions_of_same_instance(problem)
+        if comparison.empty:
+            st.info("No saved solution file matches this instance.")
+        else:
+            st.dataframe(comparison, hide_index=True, width='stretch')
+            st.bar_chart(comparison.set_index("file")[list(AGGREGATED_OBJECTIVES)], horizontal=True)
 
     # ========================================================================
     # TAB 1: JIT vs Optimized Comparison
@@ -533,7 +659,7 @@ def main():
                     if engine in solution.prep_start_times and engine in solution.engine_to_factory:
                         prep_start = solution.prep_start_times[engine]
                         prep_end = solution.prep_end_times[engine]
-                        if prep_start <= current_time < prep_end:
+                        if prep_start is not None and prep_start <= current_time < prep_end:
                             factory = solution.engine_to_factory[engine]
                             engines_in_prep[factory.id].append(engine.id)
 
@@ -650,12 +776,11 @@ def main():
         st.header("KPI Evolution During Optimization")
 
         # Check if solution history is available
-        if 'solution_history' not in st.session_state or not st.session_state.solution_history:
+        if not solution_history:
             st.warning("⚠️ No solution history available. Re-run the solver to collect intermediate solutions.")
             st.info("The solver stores all intermediate solutions found during optimization. This allows tracking how the objective values improve over time.")
             return
 
-        solution_history = st.session_state.solution_history
         st.success(f"✅ Loaded {len(solution_history)} intermediate solutions")
 
         # Extract data for plotting
