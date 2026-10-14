@@ -177,7 +177,7 @@ def main():
              else f"msns{args.msns_per_fal * 4}")
     if args.replicate is not None:
         label = f"{label}_r{args.replicate}"
-    label = f"{label}_{method}"
+    label = f"{label}_{method}" if greedy else f"{label}_{method}_{Path(args.weights).stem}"
     data_file = solution_file(label)
     with open(data_file, 'wb') as f:
         pickle.dump({
@@ -186,7 +186,7 @@ def main():
             'kpis': kpis,
             'feasible': feasible,
             'solution_history': [{'index': 0, 'fitness': score, 'kpis': kpis}],
-            'solver': "Greedy (myopic rule)" if greedy else f"RL ({Path(args.weights).name})",
+            'solver': "Greedy (myopic rule)" if greedy else f"RL a2c ({Path(args.weights).stem})",
         }, f)
     print(f"\nSolution saved to: {data_file}")
 

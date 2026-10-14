@@ -65,8 +65,12 @@ class DidpExpert:
             })
         return entries
 
+    @property
+    def name(self):
+        return f"didp_{self.solver.lower()}_{self.time_limit:g}s"
+
     def dataset_path(self, directory):
-        return Path(directory) / f"didp_expert_{self.time_limit:g}s.json"
+        return Path(directory) / f"{self.name}.json"
 
     def build_dataset(self, seeds, n_msns_per_fal, directory, processes=None):
         jobs = [(seed, n_msns_per_fal) for seed in seeds]

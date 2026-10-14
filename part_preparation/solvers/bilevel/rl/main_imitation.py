@@ -15,7 +15,8 @@ TRAIN_SEEDS = range(60)
 N_MSNS_PER_FAL = 40
 EXPERT_TIME_LIMIT = 10.0
 IMITATION_DIR = DATA_DIR / "datasets" / "imitation"
-TAG = f"{EXPERT_TIME_LIMIT:g}s"
+EXPERT = DidpExpert(time_limit=EXPERT_TIME_LIMIT)
+TAG = EXPERT.name
 WEIGHTS_DIR = IMITATION_DIR / "weights"
 EVAL_INSTANCE = "medium"
 SELECT_REPLICATES = range(90, 94)
@@ -114,7 +115,7 @@ def main():
     parser.add_argument("mode", choices=["generate", "train"])
     mode = parser.parse_args().mode
 
-    expert = DidpExpert(time_limit=EXPERT_TIME_LIMIT)
+    expert = EXPERT
     if mode == "generate":
         expert.build_dataset(TRAIN_SEEDS, N_MSNS_PER_FAL, IMITATION_DIR)
         return
@@ -135,7 +136,7 @@ def main():
 
     fine_tune(agent, train_envs, select_envs, rng)
     save_weights(agent, "final")
-    agent.save_logs("a2c_with_imitation")
+    agent.save_logs(f"a2c_with_imitation_{TAG}")
 
     print("test :", round(evaluate(test_envs, agent).mean()))
 
